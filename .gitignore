@@ -1,0 +1,23 @@
+# secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_ed25519*
+
+# build
+/bin/
+/dist/
+*.test
+*.out
+
+# base images and runtime state never belong in git
+/base-images/*/rootfs/
+/var/
+
+# editors
+.DS_Store
+.idea/
+.vscode/
+/notes/
