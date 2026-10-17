@@ -195,3 +195,31 @@ func TestTurns(t *testing.T) {
 		t.Fatalf("Turns = %+v, %v", turns, err)
 	}
 }
+
+func TestOwnerNumbers(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	u := mkUser(t, s, "a@example.com")
+	if err := s.AddOwnerNumber(ctx, u.ID, "+44 7700 900-123"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddOwnerNumber(ctx, u.ID, "447700900123"); err != nil {
+		t.Fatalf("adding a number twice: %v", err)
+	}
+	if !s.IsOwnerNumber(ctx, u.ID, "447700900123") || s.IsOwnerNumber(ctx, u.ID, "") || s.IsOwnerNumber(ctx, u.ID, "1555") {
+		t.Fatal("IsOwnerNumber is wrong")
+	}
+	nums, _ := s.OwnerNumbers(ctx, u.ID)
+	if len(nums) != 1 || nums[0] != "447700900123" {
+		t.Fatalf("OwnerNumbers = %v", nums)
+	}
+	acct := &Account{UserID: u.ID, JID: "1:1@s.whatsapp.net", Status: AccountConnected}
+	s.CreateAccount(ctx, acct)
+	if got, _ := s.Account(ctx, acct.ID); got.Kind != KindAgent {
+		t.Fatalf("new accounts should default to agent numbers, got %q", got.Kind)
+	}
+	s.SetAccountKind(ctx, acct.ID, KindPersonal)
+	if got, _ := s.Account(ctx, acct.ID); !got.Personal() {
+		t.Fatal("kind not saved")
+	}
+}

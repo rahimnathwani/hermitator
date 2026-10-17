@@ -87,6 +87,10 @@ func (r *recorder) React(_ context.Context, _, chat, _, _, emoji string) error {
 	return nil
 }
 func (r *recorder) Typing(context.Context, string, string, bool) error { return nil }
+func (r *recorder) MarkRead(_ context.Context, _, chat, _, id string) error {
+	r.add(sent{"read", chat, id})
+	return nil
+}
 
 // wait returns the next event of the given kind.
 func (r *recorder) wait(t *testing.T, kind string) sent {
@@ -281,39 +285,124 @@ func TestAbort(t *testing.T) {
 	}
 }
 
-func TestRoutingRules(t *testing.T) {
-	e := setup(t)
-	ctx := context.Background()
-	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+// from builds a message the way the gateway does for someone else
+// writing to the linked account.
+func (e *env) from(phone, text string) Message {
+	m := e.msg(phone+"@s.whatsapp.net", text, false)
+	m.Sender, m.SenderPhone = phone+"@s.whatsapp.net", phone
+	return m
+}
 
-	// Unlinked chats are ignored, and so is a /link from someone else.
-	e.m.HandleMessage(ctx, e.msg("friend@s.whatsapp.net", "hi", false))
-	code, _, _ := e.m.LinkCode(ctx, e.agent.ID, false)
-	e.m.HandleMessage(ctx, e.msg("friend@s.whatsapp.net", "/link "+code, false))
-
-	// With a fallback agent, other people's direct messages reach it, but
-	// the owner's own chats and groups do not.
-	e.st.SetAccountFallback(ctx, e.acct.ID, e.agent.ID)
-	e.m.HandleMessage(ctx, e.msg("me-to-friend@s.whatsapp.net", "see you at 6", true))
-	group := e.msg("123@g.us", "hello group", false)
-	group.IsGroup = true
-	e.m.HandleMessage(ctx, group)
-	e.m.HandleMessage(ctx, e.msg("stranger@s.whatsapp.net", "who is this?", false))
-
-	got := e.rec.wait(t, "text")
-	if got.chat != "stranger@s.whatsapp.net" || !strings.Contains(got.body, "who is this?") {
-		t.Fatalf("first reply went to %s: %q", got.chat, got.body)
-	}
+// quiet fails if hermitator sent anything to chat.
+func (e *env) quiet(t *testing.T, chat string) {
+	t.Helper()
 	e.rec.mu.Lock()
 	defer e.rec.mu.Unlock()
 	for _, s := range e.rec.log {
-		if s.chat != "stranger@s.whatsapp.net" {
+		if s.chat == chat {
 			t.Fatalf("hermitator answered a chat it should have ignored: %+v", s)
 		}
 	}
-	if _, err := e.st.Route(ctx, e.acct.ID, "friend@s.whatsapp.net"); err == nil {
-		t.Fatal("someone other than the owner linked a chat")
+}
+
+func TestAgentNumber(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	const me, stranger = "447700900123", "15550001111"
+
+	// Strangers messaging the agent's number get nothing, commands included.
+	e.m.HandleMessage(ctx, e.from(stranger, "hi, who is this?"))
+	e.m.HandleMessage(ctx, e.from(stranger, "/status"))
+
+	// The owner links their chat with the agent's number from their own phone.
+	code, _, _ := e.m.LinkCode(ctx, e.agent.ID, false)
+	e.m.HandleMessage(ctx, e.from(me, "/link "+code))
+	got := e.rec.wait(t, "text")
+	if !strings.Contains(got.body, "Linked this chat") || !strings.Contains(got.body, "+"+me) {
+		t.Fatalf("link reply = %q", got.body)
 	}
+	if !e.st.IsOwnerNumber(ctx, e.user.ID, me) {
+		t.Fatal("the number that used the code was not recorded as the owner's")
+	}
+
+	// Now commands from that number are hermitator's, not the agent's.
+	e.m.HandleMessage(ctx, e.from(me, "/status"))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "*bot*") {
+		t.Fatalf("status = %q", got.body)
+	}
+	// And ordinary messages reach the agent, with a read receipt.
+	e.m.HandleMessage(ctx, e.from(me, "hello agent"))
+	e.rec.wait(t, "read")
+	if got := e.rec.wait(t, "text"); got.body != "*echo:* hello agent" {
+		t.Fatalf("reply = %q", got.body)
+	}
+	e.quiet(t, stranger+"@s.whatsapp.net")
+}
+
+func TestFallbackOnlyServesTheOwner(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	e.st.AddOwnerNumber(ctx, e.user.ID, "447700900123")
+	e.st.SetAccountFallback(ctx, e.acct.ID, e.agent.ID)
+
+	e.m.HandleMessage(ctx, e.from("15550001111", "who is this?"))
+	group := e.from("447700900123", "hello group")
+	group.Chat, group.IsGroup = "123@g.us", true
+	e.m.HandleMessage(ctx, group)
+	e.m.HandleMessage(ctx, e.msg("friend@s.whatsapp.net", "see you at 6", true)) // sent by the account itself
+	e.m.HandleMessage(ctx, e.from("447700900123", "are you there?"))
+
+	got := e.rec.wait(t, "text")
+	if got.chat != "447700900123@s.whatsapp.net" || !strings.Contains(got.body, "are you there?") {
+		t.Fatalf("first reply went to %s: %q", got.chat, got.body)
+	}
+	e.quiet(t, "15550001111@s.whatsapp.net")
+	e.quiet(t, "123@g.us")
+	e.quiet(t, "friend@s.whatsapp.net")
+}
+
+func TestLinkGuessingIsThrottled(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	const guesser = "15550001111"
+	for i := 0; i < linkAttempts+3; i++ {
+		e.m.HandleMessage(ctx, e.from(guesser, "/link ZZZZZ"))
+	}
+	time.Sleep(200 * time.Millisecond)
+	e.rec.mu.Lock()
+	replies := len(e.rec.log)
+	e.rec.mu.Unlock()
+	if replies != linkAttempts {
+		t.Fatalf("got %d replies to wrong codes, want %d", replies, linkAttempts)
+	}
+	// Even a correct code is ignored once the sender is throttled.
+	code, _, _ := e.m.LinkCode(ctx, e.agent.ID, false)
+	e.m.HandleMessage(ctx, e.from(guesser, "/link "+code))
+	if _, err := e.st.Route(ctx, e.acct.ID, guesser+"@s.whatsapp.net"); err == nil {
+		t.Fatal("a throttled sender linked a chat")
+	}
+}
+
+func TestPersonalNumber(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.st.SetAccountKind(ctx, e.acct.ID, store.KindPersonal)
+	e.st.SetAccountFallback(ctx, e.acct.ID, e.agent.ID)
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+
+	// Friends writing to the owner, and the owner writing to friends, are
+	// none of hermitator's business.
+	e.m.HandleMessage(ctx, e.from("15550001111", "dinner tonight?"))
+	e.m.HandleMessage(ctx, e.msg("15550001111@s.whatsapp.net", "sure", true))
+	// Message yourself, linked by the owner, works.
+	e.link(t, "self@s.whatsapp.net")
+	e.m.HandleMessage(ctx, e.msg("self@s.whatsapp.net", "hello", true))
+	if got := e.rec.wait(t, "text"); got.chat != "self@s.whatsapp.net" {
+		t.Fatalf("reply went to %s", got.chat)
+	}
+	e.quiet(t, "15550001111@s.whatsapp.net")
 }
 
 func TestOutboxDoesNotFollowSymlinksOutOfTheSandbox(t *testing.T) {

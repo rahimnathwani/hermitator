@@ -64,6 +64,9 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	}
 	log := m.log.With("agent", agent.ID, "turn", t.id)
 
+	for _, msg := range batch {
+		chatRef{m: m, msg: msg}.markRead()
+	}
 	chat.react("⏳")
 	stopTyping := chat.typing(ctx)
 	defer stopTyping()
@@ -478,6 +481,12 @@ func (c chatRef) react(emoji string) {
 	}
 	if err := c.m.msgr.React(c.m.ctx, c.msg.AccountID, c.msg.Chat, c.msg.Sender, c.msg.ID, emoji); err != nil {
 		c.m.log.Debug("react", "err", err)
+	}
+}
+
+func (c chatRef) markRead() {
+	if c.ok() && c.msg.ID != "" && !c.msg.FromMe {
+		c.m.msgr.MarkRead(c.m.ctx, c.msg.AccountID, c.msg.Chat, c.msg.Sender, c.msg.ID)
 	}
 }
 

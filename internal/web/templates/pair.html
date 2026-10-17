@@ -4,7 +4,7 @@
   <section class="card">
     <h2>Scan the code</h2>
     <ol>
-      <li>Open WhatsApp on your phone.</li>
+      <li>Open WhatsApp on the phone with the number hermitator should use, usually your agent's own number.</li>
       <li>Go to <strong>Settings</strong>, then <strong>Linked devices</strong>, then <strong>Link a device</strong>.</li>
       <li>Point your phone at this code.</li>
     </ol>
@@ -12,7 +12,7 @@
   </section>
   <section class="card">
     <h2>Or use your phone number</h2>
-    <p>On a phone without a second screen, enter your number and type the code WhatsApp asks for under <strong>Link with phone number instead</strong>.</p>
+    <p>If you cannot scan, enter that number here and type the code into WhatsApp under <strong>Link with phone number instead</strong>.</p>
     <form method="post" action="/accounts/pair/{{.Data.ID}}/phone" class="inline-form" data-pair-phone hx-boost="false">
       <input name="phone" type="tel" placeholder="+44 7700 900123" required>
       <button>Get code</button>

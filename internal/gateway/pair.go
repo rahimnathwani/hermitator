@@ -160,6 +160,12 @@ func (g *Gateway) finishPairing(userID string, client *whatsmeow.Client) (string
 		Phone:    jid.User,
 		PushName: client.Store.PushName,
 		Status:   hstore.AccountConnected,
+		Kind:     hstore.KindAgent,
+	}
+	// Linking a number the user already said is theirs means hermitator is
+	// sharing their own WhatsApp.
+	if g.store.IsOwnerNumber(ctx, userID, jid.User) {
+		acct.Kind = hstore.KindPersonal
 	}
 	if err := g.store.CreateAccount(ctx, acct); err != nil {
 		return "", err

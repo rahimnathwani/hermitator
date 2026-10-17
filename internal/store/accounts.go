@@ -16,6 +16,15 @@ const (
 	AccountLoggedOut    = "logged_out"
 )
 
+// Account kinds.
+const (
+	// KindAgent is a number that belongs to the agents; the owner messages
+	// it from their own phone.
+	KindAgent = "agent"
+	// KindPersonal is the owner's own number, linked like WhatsApp Web.
+	KindPersonal = "personal"
+)
+
 // Account is a WhatsApp account linked as a companion device.
 type Account struct {
 	ID              string
@@ -25,16 +34,20 @@ type Account struct {
 	PushName        string
 	Status          string
 	FallbackAgentID string
+	Kind            string
 	CreatedAt       time.Time
 }
 
-const accountColumns = `id, user_id, jid, phone, push_name, status, fallback_agent_id, created_at`
+// Personal reports whether the account is the owner's own number.
+func (a *Account) Personal() bool { return a.Kind == KindPersonal }
+
+const accountColumns = `id, user_id, jid, phone, push_name, status, fallback_agent_id, kind, created_at`
 
 func scanAccount(row interface{ Scan(...any) error }) (*Account, error) {
 	var a Account
 	var jid, fallback sql.NullString
 	var created string
-	if err := row.Scan(&a.ID, &a.UserID, &jid, &a.Phone, &a.PushName, &a.Status, &fallback, &created); err != nil {
+	if err := row.Scan(&a.ID, &a.UserID, &jid, &a.Phone, &a.PushName, &a.Status, &fallback, &a.Kind, &created); err != nil {
 		return nil, one(err)
 	}
 	a.JID, a.FallbackAgentID = jid.String, fallback.String
@@ -46,8 +59,11 @@ func scanAccount(row interface{ Scan(...any) error }) (*Account, error) {
 func (s *Store) CreateAccount(ctx context.Context, a *Account) error {
 	a.ID = ids.New()
 	a.CreatedAt = time.Now()
-	_, err := s.db.ExecContext(ctx, `INSERT INTO whatsapp_accounts (`+accountColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.UserID, nullString(a.JID), a.Phone, a.PushName, a.Status, nullString(a.FallbackAgentID), ts(a.CreatedAt))
+	if a.Kind == "" {
+		a.Kind = KindAgent
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO whatsapp_accounts (`+accountColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.UserID, nullString(a.JID), a.Phone, a.PushName, a.Status, nullString(a.FallbackAgentID), a.Kind, ts(a.CreatedAt))
 	if isUnique(err) {
 		return ErrConflict
 	}
@@ -99,6 +115,11 @@ func (s *Store) SetAccountStatus(ctx context.Context, id, status, pushName strin
 // SetAccountFallback sets the agent that answers unrouted chats ("" for none).
 func (s *Store) SetAccountFallback(ctx context.Context, id, agentID string) error {
 	return affected(s.db.ExecContext(ctx, `UPDATE whatsapp_accounts SET fallback_agent_id = ? WHERE id = ?`, nullString(agentID), id))
+}
+
+// SetAccountKind says whose number an account is.
+func (s *Store) SetAccountKind(ctx context.Context, id, kind string) error {
+	return affected(s.db.ExecContext(ctx, `UPDATE whatsapp_accounts SET kind = ? WHERE id = ?`, kind, id))
 }
 
 // DeleteAccount removes an account and its routes.

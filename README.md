@@ -3,8 +3,9 @@
 Coding agents that live in their own sandboxed Linux machines, wake up when
 you message them on WhatsApp, and use no memory while they sleep.
 
-You send *"the navbar overlaps the hero on mobile, fix it and send me a
-screenshot"* to a WhatsApp chat. hermitator wakes that chat's agent, a
+Your agents get their own WhatsApp number. You send it *"the navbar overlaps
+the hero on mobile, fix it and send me a screenshot"*, and hermitator wakes the
+agent bound to that chat, a
 [gVisor](https://gvisor.dev) sandbox with its own filesystem, network and
 toolchain, within about a tenth of a second, and hands your message to
 [Claude Code](https://docs.claude.com/en/docs/claude-code) or
@@ -34,11 +35,13 @@ keep hundreds of them.
   `claude setup-token`. pi runs with a ChatGPT subscription (through OpenAI's
   device-code login, done from the panel), a DeepSeek key or an OpenRouter
   key.
-- **WhatsApp as the interface.** hermitator links to your account the way
-  WhatsApp Web does. Any chat can be bound to an agent with `/link CODE`.
-  Photos, voice notes (transcribed locally with whisper.cpp) and documents go
-  in; files come back when the agent runs `whatsapp-send`. A ⏳ reaction says
-  it is working, ✅ says it is done.
+- **WhatsApp as the interface.** hermitator links to a WhatsApp number the
+  way WhatsApp Web does: ideally one that belongs to your agents, so you
+  message them like a contact, though it can share your own too. Each chat
+  with that number (or each group it is in) is bound to an agent with
+  `/link CODE`. Photos, voice notes (transcribed locally with whisper.cpp)
+  and documents go in; files come back when the agent runs `whatsapp-send`.
+  Read receipts and a ⏳ reaction say it is working, ✅ says it is done.
 - **A control panel.** Live activity per agent, a console for talking to it
   from the browser, a terminal inside the sandbox, users with an admin who can
   act as them, and an audit log.
@@ -152,11 +155,16 @@ want both. Then log in as yourself and:
 
 1. **Settings:** paste the token from running `claude setup-token` on your own
    computer, and/or connect ChatGPT or add API keys for pi.
-2. **WhatsApp:** link your account by scanning the QR code, or by typing a
-   code on your phone.
+2. **WhatsApp:** link the agents' number by scanning the QR code with the
+   phone that has it, or by typing a code into that phone.
 3. **Agents:** create one.
-4. In any WhatsApp chat, for example *Message yourself*, send the `/link`
-   code shown on the agent's page. That chat now talks to the agent.
+4. From your own WhatsApp, send the agent's `/link` code to the agents'
+   number. That chat now talks to the agent, and hermitator now knows your
+   number. For more agents on the same number, make a group with the
+   number per agent and `/link` each one.
+
+WhatsApp unlinks companion devices whose phone has been offline for about
+two weeks, so open WhatsApp on the agents' phone now and then.
 
 ## Using it
 
@@ -174,15 +182,20 @@ hermitator answers itself:
 | `/help` | The list |
 
 Other slash commands, such as Claude Code's `/compact`, pass through to the
-agent. Only you (the owner of the linked account) can use commands.
+agent. Only you can use commands: messages from your own numbers (listed in
+Settings, and learnt from `/link`), or sent by the linked account itself when
+it is your own number.
 
 Messages sent in quick succession, a photo and then its caption say, become
 one turn. Messages that arrive while the agent is working wait for the next
 turn. In groups, each message reaches the agent with its sender's name.
 
-An account can also have a **fallback agent**, which answers direct messages
-that other people send you in chats that are not linked. It never responds to
-your own messages or in groups.
+Anyone else who messages the agents' number is ignored, unless they are in a
+chat you linked, such as a group you added them to.
+
+An account can also have a **fallback agent**, which answers your direct
+messages to the number without a `/link`. It listens only to your numbers,
+never to strangers or groups.
 
 ## Configuration
 
@@ -210,12 +223,13 @@ What it does not protect:
 
 - **The agent holds your credentials while it works.** It needs them to call
   the model. Treat an agent like a laptop logged into your accounts.
-- **Anyone who can write in a linked chat can drive the agent.** Link groups
-  with care.
+- **Anyone who can write in a linked chat can drive the agent.** Strangers
+  messaging the agents' number are ignored, but if you link a group, everyone
+  in it can talk to its agent.
 - **WhatsApp does not officially support this.** whatsmeow speaks the same
   protocol as WhatsApp Web, but WhatsApp can and does ban numbers it decides
-  are automated. Consider a second number. Replies come from your own
-  account.
+  are automated. A number of its own for the agents keeps your personal one
+  out of it.
 - **hermitator runs as root on the host.** It has to, to mount filesystems
   and manage network namespaces.
 - **Subscriptions have terms.** hermitator drives the official CLIs with your

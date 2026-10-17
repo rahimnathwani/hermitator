@@ -8,10 +8,10 @@
 <section class="card guide">
   <h2>Getting started</h2>
   <ol class="steps">
-    <li class="{{if $d.HasAccount}}done{{end}}"><a href="/accounts">Link your WhatsApp</a> as a companion device, the way WhatsApp Web is linked.</li>
+    <li class="{{if $d.HasAccount}}done{{end}}"><a href="/accounts">Link a WhatsApp number</a> for your agents, the way WhatsApp Web is linked.</li>
     <li class="{{if $d.HasModel}}done{{end}}"><a href="/settings">Add model credentials</a>: a Claude token for Claude Code, or a ChatGPT login or API key for pi.</li>
     <li class="{{if $d.HasAgent}}done{{end}}">Create an agent below. Each agent is its own sandboxed Linux machine.</li>
-    <li class="{{if $d.HasLink}}done{{end}}">Open the agent and send its <code>/link</code> code in any WhatsApp chat, such as <em>Message yourself</em>.</li>
+    <li class="{{if $d.HasLink}}done{{end}}">Open the agent and send its <code>/link</code> code to the agent's number from your own WhatsApp.</li>
   </ol>
 </section>
 {{end}}

@@ -28,9 +28,18 @@
     <section class="card">
       <h2>Link a chat</h2>
       {{if $d.Accounts}}
-      <p>Send this in any WhatsApp chat on your linked account, such as <em>Message yourself</em> or a group you created for this agent:</p>
+      <p>Send this code to start talking to the agent:</p>
       <p class="code"><code class="copy">/link {{$d.LinkCode}}</code></p>
-      <p class="muted">Valid for {{until $d.LinkExpires}}, once.</p>
+      <ul class="how">
+        {{range $d.Accounts}}
+        {{if .Personal}}
+        <li>On your own number +{{.Phone}}: in <em>Message yourself</em>, or any chat you want the agent in.</li>
+        {{else}}
+        <li>From your own WhatsApp, as a message to <strong class="copy">+{{.Phone}}</strong>, or in a group that includes that number.</li>
+        {{end}}
+        {{end}}
+      </ul>
+      <p class="muted">Valid for {{until $d.LinkExpires}}, once. The chat you send it in becomes this agent's.</p>
       <form method="post" action="/agents/{{$a.ID}}/link-code"><button class="small">New code</button></form>
       {{else}}
       <p><a href="/accounts">Link a WhatsApp account</a> first.</p>

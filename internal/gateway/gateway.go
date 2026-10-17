@@ -178,6 +178,29 @@ func (g *Gateway) Connected(accountID string) bool {
 	return err == nil && c.IsConnected() && c.IsLoggedIn()
 }
 
+// ApplyKind sets an account's presence to match whose number it is. An
+// agent's number shows as online, which also makes typing indicators
+// reliable. The owner's own number stays offline: a companion device that
+// claims to be online stops the phone from getting notifications.
+func (g *Gateway) ApplyKind(ctx context.Context, accountID string) error {
+	acct, err := g.store.Account(ctx, accountID)
+	if err != nil {
+		return err
+	}
+	cli, err := g.client(accountID)
+	if err != nil {
+		return err
+	}
+	if cli.Store.PushName == "" {
+		return nil // presence needs a profile name; WhatsApp sets one soon after pairing
+	}
+	presence := types.PresenceAvailable
+	if acct.Personal() {
+		presence = types.PresenceUnavailable
+	}
+	return cli.SendPresence(ctx, presence)
+}
+
 // Remove logs an account out of WhatsApp and forgets it.
 func (g *Gateway) Remove(ctx context.Context, accountID string) error {
 	g.mu.Lock()
@@ -213,7 +236,11 @@ func (g *Gateway) handleEvent(a *account, evt any) {
 		}
 	case *events.Connected:
 		g.store.SetAccountStatus(ctx, a.id, hstore.AccountConnected, a.client.Store.PushName)
+		g.ApplyKind(ctx, a.id)
 		g.log.Info("whatsapp connected", "account", a.id)
+	case *events.PushNameSetting:
+		g.store.SetAccountStatus(ctx, a.id, hstore.AccountConnected, a.client.Store.PushName)
+		g.ApplyKind(ctx, a.id)
 	case *events.Disconnected:
 		g.store.SetAccountStatus(ctx, a.id, hstore.AccountDisconnected, "")
 	case *events.LoggedOut:

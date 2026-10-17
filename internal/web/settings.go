@@ -21,7 +21,9 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, v *viewer)
 	ctx := r.Context()
 	times, _ := s.Store.SecretTimes(ctx, v.User.ID)
 	agents, _ := s.Store.Agents(ctx, v.User.ID)
+	numbers, _ := s.Store.OwnerNumbers(ctx, v.User.ID)
 	s.render(w, r, v, "settings.html", "Settings", "settings", map[string]any{
+		"Numbers":    numbers,
 		"Claude":     times[store.SecretClaudeToken],
 		"DeepSeek":   times[store.SecretDeepSeekKey],
 		"OpenRouter": times[store.SecretOpenRouterKey],
@@ -106,4 +108,28 @@ func (s *Server) codexDisconnect(w http.ResponseWriter, r *http.Request, v *view
 	}
 	s.audit(r, v, "secret.delete", store.SecretPiAuth+" openai-codex")
 	s.back(w, r, "/settings", "ChatGPT disconnected.")
+}
+
+func (s *Server) addNumber(w http.ResponseWriter, r *http.Request, v *viewer) {
+	phone := store.NormalizePhone(formValue(r, "phone"))
+	if len(phone) < 8 || len(phone) > 15 {
+		s.back(w, r, "/settings", "Enter the full number with its country code, like +44 7700 900123.")
+		return
+	}
+	if err := s.Store.AddOwnerNumber(r.Context(), v.User.ID, phone); err != nil {
+		s.back(w, r, "/settings", "Could not save: "+err.Error())
+		return
+	}
+	s.audit(r, v, "number.add", "+"+phone)
+	s.back(w, r, "/settings", "Added +"+phone+".")
+}
+
+func (s *Server) deleteNumber(w http.ResponseWriter, r *http.Request, v *viewer) {
+	phone := store.NormalizePhone(formValue(r, "phone"))
+	if err := s.Store.DeleteOwnerNumber(r.Context(), v.User.ID, phone); err != nil {
+		s.back(w, r, "/settings", "No such number.")
+		return
+	}
+	s.audit(r, v, "number.delete", "+"+phone)
+	s.back(w, r, "/settings", "Removed +"+phone+".")
 }

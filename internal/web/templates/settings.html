@@ -5,6 +5,24 @@
 
 <div class="columns">
 <section class="card">
+  <h2>Your WhatsApp numbers</h2>
+  <p>Messages from these numbers count as you: they can run commands like <code>/status</code> and reach your fallback agents. A number is added when you send a <code>/link</code> code from it.</p>
+  {{with $d.Numbers}}
+  <ul class="routes">
+    {{range .}}
+    <li><span>+{{.}}</span>
+      <form method="post" action="/settings/numbers/delete"><input type="hidden" name="phone" value="{{.}}"><button class="small">Remove</button></form>
+    </li>
+    {{end}}
+  </ul>
+  {{end}}
+  <form method="post" action="/settings/numbers" class="inline-form">
+    <input type="tel" name="phone" placeholder="+44 7700 900123" required>
+    <button>Add</button>
+  </form>
+</section>
+
+<section class="card">
   <h2>Claude Code</h2>
   <p>Agents running Claude Code use your Claude subscription. On your own computer, run</p>
   <pre><code class="copy">claude setup-token</code></pre>

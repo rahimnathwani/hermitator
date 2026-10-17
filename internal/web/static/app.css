@@ -203,3 +203,6 @@ details.menu[open] > form { margin-top: .4rem; }
 
 .new-agent, form.settings { max-width: 34rem; }
 .new-agent .muted { font-weight: 400; }
+.how { margin: .25rem 0 .5rem; padding-left: 1.2rem; }
+.how li { margin: .2rem 0; }
+.note { background: color-mix(in srgb, var(--warn) 10%, transparent); border-left: 3px solid var(--warn); padding: .4rem .7rem; border-radius: 4px; font-size: .9rem; }

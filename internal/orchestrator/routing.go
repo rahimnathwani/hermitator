@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/ids"
@@ -36,22 +37,29 @@ func (m *Manager) LinkCode(ctx context.Context, agentID string, fresh bool) (str
 
 // HandleMessage routes one incoming chat message.
 //
-// Only the account owner's own messages can run commands. A chat bound
-// to an agent sends it everything; an unbound direct chat goes to the
-// account's fallback agent if there is one, but only for messages from
-// other people, so the agent does not answer the owner's own
-// conversations with friends.
+// The owner is whoever the linked account belongs to: messages the account
+// itself sends (when it is the owner's own number) and messages from the
+// owner's other numbers (when it is a number dedicated to agents). Only
+// the owner can run commands.
+//
+// A linked chat sends its agent everything. An unlinked direct chat from
+// one of the owner's numbers goes to the account's fallback agent, if it
+// has one. Everything else, including strangers messaging an agent's
+// number, is ignored.
 func (m *Manager) HandleMessage(ctx context.Context, msg Message) {
 	acct, err := m.store.Account(ctx, msg.AccountID)
 	if err != nil {
 		return
 	}
 	reply := func(text string) { chatRef{m: m, msg: msg}.send(text) }
+	owner := msg.FromMe || m.store.IsOwnerNumber(ctx, acct.UserID, msg.SenderPhone)
 
 	cmd, isCmd := ParseCommand(msg.Text)
-	isCmd = isCmd && msg.FromMe && msg.Media == nil
+	isCmd = isCmd && msg.Media == nil
 	if isCmd && cmd.Name == "link" {
-		m.link(ctx, acct, msg, cmd.Arg, reply)
+		// A valid code proves its sender can see the agent's page, so it
+		// is accepted from anyone; guessing is throttled.
+		m.link(ctx, acct, msg, cmd.Arg, owner, reply)
 		return
 	}
 
@@ -60,20 +68,21 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) {
 	switch {
 	case err == nil:
 		agentID = route.AgentID
-		if route.RequireMention && !msg.Mentioned && !msg.FromMe {
+		if route.RequireMention && !msg.Mentioned && !owner {
 			return
 		}
 	case errors.Is(err, store.ErrNotFound):
-		if acct.FallbackAgentID == "" || msg.FromMe || msg.IsGroup {
+		if acct.FallbackAgentID == "" || msg.FromMe || msg.IsGroup || !owner {
 			return
 		}
 		agentID = acct.FallbackAgentID
+		route = nil
 	default:
 		m.log.Error("route lookup", "err", err)
 		return
 	}
 
-	if isCmd {
+	if isCmd && owner {
 		m.command(ctx, acct, agentID, route, msg, cmd, reply)
 		return
 	}
@@ -83,20 +92,63 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) {
 	m.actor(agentID).do(func(a *actor) { a.enqueue(msg) })
 }
 
-func (m *Manager) link(ctx context.Context, acct *store.Account, msg Message, code string, reply func(string)) {
+// Wrong /link codes allowed per sender per hour before hermitator stops
+// answering them.
+const linkAttempts = 5
+
+// linkGuard throttles wrong /link codes per sender.
+type linkGuard struct {
+	mu       sync.Mutex
+	failures map[string][]time.Time
+}
+
+func (g *linkGuard) blocked(sender string) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	var recent []time.Time
+	for _, t := range g.failures[sender] {
+		if time.Since(t) < time.Hour {
+			recent = append(recent, t)
+		}
+	}
+	if g.failures == nil {
+		g.failures = map[string][]time.Time{}
+	}
+	g.failures[sender] = recent
+	return len(recent) >= linkAttempts
+}
+
+func (g *linkGuard) fail(sender string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.failures == nil {
+		g.failures = map[string][]time.Time{}
+	}
+	g.failures[sender] = append(g.failures[sender], time.Now())
+}
+
+func (m *Manager) link(ctx context.Context, acct *store.Account, msg Message, code string, owner bool, reply func(string)) {
+	who := msg.Sender
+	if !owner && m.links.blocked(who) {
+		return
+	}
 	invalid := "That link code is not valid. Codes expire after a day; get a fresh one from the agent's page in hermitator."
 	code = strings.ToUpper(strings.TrimSpace(code))
 	if code == "" {
-		reply("Usage: /link CODE. You will find the code on the agent's page in hermitator.")
+		if owner {
+			reply("Usage: /link CODE. You will find the code on the agent's page in hermitator.")
+		}
 		return
 	}
 	agentID, err := m.store.ConsumeLinkCode(ctx, code)
-	if err != nil {
-		reply(invalid)
-		return
+	var ag *store.Agent
+	if err == nil {
+		ag, err = m.store.Agent(ctx, agentID)
 	}
-	ag, err := m.store.Agent(ctx, agentID)
 	if err != nil || ag.UserID != acct.UserID {
+		if !owner {
+			m.links.fail(who)
+		}
 		reply(invalid)
 		return
 	}
@@ -105,7 +157,15 @@ func (m *Manager) link(ctx context.Context, acct *store.Account, msg Message, co
 		return
 	}
 	m.store.Audit(ctx, acct.UserID, acct.UserID, "route.link", fmt.Sprintf("agent=%s chat=%s", ag.ID, msg.Chat))
-	reply(fmt.Sprintf("✅ Linked this chat to *%s* (%s). Send a message to wake it up; /help lists commands.", ag.Name, harnessName(ag.Harness)))
+	text := fmt.Sprintf("✅ Linked this chat to *%s* (%s). Send a message to wake it up; /help lists commands.", ag.Name, harnessName(ag.Harness))
+	if !msg.FromMe && msg.SenderPhone != "" && !m.store.IsOwnerNumber(ctx, acct.UserID, msg.SenderPhone) {
+		// Whoever had the code is the owner, writing from their own phone.
+		if err := m.store.AddOwnerNumber(ctx, acct.UserID, msg.SenderPhone); err == nil {
+			m.store.Audit(ctx, acct.UserID, acct.UserID, "number.add", "+"+msg.SenderPhone+" via /link")
+			text += fmt.Sprintf("\n\nI will treat +%s as you from now on: its messages can run commands. You can change that in hermitator's settings.", msg.SenderPhone)
+		}
+	}
+	reply(text)
 }
 
 func (m *Manager) command(ctx context.Context, acct *store.Account, agentID string, route *store.Route, msg Message, cmd Command, reply func(string)) {

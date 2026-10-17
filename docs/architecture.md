@@ -128,13 +128,20 @@ start.
    preserving order per account. Status updates, channels, hermitator's own
    echoes and anything more than 15 minutes old are dropped.
 2. Routing: a linked chat goes to its agent. An unlinked direct message from
-   someone else goes to the account's fallback agent, if there is one.
-   Anything else is ignored. `/link` and the other commands are only
-   accepted from the account's owner.
+   the owner goes to the account's fallback agent, if there is one. Anything
+   else is ignored. "The owner" means the linked account itself, when it is
+   the owner's own number, or one of the owner's own numbers writing to it,
+   when it is a number dedicated to agents. Only the owner can run
+   commands. `/link CODE` is accepted from anyone, because a valid code
+   proves its sender can see the agent's page, and the sender's number is
+   then remembered as the owner's. Wrong codes are throttled per sender.
+   Direct chats are keyed by phone number even when WhatsApp addresses them
+   by LID, so routes keep matching.
 3. The agent's actor collects messages for 1.5 seconds, so a photo and the
    caption typed after it make one turn, then starts the turn. Messages that
    arrive mid-turn wait for the next one.
-4. The turn reacts ⏳, shows "typing…", wakes the sandbox, saves attachments
+4. The turn sends read receipts (on agent numbers only), reacts ⏳, shows
+   "typing…", wakes the sandbox, saves attachments
    into `/shared/inbox` (transcribing voice notes on the host), and submits a
    job running `hermitator-guest turn` with the request on stdin.
 5. The guest runs the harness and translates its output into a small event

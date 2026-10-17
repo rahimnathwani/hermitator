@@ -44,6 +44,7 @@ type Gateway interface {
 	Pairing(id, userID string) (*gateway.Pairing, error)
 	PairPhone(ctx context.Context, p *gateway.Pairing, phone string) (string, error)
 	Remove(ctx context.Context, accountID string) error
+	ApplyKind(ctx context.Context, accountID string) error
 }
 
 // Server serves the control panel.
@@ -117,9 +118,12 @@ func (s *Server) Handler() (http.Handler, error) {
 	tenant("GET /accounts/pair/{pid}/events", s.pairEvents)
 	tenant("POST /accounts/pair/{pid}/phone", s.pairPhone)
 	tenant("POST /accounts/{id}/fallback", s.setFallback)
+	tenant("POST /accounts/{id}/kind", s.setKind)
 	tenant("POST /accounts/{id}/delete", s.deleteAccount)
 	tenant("GET /settings", s.settingsPage)
 	tenant("POST /settings/secret", s.saveSecret)
+	tenant("POST /settings/numbers", s.addNumber)
+	tenant("POST /settings/numbers/delete", s.deleteNumber)
 	tenant("GET /settings/codex/login", s.codexLogin)
 	tenant("POST /settings/codex/disconnect", s.codexDisconnect)
 

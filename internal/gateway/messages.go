@@ -39,14 +39,15 @@ func (g *Gateway) convert(ctx context.Context, a *account, e *events.Message) (o
 	m := e.Message
 	cli := a.client
 	msg := orchestrator.Message{
-		AccountID:  a.id,
-		Chat:       info.Chat.String(),
-		IsGroup:    info.IsGroup,
-		Sender:     info.Sender.String(),
-		SenderName: info.PushName,
-		ID:         info.ID,
-		FromMe:     info.IsFromMe,
-		Time:       info.Timestamp,
+		AccountID:   a.id,
+		Chat:        canonicalChat(ctx, cli, info).String(),
+		IsGroup:     info.IsGroup,
+		Sender:      info.Sender.String(),
+		SenderPhone: phoneOf(ctx, cli, info.Sender, info.SenderAlt),
+		SenderName:  info.PushName,
+		ID:          info.ID,
+		FromMe:      info.IsFromMe,
+		Time:        info.Timestamp,
 	}
 	var ctxInfo *waE2E.ContextInfo
 	download := func(d whatsmeow.DownloadableMessage, size uint64) func(context.Context) ([]byte, error) {
@@ -103,6 +104,43 @@ func (g *Gateway) convert(ctx context.Context, a *account, e *events.Message) (o
 	}
 	msg.ChatName = g.chatName(ctx, cli, info)
 	return msg, true
+}
+
+// phoneOf returns the phone number behind a user JID, which WhatsApp may
+// give as a hidden "LID" instead, with the phone number as its alternate.
+func phoneOf(ctx context.Context, cli *whatsmeow.Client, jid, alt types.JID) string {
+	switch {
+	case jid.Server == types.DefaultUserServer:
+		return jid.User
+	case alt.Server == types.DefaultUserServer:
+		return alt.User
+	case jid.Server == types.HiddenUserServer:
+		if pn, err := cli.Store.LIDs.GetPNForLID(ctx, jid.ToNonAD()); err == nil && !pn.IsEmpty() {
+			return pn.User
+		}
+	}
+	return ""
+}
+
+// canonicalChat names a direct chat by phone number when it can. WhatsApp
+// addresses the same person sometimes by number and sometimes by LID, and
+// a route has to keep matching either way.
+func canonicalChat(ctx context.Context, cli *whatsmeow.Client, info types.MessageInfo) types.JID {
+	chat := info.Chat.ToNonAD()
+	if info.IsGroup || chat.Server != types.HiddenUserServer {
+		return chat
+	}
+	alt := info.SenderAlt
+	if info.IsFromMe {
+		alt = info.RecipientAlt
+	}
+	if alt.Server == types.DefaultUserServer {
+		return alt.ToNonAD()
+	}
+	if pn, err := cli.Store.LIDs.GetPNForLID(ctx, chat); err == nil && !pn.IsEmpty() {
+		return pn.ToNonAD()
+	}
+	return chat
 }
 
 func quotedText(q *waE2E.Message) string {
@@ -252,6 +290,22 @@ func (g *Gateway) React(ctx context.Context, accountID, chat, sender, messageID,
 		g.sent.add(resp.ID)
 	}
 	return err
+}
+
+// MarkRead implements orchestrator.Messenger. Only agent numbers send read
+// receipts; on the owner's own account they would mark messages as read
+// before the owner had seen them.
+func (g *Gateway) MarkRead(ctx context.Context, accountID, chat, sender, messageID string) error {
+	acct, err := g.store.Account(ctx, accountID)
+	if err != nil || acct.Personal() {
+		return err
+	}
+	cli, jid, err := g.target(accountID, chat)
+	if err != nil {
+		return err
+	}
+	senderJID, _ := types.ParseJID(sender)
+	return cli.MarkRead(ctx, []types.MessageID{messageID}, time.Now(), jid, senderJID)
 }
 
 // Typing implements orchestrator.Messenger.

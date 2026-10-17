@@ -17,18 +17,21 @@ import (
 
 // Message is an incoming chat message, as handed over by the gateway.
 type Message struct {
-	AccountID  string
-	Chat       string
-	ChatName   string
-	IsGroup    bool
-	Sender     string
-	SenderName string
-	ID         string
-	FromMe     bool
-	Mentioned  bool
-	Text       string
-	Time       time.Time
-	Media      *Media
+	AccountID string
+	Chat      string
+	ChatName  string
+	IsGroup   bool
+	Sender    string
+	// SenderPhone is the sender's number in international format without
+	// the plus, when WhatsApp reveals it.
+	SenderPhone string
+	SenderName  string
+	ID          string
+	FromMe      bool
+	Mentioned   bool
+	Text        string
+	Time        time.Time
+	Media       *Media
 }
 
 // Media is an attachment. It is only downloaded if the chat is routed.
@@ -47,6 +50,8 @@ type Messenger interface {
 	SendFile(ctx context.Context, accountID, chat, name string, data []byte, caption string) error
 	React(ctx context.Context, accountID, chat, sender, messageID, emoji string) error
 	Typing(ctx context.Context, accountID, chat string, typing bool) error
+	// MarkRead sends a read receipt, where the account wants them.
+	MarkRead(ctx context.Context, accountID, chat, sender, messageID string) error
 }
 
 // Transcriber turns a voice note into text.

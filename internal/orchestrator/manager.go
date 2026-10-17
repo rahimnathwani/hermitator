@@ -50,6 +50,7 @@ type Manager struct {
 	ctx    context.Context
 	mu     sync.Mutex
 	actors map[string]*actor
+	links  linkGuard
 }
 
 // New creates a Manager. Call Start before handing it messages.
@@ -349,6 +350,9 @@ func (nopMessenger) React(context.Context, string, string, string, string, strin
 	return nil
 }
 func (nopMessenger) Typing(context.Context, string, string, bool) error { return nil }
+func (nopMessenger) MarkRead(context.Context, string, string, string, string) error {
+	return nil
+}
 
 // UpdateAgent saves an agent's settings. Changing the harness starts a
 // fresh conversation, because the two harnesses keep incompatible

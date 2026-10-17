@@ -36,7 +36,8 @@ func (s *Server) accountsPage(w http.ResponseWriter, r *http.Request, v *viewer)
 	for _, a := range accounts {
 		views = append(views, accountView{Account: a, Online: s.Gateway.Connected(a.ID), Fallback: names[a.FallbackAgentID]})
 	}
-	s.render(w, r, v, "accounts.html", "WhatsApp", "accounts", map[string]any{"Accounts": views, "Agents": agents})
+	numbers, _ := s.Store.OwnerNumbers(ctx, v.User.ID)
+	s.render(w, r, v, "accounts.html", "WhatsApp", "accounts", map[string]any{"Accounts": views, "Agents": agents, "Numbers": numbers})
 }
 
 func (s *Server) startPairing(w http.ResponseWriter, r *http.Request, v *viewer) {
@@ -117,6 +118,23 @@ func (s *Server) setFallback(w http.ResponseWriter, r *http.Request, v *viewer) 
 	}
 	s.Store.SetAccountFallback(r.Context(), acct.ID, agentID)
 	s.audit(r, v, "account.fallback", "account="+acct.ID+" agent="+agentID)
+	s.back(w, r, "/accounts", "Saved.")
+}
+
+func (s *Server) setKind(w http.ResponseWriter, r *http.Request, v *viewer) {
+	acct, err := s.accountFor(r, v)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	kind := formValue(r, "kind")
+	if kind != store.KindAgent && kind != store.KindPersonal {
+		http.Error(w, "unknown kind", http.StatusBadRequest)
+		return
+	}
+	s.Store.SetAccountKind(r.Context(), acct.ID, kind)
+	s.Gateway.ApplyKind(r.Context(), acct.ID)
+	s.audit(r, v, "account.kind", "account="+acct.ID+" kind="+kind)
 	s.back(w, r, "/accounts", "Saved.")
 }
 

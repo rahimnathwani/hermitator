@@ -32,7 +32,8 @@ func (noGateway) Pairing(string, string) (*gateway.Pairing, error) { return nil,
 func (noGateway) PairPhone(context.Context, *gateway.Pairing, string) (string, error) {
 	return "", gateway.ErrNotPaired
 }
-func (noGateway) Remove(context.Context, string) error { return nil }
+func (noGateway) Remove(context.Context, string) error    { return nil }
+func (noGateway) ApplyKind(context.Context, string) error { return nil }
 
 const password = "a long enough password"
 
@@ -292,5 +293,36 @@ func TestLoginRateLimit(t *testing.T) {
 	}
 	if code, body := c.post("/login", url.Values{"email": {"alice@example.com"}, "password": {password}}); code != http.StatusUnauthorized || !strings.Contains(body, "Too many attempts") {
 		t.Fatalf("after 12 failures a correct password got %d", code)
+	}
+}
+
+func TestOwnerNumbersAndAccountKind(t *testing.T) {
+	f := setup(t)
+	alice, bob := f.login(t, "alice@example.com"), f.login(t, "bob@example.com")
+	ctx := context.Background()
+	if code, _ := alice.post("/settings/numbers", url.Values{"phone": {"+44 7700 900123"}}); code != http.StatusSeeOther {
+		t.Fatalf("add number: %d", code)
+	}
+	if code, body := alice.get("/settings"); code != http.StatusOK || !strings.Contains(body, "+447700900123") {
+		t.Fatalf("settings page does not list the number: %d", code)
+	}
+	if !f.store.IsOwnerNumber(ctx, f.users["alice@example.com"].ID, "447700900123") || f.store.IsOwnerNumber(ctx, f.users["bob@example.com"].ID, "447700900123") {
+		t.Fatal("number saved for the wrong user")
+	}
+
+	acct := &store.Account{UserID: f.users["alice@example.com"].ID, JID: "1:1@s.whatsapp.net", Phone: "15550001111", Status: store.AccountConnected}
+	f.store.CreateAccount(ctx, acct)
+	if code, _ := bob.post("/accounts/"+acct.ID+"/kind", url.Values{"kind": {"personal"}}); code != http.StatusNotFound {
+		t.Fatalf("bob changed alice's account: %d", code)
+	}
+	if code, _ := alice.post("/accounts/"+acct.ID+"/kind", url.Values{"kind": {"personal"}}); code != http.StatusSeeOther {
+		t.Fatalf("set kind: %d", code)
+	}
+	if got, _ := f.store.Account(ctx, acct.ID); !got.Personal() {
+		t.Fatal("kind not saved")
+	}
+	id := alice.createAgent("bot")
+	if _, body := alice.get("/agents/" + id); !strings.Contains(body, "+15550001111") {
+		t.Fatal("agent page does not explain where to send the link code")
 	}
 }

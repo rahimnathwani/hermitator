@@ -4,7 +4,7 @@
   <h1>WhatsApp</h1>
   <form method="post" action="/accounts/pair"><button class="primary">Link an account</button></form>
 </div>
-<p class="muted">hermitator joins your WhatsApp as a linked device, like WhatsApp Web. It only acts on chats you link to an agent with <code>/link</code>.</p>
+<p class="muted">Link a number that belongs to your agents, and message it from your own WhatsApp. (You can also link your own number, the way WhatsApp Web is linked.) hermitator only acts in chats linked to an agent with <code>/link</code>, and ignores everyone else.</p>
 
 {{if $d.Accounts}}
 <section class="grid">
@@ -16,7 +16,20 @@
     </header>
     {{with .PushName}}<p class="meta">{{.}}</p>{{end}}
     {{if eq .Status "logged_out"}}
-    <p>This device was removed from your phone. Remove it here and link the account again.</p>
+    <p>This device was removed from the phone. Remove it here and link the account again.</p>
+    {{end}}
+    <form method="post" action="/accounts/{{.ID}}/kind" class="inline-form">
+      <label>This number belongs to
+        <select name="kind">
+          <option value="agent" {{if not .Personal}}selected{{end}}>my agents</option>
+          <option value="personal" {{if .Personal}}selected{{end}}>me</option>
+        </select>
+      </label>
+      <button class="small">Save</button>
+    </form>
+    <p class="muted small">{{if .Personal}}hermitator stays invisible on your own number: no online status, no read receipts.{{else}}hermitator shows this number as online and sends read receipts and typing indicators.{{end}}</p>
+    {{if and (not .Personal) (not $d.Numbers)}}
+    <p class="note">Message this number from your own WhatsApp with an agent's <code>/link</code> code. hermitator learns your number from that, so it can tell you apart from strangers.</p>
     {{end}}
     <form method="post" action="/accounts/{{.ID}}/fallback" class="inline-form">
       <label>Fallback agent
@@ -28,7 +41,7 @@
       </label>
       <button class="small">Save</button>
     </form>
-    <p class="muted small">A fallback agent answers direct messages that other people send you in chats that are not linked. It never answers your own messages or speaks in groups.</p>
+    <p class="muted small">A fallback agent answers your direct messages to this number without a <code>/link</code>. It only listens to <a href="/settings">your numbers</a>, never to strangers or groups.</p>
     <form method="post" action="/accounts/{{.ID}}/delete">
       <button class="small danger">Remove</button>
     </form>
