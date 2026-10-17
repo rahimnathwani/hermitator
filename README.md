@@ -1,6 +1,259 @@
 # hermitator
 
-Coding agents that live in gVisor sandboxes, wake up when you message them on
-WhatsApp, and use no RAM while they sleep.
+Coding agents that live in their own sandboxed Linux machines, wake up when
+you message them on WhatsApp, and use no memory while they sleep.
 
-Work in progress. See [docs/design.md](docs/design.md).
+You send *"the navbar overlaps the hero on mobile, fix it and send me a
+screenshot"* to a WhatsApp chat. hermitator wakes that chat's agent, a
+[gVisor](https://gvisor.dev) sandbox with its own filesystem, network and
+toolchain, within about a tenth of a second, and hands your message to
+[Claude Code](https://docs.claude.com/en/docs/claude-code) or
+[pi](https://github.com/earendil-works/pi) running inside it. When the agent
+is done, the reply and the screenshot arrive in the chat. A few idle minutes
+later the sandbox is gone from memory: stopped if nothing was running, or
+checkpointed to disk, dev server and all, ready to resume exactly where it
+left off.
+
+Because only the agents you are talking to use RAM, one modest server can
+keep hundreds of them.
+
+![An agent's page in the hermitator panel while it works (demo data)](docs/agent-page.png)
+
+## What you get
+
+- **A machine per agent.** Each agent runs in gVisor, a kernel in user space
+  that intercepts every system call. It gets its own root filesystem
+  (OverlayFS over a shared, read-only image) and its own network namespace,
+  which reaches the internet but not the host, other agents or private
+  networks. It is root inside, so `apt`, `npm`, `pip` and `uv` just work, and
+  everything it installs persists.
+- **No RAM while idle.** An idle agent with nothing running is stopped. One
+  with background processes (a dev server, a database) is checkpointed, and
+  those processes carry on when the next message arrives.
+- **Your own subscriptions.** Claude Code runs with a token from
+  `claude setup-token`. pi runs with a ChatGPT subscription (through OpenAI's
+  device-code login, done from the panel), a DeepSeek key or an OpenRouter
+  key.
+- **WhatsApp as the interface.** hermitator links to your account the way
+  WhatsApp Web does. Any chat can be bound to an agent with `/link CODE`.
+  Photos, voice notes (transcribed locally with whisper.cpp) and documents go
+  in; files come back when the agent runs `whatsapp-send`. A ⏳ reaction says
+  it is working, ✅ says it is done.
+- **A control panel.** Live activity per agent, a console for talking to it
+  from the browser, a terminal inside the sandbox, users with an admin who can
+  act as them, and an audit log.
+- **One binary and SQLite.** No queue, no Redis, no Docker daemon.
+
+## Numbers
+
+Measured on a Hetzner dedicated server (Ryzen 5 3600, 64 GB RAM, NVMe) with
+gVisor release 20261012.0 on the systrap platform:
+
+| | |
+|---|---|
+| Wake a stopped agent (cold boot) | 70–100 ms |
+| Wake a checkpointed agent | 55–60 ms |
+| Checkpoint of an agent running a Python web server | 13 MB on disk |
+| An awake, idle agent | 28 MB of RAM (39 MB with that web server) |
+| A sleeping agent | 0 |
+| hermitator itself | about 60 MB |
+
+The model's own thinking time is, of course, extra.
+
+## How it works
+
+```mermaid
+graph TB
+  subgraph phone [Your phone]
+    WA[WhatsApp]
+  end
+  subgraph host [Host always running]
+    GW[Gateway with one whatsmeow client per account]
+    OR[Orchestrator with one actor per agent]
+    WEB[Web panel]
+    DB[(SQLite)]
+  end
+  subgraph sandbox [One gVisor sandbox per agent with zero RAM when asleep]
+    INIT[hermitator-guest as PID 1]
+    H[Claude Code or pi]
+    BG[Dev servers and other background work]
+  end
+  WA --> GW
+  GW --> OR
+  OR -->|job files in a shared spool| INIT
+  INIT --> H
+  INIT --> BG
+  H -->|whatsapp-send| OR
+  OR --> GW
+  WEB --> OR
+  OR --> DB
+```
+
+A few decisions shape everything else:
+
+- **WhatsApp lives on the host.** Its multi-device protocol needs a
+  connection that never sleeps, so one Go process holds a
+  [whatsmeow](https://github.com/tulir/whatsmeow) client for every linked
+  account and only wakes a sandbox when a message is routed to it.
+- **Nothing runs through `runsc exec`.** gVisor kills every process started
+  by `exec` when it restores a checkpoint. So the guest binary is PID 1 and
+  runs jobs that the host drops into a shared spool directory as plain
+  files. Every process an agent starts is a descendant of PID 1, and survives
+  sleep.
+- **Sleep picks the cheaper option.** If PID 1 is the only process left, the
+  sandbox is stopped: all state is already on disk in its upper layer. If
+  anything else is running, it is checkpointed.
+- **The sandbox is untrusted, including what it writes.** Every file the
+  host reads or writes under a sandbox's shared directories goes through
+  Go's `os.Root`, so an agent cannot plant a symlink that makes the host
+  read or write elsewhere.
+
+[docs/architecture.md](docs/architecture.md) covers the rest: the turn
+protocol, the network policy, credentials and what happens on restart.
+
+## Install
+
+You need a Linux server (x86-64 or arm64) where you have root, with systemd.
+No nested virtualization is required. hermitator is developed on Arch Linux;
+the install script also knows apt. For HTTPS, point a domain at the server
+and hermitator puts [Caddy](https://caddyserver.com) in front of it.
+
+From a machine with Go 1.27:
+
+```sh
+git clone https://github.com/rahimnathwani/hermitator
+cd hermitator
+deploy/deploy.sh root@your-server hermitator.example.com
+```
+
+That builds both binaries, copies them over SSH and runs
+[deploy/install.sh](deploy/install.sh), which installs a pinned gVisor
+release (checksum verified), writes `/etc/hermitator/hermitator.env` with a
+new master key, configures Caddy, builds the agent image (about 2.5 GB; the
+first build takes a few minutes) and starts the service. Run it again to
+upgrade. Running sandboxes keep running across upgrades. To also build
+whisper.cpp for voice notes, prefix the command with `WITH_WHISPER=1`.
+
+Then, on the server:
+
+```sh
+hermitator doctor                              # check the host
+hermitator user add admin@example.com --admin  # prints a password
+hermitator user add you@example.com            # prints a password
+```
+
+Admins manage users but do not own agents themselves, so you will usually
+want both. Then log in as yourself and:
+
+1. **Settings:** paste the token from running `claude setup-token` on your own
+   computer, and/or connect ChatGPT or add API keys for pi.
+2. **WhatsApp:** link your account by scanning the QR code, or by typing a
+   code on your phone.
+3. **Agents:** create one.
+4. In any WhatsApp chat, for example *Message yourself*, send the `/link`
+   code shown on the agent's page. That chat now talks to the agent.
+
+## Using it
+
+Everything you send in a linked chat goes to its agent, except these, which
+hermitator answers itself:
+
+| Command | |
+|---|---|
+| `/status` | What the agent is doing, its state and disk use |
+| `/sleep` | Suspend it now (alias `/exit`) |
+| `/stop` | Abort the current turn |
+| `/new` | Start a fresh conversation; files are kept (alias `/clear`) |
+| `/switch claude` or `/switch pi` | Change harness, same workspace |
+| `/link CODE`, `/unlink` | Bind this chat to an agent, or unbind it |
+| `/help` | The list |
+
+Other slash commands, such as Claude Code's `/compact`, pass through to the
+agent. Only you (the owner of the linked account) can use commands.
+
+Messages sent in quick succession, a photo and then its caption say, become
+one turn. Messages that arrive while the agent is working wait for the next
+turn. In groups, each message reaches the agent with its sender's name.
+
+An account can also have a **fallback agent**, which answers direct messages
+that other people send you in chats that are not linked. It never responds to
+your own messages or in groups.
+
+## Configuration
+
+The service reads `HERMITATOR_*` variables from
+`/etc/hermitator/hermitator.env`. The only required one is the master key; the
+rest have sensible defaults. They are all listed in
+[.env.example](.env.example).
+
+## Security model
+
+What the sandbox protects is the host, and other agents, from an agent:
+
+- gVisor implements Linux in user space, so the agent never talks to the
+  host kernel directly.
+- The agent sees its own filesystem, plus `/shared` (media in and out), the
+  job spool and hermitator's tools (read-only). The host treats all of them
+  as hostile input.
+- Network traffic from the sandbox can reach the internet and nothing else:
+  not the host, not other agents, not private or link-local ranges.
+- Credentials are encrypted at rest (XChaCha20-Poly1305 under the master key),
+  passed to the harness only for the turns that need them, never on a command
+  line, and removed from the sandbox before it is suspended.
+
+What it does not protect:
+
+- **The agent holds your credentials while it works.** It needs them to call
+  the model. Treat an agent like a laptop logged into your accounts.
+- **Anyone who can write in a linked chat can drive the agent.** Link groups
+  with care.
+- **WhatsApp does not officially support this.** whatsmeow speaks the same
+  protocol as WhatsApp Web, but WhatsApp can and does ban numbers it decides
+  are automated. Consider a second number. Replies come from your own
+  account.
+- **hermitator runs as root on the host.** It has to, to mount filesystems
+  and manage network namespaces.
+- **Subscriptions have terms.** hermitator drives the official CLIs with your
+  tokens. Check that your plan allows what you do with it.
+
+## Development
+
+The real runtime needs Linux and root, but everything else runs on a Mac:
+
+```sh
+make dev     # the panel on http://127.0.0.1:8080, agents run unsandboxed
+make test    # including end-to-end turns through the real guest binary
+make lint
+```
+
+`make dev` uses `HERMITATOR_RUNTIME=unsafe-local`, which runs agents as
+ordinary processes on your machine. It is for working on hermitator, not for
+running agents you do not trust.
+
+| | |
+|---|---|
+| [cmd/hermitator](cmd/hermitator) | The service and its admin commands |
+| [cmd/hermitator-guest](cmd/hermitator-guest) | PID 1 inside every sandbox, the turn runner and `whatsapp-send` |
+| [internal/orchestrator](internal/orchestrator) | Routing, turns, sleep and wake |
+| [internal/sandbox](internal/sandbox) | runsc, OverlayFS, network namespaces and nftables |
+| [internal/spool](internal/spool) | Running processes in a sandbox through files |
+| [internal/harness](internal/harness) | Driving Claude Code and pi headlessly |
+| [internal/gateway](internal/gateway) | WhatsApp |
+| [internal/web](internal/web) | The panel |
+| [image](image) | The agent image |
+| [deploy](deploy) | Installation |
+
+## Limitations
+
+- A checkpoint only restores on the same CPU architecture and gVisor
+  version. After a gVisor upgrade, a checkpointed agent boots cold instead:
+  its files are all there, but whatever was running is not.
+- Processes started from the web terminal do not survive a checkpoint
+  (gVisor drops `exec` sessions on restore). Ask the agent to start
+  long-running things instead.
+- No per-agent disk quotas or egress allowlists yet.
+- One host. There is no clustering, and no plan for it.
+
+## License
+
+[MIT](LICENSE)

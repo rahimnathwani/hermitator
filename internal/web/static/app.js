@@ -99,7 +99,7 @@ function mountLog(el) {
 
   const add = (kind, ...body) => {
     el.querySelector(".empty")?.remove();
-    const when = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const when = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     el.append(h("div", { class: `entry ${kind}` }, h("span", { class: "when" }, when), h("div", { class: "body" }, ...body)));
     while (el.children.length > 300) el.firstElementChild.remove();

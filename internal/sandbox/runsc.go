@@ -15,6 +15,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
+
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 
 	"github.com/rahimnathwani/hermitator/internal/turn"
 )
@@ -319,14 +322,40 @@ func parsePS(out []byte) []Process {
 	return ps
 }
 
-// Shell implements Runtime.
+// Shell implements Runtime. The environment, which carries credentials,
+// goes to runsc in a process spec file rather than on its command line,
+// where any process on the host could read it.
 func (r *Runsc) Shell(ctx context.Context, s *Spec, env []string) (*exec.Cmd, error) {
-	args := []string{"-cwd", "/workspace"}
-	for _, kv := range env {
-		args = append(args, "-env", kv)
+	proc := specs.Process{
+		Args: []string{"/bin/bash", "-l"},
+		Env:  append(guestEnv(s.Image), env...),
+		Cwd:  turn.Workspace,
+		Capabilities: &specs.LinuxCapabilities{
+			Bounding:  capabilities,
+			Effective: capabilities,
+			Permitted: capabilities,
+		},
 	}
-	args = append(args, s.ID, "/bin/bash", "-l")
-	return exec.CommandContext(ctx, r.Binary, r.args("exec", args...)...), nil
+	b, err := json.Marshal(proc)
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.CreateTemp(s.Dir, ".exec-*.json")
+	if err != nil {
+		return nil, err
+	}
+	path := f.Name()
+	_, err = f.Write(b)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		os.Remove(path)
+		return nil, err
+	}
+	// runsc reads the file as it starts; it need not outlive that.
+	time.AfterFunc(10*time.Second, func() { os.Remove(path) })
+	return exec.CommandContext(ctx, r.Binary, r.args("exec", "-process", path, s.ID)...), nil
 }
 
 func (r *Runsc) mount(ctx context.Context, s *Spec) error {

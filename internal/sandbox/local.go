@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -26,7 +28,19 @@ type localProc struct {
 	done chan struct{}
 }
 
-func (s *Spec) localHome() string      { return filepath.Join(s.Dir, "home") }
+func (s *Spec) localHome() string { return filepath.Join(s.Dir, "home") }
+func (s *Spec) pidFile() string   { return filepath.Join(s.Dir, "guest.pid") }
+
+func stopStale(pidFile string) {
+	b, err := os.ReadFile(pidFile)
+	if err != nil {
+		return
+	}
+	if pid, err := strconv.Atoi(strings.TrimSpace(string(b))); err == nil && pid > 1 {
+		syscall.Kill(-pid, syscall.SIGTERM)
+	}
+	os.Remove(pidFile)
+}
 func (s *Spec) localWorkspace() string { return filepath.Join(s.Dir, "workspace") }
 
 func (l *Local) env(s *Spec) []string {
@@ -85,10 +99,14 @@ func (l *Local) Wake(ctx context.Context, s *Spec) (string, error) {
 	cmd.Dir = s.localWorkspace()
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// A guest left over from a previous hermitator process would poll the
+	// same spool and steal jobs.
+	stopStale(s.pidFile())
 	if err := cmd.Start(); err != nil {
 		logf.Close()
 		return "", err
 	}
+	os.WriteFile(s.pidFile(), []byte(strconv.Itoa(cmd.Process.Pid)), 0o600)
 	p := &localProc{cmd: cmd, done: make(chan struct{})}
 	go func() {
 		cmd.Wait()
@@ -117,8 +135,10 @@ func (l *Local) Stop(ctx context.Context, s *Spec) error {
 	delete(l.procs, s.ID)
 	l.mu.Unlock()
 	if p == nil {
+		stopStale(s.pidFile())
 		return nil
 	}
+	os.Remove(s.pidFile())
 	syscall.Kill(-p.cmd.Process.Pid, syscall.SIGTERM)
 	select {
 	case <-p.done:
