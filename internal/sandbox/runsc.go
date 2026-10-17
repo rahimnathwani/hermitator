@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -167,22 +168,35 @@ func (r *Runsc) restore(ctx context.Context, s *Spec) error {
 
 // start runs `runsc run` or `runsc restore` with the guest's output going
 // to its log file.
+//
+// Both streams must be files: the sandbox processes runsc leaves behind
+// inherit them, so a pipe would never reach EOF and Run would never
+// return.
 func (r *Runsc) start(ctx context.Context, s *Spec, sub string, args ...string) error {
 	logf, err := os.OpenFile(s.logPath(), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}
 	defer logf.Close()
+	before, _ := logf.Seek(0, io.SeekEnd)
 	cmd := exec.CommandContext(ctx, r.Binary, r.args(sub, args...)...)
-	var stderr bytes.Buffer
-	cmd.Stdout = logf
-	cmd.Stderr = &stderr
+	cmd.Stdout, cmd.Stderr = logf, logf
 	if err := cmd.Run(); err != nil {
-		logf.Write(stderr.Bytes())
-		return fmt.Errorf("runsc %s: %w: %s", sub, err, strings.TrimSpace(lastLine(stderr.String())))
+		return fmt.Errorf("runsc %s: %w: %s", sub, err, lastLine(readFrom(s.logPath(), before)))
 	}
-	logf.Write(stderr.Bytes())
 	return nil
+}
+
+// readFrom returns what a file gained after offset.
+func readFrom(path string, offset int64) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	f.Seek(offset, io.SeekStart)
+	b, _ := io.ReadAll(io.LimitReader(f, 64<<10))
+	return string(b)
 }
 
 func lastLine(s string) string {

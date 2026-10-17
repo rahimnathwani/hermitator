@@ -244,7 +244,7 @@ func (m *Manager) finish(ctx context.Context, chat chatRef, rec *store.Turn, res
 		m.store.TouchAgent(ctx, rec.AgentID)
 		m.hub.publish(rec.AgentID, UIEvent{Kind: "turn_end", TurnID: rec.ID, Status: rec.Status, Output: clip(rec.Output, 4000)})
 		m.log.Info("turn finished", "agent", rec.AgentID, "turn", rec.ID, "status", rec.Status, "tools", rec.Tools,
-			"duration", rec.Duration().Round(time.Millisecond), "cost_usd", rec.CostUSD)
+			"duration", rec.Duration().Round(time.Millisecond).String(), "cost_usd", rec.CostUSD)
 	}
 	deliver()
 	return running

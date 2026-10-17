@@ -55,6 +55,9 @@ func usage() {
 }
 
 func initMain() int {
+	// PID 1 must outlive a closed log stream; dying would take the whole
+	// sandbox down with it.
+	signal.Ignore(syscall.SIGPIPE)
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()

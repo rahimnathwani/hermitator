@@ -1,0 +1,25 @@
+[Unit]
+Description=hermitator: coding agents in gVisor sandboxes, reachable over WhatsApp
+Documentation=https://github.com/rahimnathwani/hermitator
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/hermitator/hermitator.env
+ExecStart=/usr/local/bin/hermitator serve
+Restart=on-failure
+RestartSec=3
+# Sandboxes are separate runsc processes in their own cgroups. Restarting
+# hermitator (to upgrade it, say) must not kill them, and runsc keeps its
+# state in /run/hermitator, which must outlive the service too.
+KillMode=process
+RuntimeDirectory=hermitator
+RuntimeDirectoryPreserve=yes
+RuntimeDirectoryMode=0700
+StateDirectory=hermitator
+StateDirectoryMode=0700
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
