@@ -35,8 +35,37 @@ func env(key, fallback string) string {
 	return fallback
 }
 
-// Load reads the configuration.
+// DefaultEnvFile is where deploy/install.sh writes the configuration.
+const DefaultEnvFile = "/etc/hermitator/hermitator.env"
+
+// loadEnvFile sets variables from a KEY=VALUE file without overriding the
+// real environment, so commands like `hermitator user add` run on the
+// server pick up the service's configuration.
+func loadEnvFile(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		k = strings.TrimSpace(strings.TrimPrefix(k, "export "))
+		if !ok || !strings.HasPrefix(k, "HERMITATOR_") {
+			continue
+		}
+		if _, set := os.LookupEnv(k); !set {
+			os.Setenv(k, strings.Trim(strings.TrimSpace(v), `"'`))
+		}
+	}
+}
+
+// Load reads the configuration from the environment, falling back to
+// $HERMITATOR_ENV_FILE (default DefaultEnvFile) for anything unset.
 func Load() (*Config, error) {
+	loadEnvFile(env("HERMITATOR_ENV_FILE", DefaultEnvFile))
 	c := &Config{
 		DataDir:   env("HERMITATOR_DATA_DIR", "/var/lib/hermitator"),
 		Listen:    env("HERMITATOR_LISTEN", "127.0.0.1:8080"),
@@ -49,6 +78,13 @@ func Load() (*Config, error) {
 		Whisper:   env("HERMITATOR_WHISPER", "whisper-cli"),
 		LogLevel:  env("HERMITATOR_LOG", "info"),
 	}
+	// Paths derived from the data directory end up as mount sources and
+	// as commands run from other working directories.
+	abs, err := filepath.Abs(c.DataDir)
+	if err != nil {
+		return nil, err
+	}
+	c.DataDir = abs
 	c.PublicURL = strings.TrimRight(env("HERMITATOR_PUBLIC_URL", "http://"+c.Listen), "/")
 	c.Model = env("HERMITATOR_WHISPER_MODEL", filepath.Join(c.DataDir, "whisper", "ggml-small.bin"))
 	subnet, err := netip.ParsePrefix(env("HERMITATOR_SUBNET", "10.88.0.0/16"))

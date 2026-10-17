@@ -32,7 +32,7 @@ const systemPrompt = `You are running inside hermitator: an isolated Linux machi
 - Files the user sends you are saved under %s; their paths appear in the message.
 - To send the user a file (a screenshot, chart, PDF, archive...), run: whatsapp-send <path> [caption]
 - /workspace is your working directory. The whole filesystem persists between conversations, including anything you install with apt, npm, pip or uv. Run as root; there is no sudo prompt.
-- When nobody is talking to you the machine is suspended. Background processes you leave running (dev servers, databases) are frozen and continue when the next message arrives.
+- When nobody is talking to you the machine is suspended. Background processes you leave running (dev servers, databases) are frozen and continue when the next message arrives. Start them with their output redirected to a file, for example: nohup npm run dev > /tmp/dev.log 2>&1 &. The shell you start them from goes away at the end of your turn.
 - Chromium and Playwright are installed for screenshots and browser automation.`
 
 func (m *Manager) agentPrompt(spec *sandbox.Spec, last Message) string {
@@ -66,6 +66,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	chat.react("⏳")
 	stopTyping := chat.typing(ctx)
 	defer stopTyping()
+	m.hub.publish(a.id, UIEvent{Kind: "turn_start", TurnID: t.id, Input: summarizeBatch(batch)})
 
 	fail := func(text string) bool {
 		chat.send(text)
@@ -106,7 +107,6 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	if err := m.store.CreateTurn(ctx, rec); err != nil {
 		log.Error("record turn", "err", err)
 	}
-	m.hub.publish(agent.ID, UIEvent{Kind: "turn_start", TurnID: t.id, Input: rec.Input})
 	log.Info("turn started", "harness", agent.Harness, "wake", wake, "wake_ms", wakeMS, "messages", len(batch))
 
 	req := turn.Request{
@@ -126,7 +126,6 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		return m.finish(ctx, chat, rec, nil, "⚠️ Could not hand the turn to the sandbox: "+err.Error(), false)
 	}
 	t.submitted(&client)
-	defer client.Remove(t.id)
 
 	// Deliver files as soon as the agent queues them.
 	outboxDone := make(chan struct{})
@@ -188,12 +187,16 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	close(outboxDone)
 	<-outboxStopped
 	m.deliverOutbox(ctx, spec, chat)
+	if err != nil && !died.Load() {
+		client.Cancel(t.id, 15*time.Second)
+	} else {
+		client.Remove(t.id)
+	}
 
 	switch {
 	case died.Load():
 		return m.finish(ctx, chat, rec, nil, "⚠️ The sandbox stopped in the middle of the turn (out of memory?).", false)
 	case errors.Is(err, context.DeadlineExceeded):
-		client.Kill(t.id)
 		return m.finish(ctx, chat, rec, nil, fmt.Sprintf("⚠️ The turn ran for over %s and was stopped.", m.cfg.MaxTurn), true)
 	case err != nil:
 		return m.finish(ctx, chat, rec, nil, "⚠️ Lost track of the turn: "+err.Error(), true)
@@ -248,6 +251,20 @@ func (m *Manager) finish(ctx context.Context, chat chatRef, rec *store.Turn, res
 	}
 	deliver()
 	return running
+}
+
+// summarizeBatch is a short description of what arrived, for the UI.
+func summarizeBatch(batch []Message) string {
+	var parts []string
+	for _, msg := range batch {
+		if msg.Media != nil {
+			parts = append(parts, "["+msg.Media.Kind+"]")
+		}
+		if t := strings.TrimSpace(msg.Text); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	return clip(strings.Join(parts, "\n"), 4000)
 }
 
 // buildPrompt turns a batch of chat messages into one prompt, saving any

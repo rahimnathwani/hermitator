@@ -19,7 +19,7 @@ type page struct {
 	Nav     string
 	V       *viewer
 	Flash   string
-	Version string
+	Version string // the asset version, for cache-busting URLs
 	Data    any
 }
 
@@ -114,7 +114,7 @@ func (s *Server) parseTemplates() error {
 
 // render writes a full page.
 func (s *Server) render(w http.ResponseWriter, r *http.Request, v *viewer, name, title, nav string, data any) {
-	p := page{Title: title, Nav: nav, V: v, Flash: s.takeFlash(w, r), Version: s.Version, Data: data}
+	p := page{Title: title, Nav: nav, V: v, Flash: s.takeFlash(w, r), Version: s.assetV, Data: data}
 	s.write(w, s.pages[name], "layout", p)
 }
 

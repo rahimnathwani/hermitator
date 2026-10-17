@@ -55,7 +55,7 @@ func password(fromStdin bool) (string, bool, error) {
 func userCmd(args []string) error {
 	ctx := context.Background()
 	if len(args) == 0 {
-		return errors.New("usage: hermitator user add|passwd|list ...")
+		return errors.New("usage: hermitator user add|passwd|list")
 	}
 	st, err := openStore(ctx)
 	if err != nil {

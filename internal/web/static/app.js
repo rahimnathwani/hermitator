@@ -242,7 +242,12 @@ async function mountTerminal(el) {
     cursorBlink: true,
     fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--mono"),
     fontSize: 14,
-    theme: { background: "#0b0d0e" },
+    theme: {
+      background: "#0b0d0e",
+      scrollbarSliderBackground: "rgba(255, 255, 255, 0.12)",
+      scrollbarSliderHoverBackground: "rgba(255, 255, 255, 0.22)",
+      scrollbarSliderActiveBackground: "rgba(255, 255, 255, 0.3)",
+    },
   });
   const fit = new FitAddon.FitAddon();
   term.loadAddon(fit);

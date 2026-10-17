@@ -121,7 +121,7 @@ func (a *actor) reap() {
 	if st, err := a.suspend(a.ctx); err != nil {
 		a.m.log.Error("suspend idle agent", "agent", a.id, "err", err)
 	} else {
-		a.m.log.Info("suspended idle agent", "agent", a.id, "state", st, "idle", time.Since(a.lastActive).Round(time.Second))
+		a.m.log.Info("suspended idle agent", "agent", a.id, "state", st, "idle", time.Since(a.lastActive).Round(time.Second).String())
 	}
 }
 

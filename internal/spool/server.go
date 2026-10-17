@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -36,6 +37,79 @@ type proc struct {
 	id      string
 	process *os.Process
 	killing bool
+	// output copies the job's stdout and stderr pipes into the spool.
+	output *output
+}
+
+// output relays a job's pipes into its spool files.
+//
+// A job never gets a spool file as its stdout: background processes it
+// leaves behind would inherit the descriptor, the host deletes the file
+// once it has read it, and gVisor cannot restore a checkpoint in which a
+// process holds a file that no longer exists. Pipes live entirely inside
+// the sandbox, so they checkpoint fine.
+type output struct {
+	sinks   []*sink
+	drained sync.WaitGroup
+}
+
+// sink writes to a file until it is closed, then discards.
+type sink struct {
+	mu sync.Mutex
+	f  *os.File
+}
+
+func (s *sink) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.f != nil {
+		s.f.Write(p)
+	}
+	return len(p), nil
+}
+
+func (s *sink) close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.f != nil {
+		s.f.Close()
+		s.f = nil
+	}
+}
+
+// relay starts copying r into f and returns the write end for the child.
+func (o *output) relay(f *os.File) (*os.File, error) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	sk := &sink{f: f}
+	o.sinks = append(o.sinks, sk)
+	o.drained.Add(1)
+	go func() {
+		defer o.drained.Done()
+		io.Copy(sk, r)
+		r.Close()
+	}()
+	return w, nil
+}
+
+// finish waits briefly for the pipes to drain, then closes the spool
+// files. Anything still writing (a background process holding the job's
+// stdout) keeps working; its output just goes nowhere.
+func (o *output) finish(grace time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		o.drained.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(grace):
+	}
+	for _, sk := range o.sinks {
+		sk.close()
+	}
 }
 
 // Serve runs until ctx is cancelled, then terminates its jobs.
@@ -159,40 +233,53 @@ func (s *Server) start(job *Job) {
 		bin = resolved
 	}
 
-	stdout, err := os.OpenFile(outPath(s.Root, job.ID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
+	// The child's ends of its stdio, closed in this process once it has
+	// started (or failed to).
+	var childEnds []*os.File
+	defer func() {
+		for _, f := range childEnds {
+			f.Close()
+		}
+	}()
+	out := &output{}
+	abort := func(err error) {
+		for _, f := range childEnds {
+			f.Close()
+		}
+		childEnds = nil
+		out.finish(0)
 		fail(err)
-		return
 	}
-	defer stdout.Close()
-	stderr, err := os.OpenFile(errPath(s.Root, job.ID), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		fail(err)
-		return
-	}
-	defer stderr.Close()
 
-	var stdin *os.File
+	stdin, err := os.Open(os.DevNull)
 	if len(job.Stdin) > 0 {
-		r, w, err := os.Pipe()
+		var w *os.File
+		stdin, w, err = os.Pipe()
+		if err == nil {
+			go func() {
+				w.Write(job.Stdin)
+				w.Close()
+			}()
+		}
+	}
+	if err != nil {
+		abort(err)
+		return
+	}
+	childEnds = append(childEnds, stdin)
+	for _, path := range []string{outPath(s.Root, job.ID), errPath(s.Root, job.ID)} {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if err != nil {
-			fail(err)
+			abort(err)
 			return
 		}
-		defer r.Close()
-		go func() {
-			w.Write(job.Stdin)
-			w.Close()
-		}()
-		stdin = r
-	} else {
-		devnull, err := os.Open(os.DevNull)
+		w, err := out.relay(f)
 		if err != nil {
-			fail(err)
+			f.Close()
+			abort(err)
 			return
 		}
-		defer devnull.Close()
-		stdin = devnull
+		childEnds = append(childEnds, w)
 	}
 
 	dir := job.Dir
@@ -204,15 +291,15 @@ func (s *Server) start(job *Job) {
 	p, err := os.StartProcess(bin, job.Argv, &os.ProcAttr{
 		Dir:   dir,
 		Env:   env,
-		Files: []*os.File{stdin, stdout, stderr},
+		Files: childEnds,
 		// A process group per job lets a kill reach everything it spawned.
 		Sys: &syscall.SysProcAttr{Setpgid: true},
 	})
 	if err != nil {
-		fail(err)
+		abort(err)
 		return
 	}
-	pr := &proc{id: job.ID, process: p}
+	pr := &proc{id: job.ID, process: p, output: out}
 	s.byID[job.ID] = pr
 	s.byPID[p.Pid] = pr
 	s.Log.Info("job started", "job", job.ID, "pid", p.Pid, "argv0", job.Argv[0])
@@ -261,8 +348,13 @@ func (s *Server) reap() {
 		if ws.Signaled() {
 			exit.Signal = unixSignalName(ws.Signal())
 		}
-		writeJSON(exitPath(s.Root, pr.id), exit)
-		s.Log.Info("job exited", "job", pr.id, "pid", pid, "exit", exit.String())
+		// The exit record promises that all output is in place, so it is
+		// written only once the output has been flushed and closed.
+		go func(pr *proc, pid int) {
+			pr.output.finish(500 * time.Millisecond)
+			writeJSON(exitPath(s.Root, pr.id), exit)
+			s.Log.Info("job exited", "job", pr.id, "pid", pid, "exit", exit.String())
+		}(pr, pid)
 	}
 }
 

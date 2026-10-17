@@ -101,3 +101,22 @@ func TestUnfinishedJobsAreMarkedLostOnColdStart(t *testing.T) {
 	}
 	t.Fatal("lost job never got an exit record")
 }
+
+func TestBackgroundChildDoesNotHoldUpTheExit(t *testing.T) {
+	c, _ := serve(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// Like `npm run dev &` without a redirect: the background process
+	// inherits the job's stdout and outlives it.
+	start := time.Now()
+	out, exit, err := c.Run(ctx, Job{ID: "bg", Argv: []string{"sh", "-c", "sleep 30 & echo started"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exit.OK() || string(out) != "started\n" {
+		t.Fatalf("exit = %+v, out = %q", exit, out)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Fatalf("exit took %s; a background child held it up", took)
+	}
+}

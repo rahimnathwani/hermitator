@@ -4,7 +4,10 @@
 package web
 
 import (
+	"context"
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,11 +37,20 @@ const (
 	sessionTTL    = 30 * 24 * time.Hour
 )
 
+// Gateway is what the panel needs from the WhatsApp side.
+type Gateway interface {
+	Connected(accountID string) bool
+	StartPairing(ctx context.Context, userID string) (*gateway.Pairing, error)
+	Pairing(id, userID string) (*gateway.Pairing, error)
+	PairPhone(ctx context.Context, p *gateway.Pairing, phone string) (string, error)
+	Remove(ctx context.Context, accountID string) error
+}
+
 // Server serves the control panel.
 type Server struct {
 	Store   *store.Store
 	Agents  *orchestrator.Manager
-	Gateway *gateway.Gateway
+	Gateway Gateway
 	Images  *sandbox.Images
 	Log     *slog.Logger
 	// PublicURL is where users reach the panel; it decides whether cookies
@@ -47,11 +59,28 @@ type Server struct {
 	Version   string
 
 	pages   map[string]*template.Template
+	assetV  string
 	limiter limiter
+}
+
+// assetVersion hashes the embedded static files, so asset URLs change
+// exactly when their contents do and can be cached forever.
+func assetVersion() string {
+	h := sha256.New()
+	fs.WalkDir(assets, "static", func(path string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			b, _ := fs.ReadFile(assets, path)
+			h.Write([]byte(path))
+			h.Write(b)
+		}
+		return nil
+	})
+	return hex.EncodeToString(h.Sum(nil))[:12]
 }
 
 // Handler builds the HTTP handler.
 func (s *Server) Handler() (http.Handler, error) {
+	s.assetV = assetVersion()
 	if err := s.parseTemplates(); err != nil {
 		return nil, err
 	}

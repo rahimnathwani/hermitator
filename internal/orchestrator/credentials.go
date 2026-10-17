@@ -255,7 +255,6 @@ func (m *Manager) CodexLogin(ctx context.Context, userID string) (<-chan LoginEv
 	go func() {
 		defer close(ch)
 		defer release()
-		defer client.Remove(jobID)
 		lctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 		defer cancel()
 		var finished bool
@@ -294,7 +293,10 @@ func (m *Manager) CodexLogin(ctx context.Context, userID string) (<-chan LoginEv
 			}
 		})
 		if err != nil {
-			client.Kill(jobID)
+			// The browser left or the code expired; stop the login.
+			client.Cancel(jobID, 15*time.Second)
+		} else {
+			client.Remove(jobID)
 		}
 		if !finished {
 			msg := "the login did not finish"

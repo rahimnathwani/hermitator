@@ -108,16 +108,17 @@ h1 .state { font-size: .7rem; vertical-align: middle; }
 label { display: block; margin: .6rem 0; font-weight: 500; }
 label .muted { font-weight: 400; }
 input, select, textarea {
-  font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+  font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
   padding: .45rem .6rem; width: 100%; margin-top: .25rem;
 }
 input:focus, select:focus, textarea:focus { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); outline-offset: 0; border-color: var(--accent); }
 input[type="radio"], input[type="checkbox"] { width: auto; margin: 0 .4rem 0 0; }
-input.tiny { width: 5rem; }
+input.tiny, .inline-form > input.tiny { width: 5rem; flex: 0 0 5rem; }
 textarea { resize: vertical; min-height: 2.6rem; }
 fieldset { border: 0; padding: 0; margin: .6rem 0; }
 legend { font-weight: 500; margin-bottom: .2rem; }
-.choice label { font-weight: 400; margin: .3rem 0; display: flex; align-items: baseline; gap: .1rem; }
+.choice label { font-weight: 400; margin: .3rem 0; display: flex; align-items: baseline; gap: .35rem; }
+.choice input[type="radio"] { margin: 0; }
 .inline-form { display: flex; gap: .5rem; align-items: flex-end; flex-wrap: wrap; margin: .5rem 0; }
 .inline-form > input, .inline-form > select { width: auto; flex: 1 1 12rem; margin: 0; }
 .inline-form label { flex: 1 1 14rem; margin: 0; }
@@ -194,8 +195,11 @@ details.menu[open] > form { margin-top: .4rem; }
 
 /* Login */
 .login h1 { font-size: 1.8rem; margin-bottom: .25rem; }
-.login form { margin-top: 1.5rem; }
+.login form { margin-top: 1.5rem; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.25rem; }
 .login button { width: 100%; margin-top: .5rem; padding: .6rem; }
 
 /* Terminal */
 .terminal { height: calc(100vh - 12rem); min-height: 22rem; background: #0b0d0e; border-radius: var(--radius); padding: .5rem; }
+
+.new-agent, form.settings { max-width: 34rem; }
+.new-agent .muted { font-weight: 400; }

@@ -137,6 +137,21 @@ func (c Client) Stderr(id string, max int) string {
 	return string(data)
 }
 
+// Cancel kills a job, waits up to grace for it to exit, then removes its
+// files. Removing them straight after Kill would delete the kill request
+// before the guest saw it.
+func (c Client) Cancel(id string, grace time.Duration) {
+	c.Kill(id)
+	deadline := time.Now().Add(grace)
+	for time.Now().Before(deadline) {
+		if _, done, _ := c.Exit(id); done {
+			break
+		}
+		time.Sleep(c.poll())
+	}
+	c.Remove(id)
+}
+
 // Remove deletes everything the spool holds for a job.
 func (c Client) Remove(id string) {
 	for _, p := range []string{jobPath(c.Root, id), killPath(c.Root, id), outPath(c.Root, id), errPath(c.Root, id), exitPath(c.Root, id)} {
@@ -149,15 +164,15 @@ func (c Client) Run(ctx context.Context, job Job) ([]byte, Exit, error) {
 	if err := c.Submit(job); err != nil {
 		return nil, Exit{}, err
 	}
-	defer c.Remove(job.ID)
 	var out bytes.Buffer
 	exit, err := c.Follow(ctx, job.ID, func(line []byte) {
 		out.Write(line)
 		out.WriteByte('\n')
 	})
 	if err != nil {
-		c.Kill(job.ID)
+		c.Cancel(job.ID, 15*time.Second)
 		return nil, Exit{}, err
 	}
+	c.Remove(job.ID)
 	return out.Bytes(), exit, nil
 }

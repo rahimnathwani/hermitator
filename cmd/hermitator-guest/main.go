@@ -141,8 +141,10 @@ func send(args []string) int {
 		return 1
 	}
 	meta, _ := json.Marshal(outboxMeta{File: name, Caption: caption})
+	// The host acts on the sidecar, so it appears atomically and last.
 	tmp := filepath.Join(outbox, "."+name+".meta.json")
-	if err := os.WriteFile(tmp, meta, 0o644); err == nil {
+	err = os.WriteFile(tmp, meta, 0o644)
+	if err == nil {
 		err = os.Rename(tmp, filepath.Join(outbox, name+".meta.json"))
 	}
 	if err != nil {
