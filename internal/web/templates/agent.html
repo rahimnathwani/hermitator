@@ -1,0 +1,115 @@
+{{define "content"}}
+{{$d := .Data}}{{$a := $d.Agent}}
+<div class="page-head">
+  <h1>{{$a.Name}} <span data-agent-state>{{template "state" (stateLabel $a.State $a.Busy)}}</span></h1>
+  <div class="actions">
+    <form method="post" action="/agents/{{$a.ID}}/wake"><button>Wake</button></form>
+    <form method="post" action="/agents/{{$a.ID}}/sleep"><button>Sleep</button></form>
+    <form method="post" action="/agents/{{$a.ID}}/stop"><button>Stop turn</button></form>
+    <form method="post" action="/agents/{{$a.ID}}/new-session"><button>New conversation</button></form>
+    <a class="button" href="/agents/{{$a.ID}}/terminal">Terminal</a>
+  </div>
+</div>
+<p class="meta">{{harness $a.Harness}}{{if $a.PiProvider}} · {{$a.PiProvider}}{{end}}{{if $a.Model}} · {{$a.Model}}{{end}} · image {{$a.Image}} · {{$a.IP}} · sleeps after {{minutes $a.IdleTimeout}} min idle</p>
+
+<div class="columns">
+  <section class="card console">
+    <h2>Activity</h2>
+    <div class="log" data-mount="log" data-src="/agents/{{$a.ID}}/events" aria-live="polite">
+      <p class="muted empty">Waiting for activity. Messages from WhatsApp and from the box below show up here as the agent works.</p>
+    </div>
+    <form method="post" action="/agents/{{$a.ID}}/prompt" class="prompt" data-reset hx-swap="none">
+      <textarea name="text" rows="2" placeholder="Message the agent from here (replies stay on this page)" required></textarea>
+      <button class="primary">Send</button>
+    </form>
+  </section>
+
+  <div class="side">
+    <section class="card">
+      <h2>Link a chat</h2>
+      {{if $d.Accounts}}
+      <p>Send this in any WhatsApp chat on your linked account, such as <em>Message yourself</em> or a group you created for this agent:</p>
+      <p class="code"><code class="copy">/link {{$d.LinkCode}}</code></p>
+      <p class="muted">Valid for {{until $d.LinkExpires}}, once.</p>
+      <form method="post" action="/agents/{{$a.ID}}/link-code"><button class="small">New code</button></form>
+      {{else}}
+      <p><a href="/accounts">Link a WhatsApp account</a> first.</p>
+      {{end}}
+      {{with $a.Routes}}
+      <h3>Linked chats</h3>
+      <ul class="routes">
+        {{range .}}
+        <li>
+          <span><strong>{{if .ChatName}}{{.ChatName}}{{else}}{{.ChatJID}}{{end}}</strong> <span class="muted">via {{.Account}}</span></span>
+          <form method="post" action="/agents/{{$a.ID}}/routes/delete">
+            <input type="hidden" name="account" value="{{.AccountID}}"><input type="hidden" name="chat" value="{{.ChatJID}}">
+            <button class="small">Unlink</button>
+          </form>
+        </li>
+        {{end}}
+      </ul>
+      {{end}}
+    </section>
+
+    <section class="card">
+      <h2>Settings</h2>
+      <form method="post" action="/agents/{{$a.ID}}/settings" class="settings">
+        <label>Name <input name="name" value="{{$a.Name}}" required maxlength="40"></label>
+        <fieldset class="choice">
+          <legend>Harness</legend>
+          <label><input type="radio" name="harness" value="claude" {{if eq $a.Harness "claude"}}checked{{end}}> Claude Code</label>
+          <label><input type="radio" name="harness" value="pi" {{if eq $a.Harness "pi"}}checked{{end}}> pi</label>
+        </fieldset>
+        <label class="pi-only">Provider
+          <select name="provider">
+            {{range $d.Providers}}<option value="{{.ID}}" {{if eq .ID $a.PiProvider}}selected{{end}}>{{.Name}}</option>{{end}}
+          </select>
+        </label>
+        <label>Model <input name="model" value="{{$a.Model}}" placeholder="default"></label>
+        <label>Sleep after <span class="inline"><input type="number" name="idle_minutes" min="1" max="1440" value="{{minutes $a.IdleTimeout}}"> minutes idle</span></label>
+        <label>Memory limit
+          <select name="memory_mb">
+            {{range $d.Memory}}<option value="{{.}}" {{if eq . $a.MemoryMB}}selected{{end}}>{{.}} MB</option>{{end}}
+          </select>
+        </label>
+        <p class="muted">Switching harness starts a fresh conversation in the same workspace. A new memory limit applies from the next cold boot.</p>
+        <button>Save</button>
+      </form>
+    </section>
+
+    <details class="card danger">
+      <summary>Delete agent</summary>
+      <p>Deletes the sandbox and every file in it. This cannot be undone.</p>
+      <form method="post" action="/agents/{{$a.ID}}/delete">
+        <label>Type <strong>{{$a.Name}}</strong> to confirm <input name="confirm" autocomplete="off" required></label>
+        <button class="danger">Delete {{$a.Name}}</button>
+      </form>
+    </details>
+  </div>
+</div>
+
+<section class="card">
+  <h2>Recent turns</h2>
+  {{if $d.Turns}}
+  <table class="turns">
+    <thead><tr><th>When</th><th>Result</th><th>Message</th><th>Reply</th><th>Tools</th><th>Wake</th><th>Took</th><th>Cost</th></tr></thead>
+    <tbody>
+    {{range $d.Turns}}
+      <tr>
+        <td title="{{.StartedAt}}">{{ago .StartedAt}}</td>
+        <td><span class="status status-{{.Status}}">{{.Status}}</span></td>
+        <td class="text">{{clip 160 .Input}}</td>
+        <td class="text">{{clip 240 .Output}}</td>
+        <td>{{.Tools}}</td>
+        <td>{{.Wake}}{{if .WakeMS}} <span class="muted">{{ms .WakeMS}}</span>{{end}}</td>
+        <td>{{dur .Duration}}</td>
+        <td>{{money .CostUSD}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+  {{else}}
+  <p class="muted">No turns yet.</p>
+  {{end}}
+</section>
+{{end}}

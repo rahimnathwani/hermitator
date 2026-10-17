@@ -154,10 +154,11 @@ func (s *Store) CountAgents(ctx context.Context, userID string) (int, error) {
 	return n, err
 }
 
-// UpdateAgentSettings saves the user-editable fields of a.
+// UpdateAgentSettings saves the user-editable fields of a. The session is
+// left alone; see SetAgentSession.
 func (s *Store) UpdateAgentSettings(ctx context.Context, a *Agent) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE agents SET name = ?, harness = ?, model = ?, pi_provider = ?, idle_timeout_sec = ?, memory_mb = ?, session_id = ? WHERE id = ?`,
-		a.Name, a.Harness, a.Model, a.PiProvider, int(a.IdleTimeout/time.Second), a.MemoryMB, a.SessionID, a.ID)
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET name = ?, harness = ?, model = ?, pi_provider = ?, idle_timeout_sec = ?, memory_mb = ? WHERE id = ?`,
+		a.Name, a.Harness, a.Model, a.PiProvider, int(a.IdleTimeout/time.Second), a.MemoryMB, a.ID)
 	if isUnique(err) {
 		return ErrConflict
 	}

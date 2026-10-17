@@ -1,0 +1,13 @@
+{{define "content"}}
+<section class="login">
+  <h1><img src="/static/favicon.svg" alt="" width="40" height="40"> hermitator</h1>
+  <p class="muted">Coding agents that wake up when you message them.</p>
+  {{with .Data.Error}}<p class="error" role="alert">{{.}}</p>{{end}}
+  <form method="post" action="/login" hx-boost="false">
+    <input type="hidden" name="next" value="{{.Data.Next}}">
+    <label>Email <input type="email" name="email" value="{{.Data.Email}}" autocomplete="username" required autofocus></label>
+    <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
+    <button class="primary">Log in</button>
+  </form>
+</section>
+{{end}}

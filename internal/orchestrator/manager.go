@@ -354,3 +354,26 @@ func (nopMessenger) React(context.Context, string, string, string, string, strin
 	return nil
 }
 func (nopMessenger) Typing(context.Context, string, string, bool) error { return nil }
+
+// UpdateAgent saves an agent's settings. Changing the harness starts a
+// fresh conversation, because the two harnesses keep incompatible
+// transcripts. A new memory limit applies from the next cold boot.
+func (m *Manager) UpdateAgent(ctx context.Context, updated *store.Agent) error {
+	return m.actor(updated.ID).call(func(a *actor) error {
+		current, err := m.store.Agent(ctx, updated.ID)
+		if err != nil {
+			return err
+		}
+		switched := current.Harness != updated.Harness
+		if switched && a.turn != nil {
+			return ErrBusy
+		}
+		if err := m.store.UpdateAgentSettings(ctx, updated); err != nil {
+			return err
+		}
+		if switched {
+			return m.store.SetAgentSession(ctx, updated.ID, "")
+		}
+		return nil
+	})
+}

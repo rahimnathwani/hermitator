@@ -1,0 +1,52 @@
+{{define "content"}}
+{{$d := .Data}}
+<div class="page-head">
+  <h1>Agents</h1>
+</div>
+
+{{if $d.ShowGuide}}
+<section class="card guide">
+  <h2>Getting started</h2>
+  <ol class="steps">
+    <li class="{{if $d.HasAccount}}done{{end}}"><a href="/accounts">Link your WhatsApp</a> as a companion device, the way WhatsApp Web is linked.</li>
+    <li class="{{if $d.HasModel}}done{{end}}"><a href="/settings">Add model credentials</a>: a Claude token for Claude Code, or a ChatGPT login or API key for pi.</li>
+    <li class="{{if $d.HasAgent}}done{{end}}">Create an agent below. Each agent is its own sandboxed Linux machine.</li>
+    <li class="{{if $d.HasLink}}done{{end}}">Open the agent and send its <code>/link</code> code in any WhatsApp chat, such as <em>Message yourself</em>.</li>
+  </ol>
+</section>
+{{end}}
+
+{{with $d.Agents}}
+<section class="grid">
+  {{range .}}{{template "agent-card" .}}{{end}}
+</section>
+{{end}}
+
+<section class="card">
+  <h2>New agent</h2>
+  {{if $d.CanCreate}}
+  <form method="post" action="/agents" class="new-agent">
+    <label>Name <input name="name" required maxlength="40" placeholder="frontend" pattern="[\p{L}\p{N}][\p{L}\p{N} ._\-]{0,39}"></label>
+    <fieldset class="choice">
+      <legend>Harness</legend>
+      <label><input type="radio" name="harness" value="claude" checked> Claude Code <span class="muted">with your Claude subscription</span></label>
+      <label><input type="radio" name="harness" value="pi"> pi <span class="muted">with ChatGPT, DeepSeek or OpenRouter</span></label>
+    </fieldset>
+    <label class="pi-only">Provider
+      <select name="provider">
+        {{range $d.Providers}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+      </select>
+    </label>
+    <label>Model <span class="muted">optional</span> <input name="model" placeholder="default"></label>
+    {{if gt (len $d.Images) 1}}
+    <label>Image
+      <select name="image">{{range $d.Images}}<option>{{.}}</option>{{end}}</select>
+    </label>
+    {{end}}
+    <button class="primary">Create agent</button>
+  </form>
+  {{else}}
+  <p class="muted">You have reached your limit of {{$d.MaxAgents}} agents.</p>
+  {{end}}
+</section>
+{{end}}

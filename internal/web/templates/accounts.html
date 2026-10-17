@@ -1,0 +1,43 @@
+{{define "content"}}
+{{$d := .Data}}
+<div class="page-head">
+  <h1>WhatsApp</h1>
+  <form method="post" action="/accounts/pair"><button class="primary">Link an account</button></form>
+</div>
+<p class="muted">hermitator joins your WhatsApp as a linked device, like WhatsApp Web. It only acts on chats you link to an agent with <code>/link</code>.</p>
+
+{{if $d.Accounts}}
+<section class="grid">
+{{range $d.Accounts}}
+  <article class="card">
+    <header>
+      <strong>+{{.Phone}}</strong>
+      {{if .Online}}<span class="state state-awake">online</span>{{else if eq .Status "logged_out"}}<span class="state state-error">logged out</span>{{else}}<span class="state state-stopped">{{.Status}}</span>{{end}}
+    </header>
+    {{with .PushName}}<p class="meta">{{.}}</p>{{end}}
+    {{if eq .Status "logged_out"}}
+    <p>This device was removed from your phone. Remove it here and link the account again.</p>
+    {{end}}
+    <form method="post" action="/accounts/{{.ID}}/fallback" class="inline-form">
+      <label>Fallback agent
+        <select name="agent">
+          <option value="">None</option>
+          {{$fb := .FallbackAgentID}}
+          {{range $d.Agents}}<option value="{{.ID}}" {{if eq .ID $fb}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </label>
+      <button class="small">Save</button>
+    </form>
+    <p class="muted small">A fallback agent answers direct messages that other people send you in chats that are not linked. It never answers your own messages or speaks in groups.</p>
+    <form method="post" action="/accounts/{{.ID}}/delete">
+      <button class="small danger">Remove</button>
+    </form>
+  </article>
+{{end}}
+</section>
+{{else}}
+<section class="card empty-state">
+  <p>No accounts linked yet.</p>
+</section>
+{{end}}
+{{end}}

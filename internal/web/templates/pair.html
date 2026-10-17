@@ -1,0 +1,24 @@
+{{define "content"}}
+<div class="page-head"><h1>Link WhatsApp</h1></div>
+<div class="columns pair" data-mount="pair" data-src="/accounts/pair/{{.Data.ID}}/events">
+  <section class="card">
+    <h2>Scan the code</h2>
+    <ol>
+      <li>Open WhatsApp on your phone.</li>
+      <li>Go to <strong>Settings</strong>, then <strong>Linked devices</strong>, then <strong>Link a device</strong>.</li>
+      <li>Point your phone at this code.</li>
+    </ol>
+    <div class="qr" data-qr><p class="muted">Getting a code from WhatsApp…</p></div>
+  </section>
+  <section class="card">
+    <h2>Or use your phone number</h2>
+    <p>On a phone without a second screen, enter your number and type the code WhatsApp asks for under <strong>Link with phone number instead</strong>.</p>
+    <form method="post" action="/accounts/pair/{{.Data.ID}}/phone" class="inline-form" data-pair-phone hx-boost="false">
+      <input name="phone" type="tel" placeholder="+44 7700 900123" required>
+      <button>Get code</button>
+    </form>
+    <p class="code" data-code hidden></p>
+  </section>
+</div>
+<p class="status-line" data-status role="status"></p>
+{{end}}

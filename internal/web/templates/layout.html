@@ -1,0 +1,43 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="htmx-config" content='{"includeIndicatorStyles": false, "refreshOnHistoryMiss": true}'>
+<title>{{.Title}} · hermitator</title>
+<link rel="icon" href="/static/favicon.svg?v={{.Version}}" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css?v={{.Version}}">
+<script src="/static/vendor/htmx.min.js?v={{.Version}}" defer></script>
+<script src="/static/app.js?v={{.Version}}" defer></script>
+</head>
+<body hx-boost="true">
+{{- with .V}}
+{{- if .Impersonating}}
+<div class="banner">
+  <span>Acting as <strong>{{.User.Email}}</strong>. Everything you do here is logged under your name.</span>
+  <form method="post" action="/admin/stop-impersonating"><button class="small">Stop</button></form>
+</div>
+{{- end}}
+<header class="top">
+  <a class="brand" href="/"><img src="/static/favicon.svg?v={{$.Version}}" alt="" width="22" height="22">hermitator</a>
+  <nav>
+  {{- if .User.IsAdmin}}
+    <a href="/admin/users" {{if eq $.Nav "users"}}aria-current="page"{{end}}>Users</a>
+    <a href="/admin/audit" {{if eq $.Nav "audit"}}aria-current="page"{{end}}>Audit log</a>
+  {{- else}}
+    <a href="/" {{if eq $.Nav "agents"}}aria-current="page"{{end}}>Agents</a>
+    <a href="/accounts" {{if eq $.Nav "accounts"}}aria-current="page"{{end}}>WhatsApp</a>
+    <a href="/settings" {{if eq $.Nav "settings"}}aria-current="page"{{end}}>Settings</a>
+  {{- end}}
+  </nav>
+  <span class="who">{{.Actor.Email}}</span>
+  <form method="post" action="/logout"><button class="link">Log out</button></form>
+</header>
+{{- end}}
+<main{{if not .V}} class="narrow"{{end}}>
+{{- with .Flash}}<p class="flash" role="status">{{.}}</p>{{end}}
+{{template "content" .}}
+</main>
+</body>
+</html>
+{{end}}

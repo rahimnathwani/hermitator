@@ -1,0 +1,21 @@
+{{define "content"}}
+<div class="page-head"><h1>Audit log</h1></div>
+<section class="card">
+  <table>
+    <thead><tr><th>When</th><th>Who</th><th>Acting as</th><th>Action</th><th>Detail</th></tr></thead>
+    <tbody>
+    {{range .Data.Entries}}
+    <tr>
+      <td title="{{.CreatedAt}}">{{ago .CreatedAt}}</td>
+      <td>{{.Actor}}</td>
+      <td>{{if ne .ActorID .EffectiveID}}<strong>{{.Effective}}</strong>{{end}}</td>
+      <td><code>{{.Action}}</code></td>
+      <td class="text">{{.Detail}}</td>
+    </tr>
+    {{else}}
+    <tr><td colspan="5" class="muted">Nothing yet.</td></tr>
+    {{end}}
+    </tbody>
+  </table>
+</section>
+{{end}}

@@ -164,8 +164,11 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 			if a.turn != nil {
 				return ErrBusy
 			}
-			ag.Harness, ag.SessionID = target, ""
-			return m.store.UpdateAgentSettings(ctx, ag)
+			ag.Harness = target
+			if err := m.store.UpdateAgentSettings(ctx, ag); err != nil {
+				return err
+			}
+			return m.store.SetAgentSession(ctx, ag.ID, "")
 		})
 		if err != nil {
 			reply("Could not switch: " + err.Error())

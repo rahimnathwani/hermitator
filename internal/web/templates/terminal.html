@@ -1,0 +1,10 @@
+{{define "content"}}
+{{$a := .Data.Agent}}
+<div class="page-head">
+  <h1><a href="/agents/{{$a.ID}}">{{$a.Name}}</a> · terminal</h1>
+  <p class="muted">A login shell inside the sandbox. The agent stays awake while this is open. Processes you start here end when the terminal closes or the agent sleeps.</p>
+</div>
+<link rel="stylesheet" href="/static/vendor/xterm.css?v={{.Version}}">
+<div class="terminal" data-mount="terminal" data-src="/agents/{{$a.ID}}/terminal/ws"
+     data-xterm="/static/vendor/xterm.js?v={{.Version}}" data-fit="/static/vendor/addon-fit.js?v={{.Version}}"></div>
+{{end}}
