@@ -1,0 +1,38 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+      - name: build
+        run: |
+          set -eu
+          tag=${GITHUB_REF_NAME}
+          mkdir dist
+          for arch in amd64 arm64; do
+            dir=hermitator-$tag-linux-$arch
+            mkdir -p "dist/$dir/bin"
+            for cmd in hermitator hermitator-guest; do
+              GOOS=linux GOARCH=$arch CGO_ENABLED=0 go build -trimpath \
+                -ldflags "-s -w -X main.version=$tag" -o "dist/$dir/bin/$cmd" "./cmd/$cmd"
+            done
+            cp -a deploy image README.md LICENSE "dist/$dir/"
+            tar -C dist -czf "dist/$dir.tar.gz" "$dir"
+          done
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.tar.gz dist/SHA256SUMS --title "$GITHUB_REF_NAME" --generate-notes

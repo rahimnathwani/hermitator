@@ -13,7 +13,7 @@ build: ## build both binaries for this machine into bin/
 test: ## run the test suite with the race detector
 	go test -race ./...
 
-lint: ## gofmt, go vet and a whitespace check
+lint: ## gofmt and go vet
 	@test -z "$$(gofmt -l .)" || { gofmt -l .; echo "run gofmt -w ."; exit 1; }
 	go vet ./...
 

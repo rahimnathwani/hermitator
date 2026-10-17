@@ -134,6 +134,11 @@ first build takes a few minutes) and starts the service. Run it again to
 upgrade. Running sandboxes keep running across upgrades. To also build
 whisper.cpp for voice notes, prefix the command with `WITH_WHISPER=1`.
 
+Or, without Go, on the server itself: download a release from
+[GitHub](https://github.com/rahimnathwani/hermitator/releases), unpack it and
+run `sudo HERMITATOR_DOMAIN=hermitator.example.com deploy/install.sh` from
+inside it.
+
 Then, on the server:
 
 ```sh
