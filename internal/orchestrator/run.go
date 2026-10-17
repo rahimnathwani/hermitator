@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -316,8 +317,7 @@ func (m *Manager) saveMedia(ctx context.Context, spec *sandbox.Spec, msg Message
 		ts = time.Now()
 	}
 	name := media.FileName(md.FileName, md.MIME, ts, seq)
-	host := filepath.Join(spec.InboxDir(), name)
-	if err := os.WriteFile(host, data, 0o644); err != nil {
+	if err := writeShared(spec, path.Join(turn.InboxDir, name), data); err != nil {
 		return fmt.Sprintf("[The user sent a %s that could not be saved: %v]", md.Kind, err), nil
 	}
 	guest := path.Join(m.rt.GuestShared(spec), turn.InboxDir, name)
@@ -327,7 +327,7 @@ func (m *Manager) saveMedia(ctx context.Context, spec *sandbox.Spec, msg Message
 	case md.Kind == "image" && media.InlineImage(md.MIME):
 		return "[Image attached, also saved at " + guest + "]", &turn.Image{Path: path.Join(turn.InboxDir, name), MIME: md.MIME}
 	case md.Kind == "audio" && m.stt != nil && m.stt.Available():
-		text, err := m.stt.Transcribe(ctx, host)
+		text, err := m.transcribe(ctx, data, name)
 		if err != nil {
 			m.log.Warn("transcription failed", "err", err)
 			return fmt.Sprintf("[Voice note saved at %s (%s); transcription failed]", guest, size), nil
@@ -346,39 +346,98 @@ type outboxMeta struct {
 	Caption string `json:"caption"`
 }
 
+// transcribe works on a private copy: the copy in the inbox belongs to the
+// agent, which could swap it for something else.
+func (m *Manager) transcribe(ctx context.Context, data []byte, name string) (string, error) {
+	f, err := os.CreateTemp("", "hermitator-audio-*"+filepath.Ext(name))
+	if err != nil {
+		return "", err
+	}
+	defer os.Remove(f.Name())
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return "", err
+	}
+	return m.stt.Transcribe(ctx, f.Name())
+}
+
+// maxOutboxFile is the largest file an agent can send.
+const maxOutboxFile = 100 << 20
+
+func writeShared(spec *sandbox.Spec, name string, data []byte) error {
+	root, err := spec.Shared()
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return root.WriteFile(name, data, 0o644)
+}
+
 // deliverOutbox sends every file the agent has queued.
 func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat chatRef) {
-	dir := spec.OutboxDir()
-	entries, err := os.ReadDir(dir)
+	root, err := spec.Shared()
 	if err != nil {
 		return
 	}
-	sent := filepath.Join(dir, "sent")
-	os.MkdirAll(sent, 0o755)
-	for _, e := range entries {
-		name := e.Name()
+	defer root.Close()
+	dir, err := root.Open(turn.OutboxDir)
+	if err != nil {
+		return
+	}
+	names, _ := dir.Readdirnames(-1)
+	dir.Close()
+	root.MkdirAll(turn.OutboxDir+"/sent", 0o755)
+	in := func(n string) string { return turn.OutboxDir + "/" + n }
+	sent := func(n string) string { return turn.OutboxDir + "/sent/" + n }
+	for _, name := range names {
 		if strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".meta.json") {
 			continue
 		}
-		metaPath := filepath.Join(dir, name)
-		raw, err := os.ReadFile(metaPath)
 		var meta outboxMeta
+		raw, err := root.ReadFile(in(name))
 		if err == nil {
 			err = json.Unmarshal(raw, &meta)
 		}
-		file := filepath.Join(dir, filepath.Base(meta.File))
-		if err != nil || meta.File == "" {
-			os.Rename(metaPath, filepath.Join(sent, name))
+		file := filepath.Base(meta.File)
+		if err != nil || meta.File == "" || file == "." || file == "/" {
+			root.Rename(in(name), sent(name))
 			continue
 		}
-		if err := chat.sendFile(file, meta.Caption); err != nil {
-			m.log.Warn("send outbox file", "agent", spec.ID, "file", meta.File, "err", err)
-			chat.send(fmt.Sprintf("⚠️ Could not send %s: %v", displayName(meta.File), err))
+		data, err := readRegular(root, in(file))
+		if err == nil {
+			err = chat.sendFile(displayName(file), data, meta.Caption)
 		}
-		os.Rename(file, filepath.Join(sent, filepath.Base(meta.File)))
-		os.Rename(metaPath, filepath.Join(sent, name))
-		m.hub.publish(spec.ID, UIEvent{Kind: "event", Event: &turn.Event{Type: "sent", Text: meta.File}})
+		if err != nil {
+			m.log.Warn("send outbox file", "agent", spec.ID, "file", file, "err", err)
+			chat.send(fmt.Sprintf("⚠️ Could not send %s: %v", displayName(file), err))
+		}
+		root.Rename(in(file), sent(file))
+		root.Rename(in(name), sent(name))
+		m.hub.publish(spec.ID, UIEvent{Kind: "event", Event: &turn.Event{Type: "sent", Text: file}})
 	}
+}
+
+// readRegular reads a regular file of at most maxOutboxFile bytes.
+func readRegular(root *os.Root, name string) ([]byte, error) {
+	f, err := root.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, fmt.Errorf("not a regular file")
+	}
+	if fi.Size() > maxOutboxFile {
+		return nil, fmt.Errorf("it is %d MB; the limit is %d MB", fi.Size()>>20, maxOutboxFile>>20)
+	}
+	return io.ReadAll(io.LimitReader(f, maxOutboxFile))
 }
 
 // chatRef is where a turn's output goes. Turns started from the web UI
@@ -406,11 +465,11 @@ func (c chatRef) send(text string) {
 // sendAgent delivers the agent's Markdown, converted for WhatsApp.
 func (c chatRef) sendAgent(text string) { c.send(wamd.Format(text)) }
 
-func (c chatRef) sendFile(path, caption string) error {
+func (c chatRef) sendFile(name string, data []byte, caption string) error {
 	if !c.ok() {
 		return nil
 	}
-	return c.m.msgr.SendFile(c.m.ctx, c.msg.AccountID, c.msg.Chat, path, caption)
+	return c.m.msgr.SendFile(c.m.ctx, c.msg.AccountID, c.msg.Chat, name, data, caption)
 }
 
 func (c chatRef) react(emoji string) {
@@ -454,7 +513,7 @@ func (c chatRef) typing(ctx context.Context) func() {
 
 // displayName strips the timestamp whatsapp-send prefixes to file names.
 func displayName(file string) string {
-	if _, rest, ok := strings.Cut(file, "-"); ok && rest != "" {
+	if stamp, rest, ok := strings.Cut(file, "-"); ok && rest != "" && strings.Trim(stamp, "0123456789") == "" {
 		return rest
 	}
 	return file

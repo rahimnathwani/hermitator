@@ -3,6 +3,7 @@ package spool
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -118,5 +119,30 @@ func TestBackgroundChildDoesNotHoldUpTheExit(t *testing.T) {
 	}
 	if took := time.Since(start); took > 5*time.Second {
 		t.Fatalf("exit took %s; a background child held it up", took)
+	}
+}
+
+func TestClientRefusesSymlinkEscapes(t *testing.T) {
+	root, outside := t.TempDir(), t.TempDir()
+	// What a hostile agent could do from inside the sandbox.
+	if err := os.Symlink(outside, filepath.Join(root, "jobs")); err != nil {
+		t.Fatal(err)
+	}
+	os.MkdirAll(filepath.Join(root, "out"), 0o700)
+	os.WriteFile(filepath.Join(outside, "secret"), []byte("host file"), 0o600)
+	c := Client{Root: root}
+	if err := c.Submit(Job{ID: "j", Argv: []string{"true"}, Env: []string{"TOKEN=secret"}}); err == nil {
+		t.Fatal("Submit followed a symlink out of the spool")
+	}
+	entries, _ := os.ReadDir(outside)
+	if len(entries) != 1 {
+		t.Fatalf("something was written outside the spool: %v", entries)
+	}
+
+	os.Remove(filepath.Join(root, "jobs"))
+	os.RemoveAll(filepath.Join(root, "out"))
+	os.Symlink(filepath.Join(outside, "secret"), filepath.Join(root, "out"))
+	if got := c.Stderr("j", 100); got != "" {
+		t.Fatalf("Stderr read through a symlink: %q", got)
 	}
 }

@@ -78,9 +78,8 @@ func (r *recorder) SendText(_ context.Context, _, chat, text string) error {
 	r.add(sent{"text", chat, text})
 	return nil
 }
-func (r *recorder) SendFile(_ context.Context, _, chat, path, caption string) error {
-	b, _ := os.ReadFile(path)
-	r.add(sent{"file", chat, caption + "|" + string(b)})
+func (r *recorder) SendFile(_ context.Context, _, chat, name string, data []byte, caption string) error {
+	r.add(sent{"file", chat, caption + "|" + string(data)})
 	return nil
 }
 func (r *recorder) React(_ context.Context, _, chat, _, _, emoji string) error {
@@ -314,5 +313,49 @@ func TestRoutingRules(t *testing.T) {
 	}
 	if _, err := e.st.Route(ctx, e.acct.ID, "friend@s.whatsapp.net"); err == nil {
 		t.Fatal("someone other than the owner linked a chat")
+	}
+}
+
+func TestOutboxDoesNotFollowSymlinksOutOfTheSandbox(t *testing.T) {
+	e := setup(t)
+	spec, err := e.m.Spec(e.agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outbox := filepath.Join(spec.SharedDir(), "outbox")
+	os.MkdirAll(outbox, 0o755)
+	secret := filepath.Join(t.TempDir(), "host-secret")
+	os.WriteFile(secret, []byte("do not send"), 0o600)
+	// What a hostile agent could leave in its outbox.
+	os.Symlink(secret, filepath.Join(outbox, "1-loot.txt"))
+	os.WriteFile(filepath.Join(outbox, "1-loot.txt.meta.json"), []byte(`{"file":"1-loot.txt"}`), 0o644)
+
+	chat := chatRef{m: e.m, msg: e.msg("self@s.whatsapp.net", "", true)}
+	e.m.deliverOutbox(context.Background(), spec, chat)
+
+	e.rec.mu.Lock()
+	defer e.rec.mu.Unlock()
+	for _, s := range e.rec.log {
+		if s.kind == "file" || strings.Contains(s.body, "do not send") {
+			t.Fatalf("sent a host file through a symlink: %+v", s)
+		}
+	}
+}
+
+func TestInboxDoesNotFollowSymlinksOutOfTheSandbox(t *testing.T) {
+	e := setup(t)
+	spec, _ := e.m.Spec(e.agent)
+	os.MkdirAll(spec.SharedDir(), 0o755)
+	target := t.TempDir()
+	os.Symlink(target, filepath.Join(spec.SharedDir(), "inbox"))
+	msg := e.msg("self@s.whatsapp.net", "", true)
+	msg.Media = &Media{Kind: "document", MIME: "text/plain", FileName: "payload.txt",
+		Fetch: func(context.Context) ([]byte, error) { return []byte("* * * * * root sh -c evil"), nil }}
+	note, _ := e.m.saveMedia(context.Background(), spec, msg, 0)
+	if !strings.Contains(note, "could not be saved") {
+		t.Fatalf("note = %q", note)
+	}
+	if entries, _ := os.ReadDir(target); len(entries) != 0 {
+		t.Fatalf("attachment was written outside the sandbox: %v", entries)
 	}
 }

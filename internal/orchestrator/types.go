@@ -44,7 +44,7 @@ type Media struct {
 // Messenger sends things back to a chat.
 type Messenger interface {
 	SendText(ctx context.Context, accountID, chat, text string) error
-	SendFile(ctx context.Context, accountID, chat, path, caption string) error
+	SendFile(ctx context.Context, accountID, chat, name string, data []byte, caption string) error
 	React(ctx context.Context, accountID, chat, sender, messageID, emoji string) error
 	Typing(ctx context.Context, accountID, chat string, typing bool) error
 }

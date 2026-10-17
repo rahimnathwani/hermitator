@@ -8,10 +8,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 )
 
 // Client submits jobs to a spool from the host side.
+//
+// The spool directory is writable from inside the sandbox, so its
+// contents are untrusted: an agent could swap jobs/ or out/ for a symlink
+// pointing anywhere on the host. Every operation therefore goes through
+// an os.Root, which refuses to resolve a path that leaves the spool.
 type Client struct {
 	Root string
 	// Poll is how often output files are checked. The default is 50ms.
@@ -25,15 +31,65 @@ func (c Client) poll() time.Duration {
 	return c.Poll
 }
 
+func (c Client) open() (*os.Root, error) {
+	if err := os.MkdirAll(c.Root, 0o700); err != nil {
+		return nil, err
+	}
+	root, err := os.OpenRoot(c.Root)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range []string{"jobs", "out"} {
+		if err := root.MkdirAll(d, 0o700); err != nil {
+			root.Close()
+			return nil, err
+		}
+	}
+	return root, nil
+}
+
+// Prepare creates the spool layout.
+func (c Client) Prepare() error {
+	root, err := c.open()
+	if err != nil {
+		return err
+	}
+	return root.Close()
+}
+
+// with runs fn with the spool's root.
+func (c Client) with(fn func(*os.Root) error) error {
+	root, err := c.open()
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return fn(root)
+}
+
+func rel(dir, id, ext string) string { return dir + "/" + id + ext }
+
+func writeAtomicIn(root *os.Root, name string, data []byte) error {
+	dir, base, _ := strings.Cut(name, "/")
+	tmp := dir + "/." + base + ".tmp"
+	if err := root.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return root.Rename(tmp, name)
+}
+
 // Submit queues a job.
 func (c Client) Submit(job Job) error {
 	if !validID(job.ID) {
 		return fmt.Errorf("invalid job id %q", job.ID)
 	}
-	if err := Init(c.Root); err != nil {
+	data, err := json.Marshal(job)
+	if err != nil {
 		return err
 	}
-	return writeJSON(jobPath(c.Root, job.ID), job)
+	return c.with(func(root *os.Root) error {
+		return writeAtomicIn(root, rel("jobs", job.ID, ".json"), data)
+	})
 }
 
 // Kill asks the guest to terminate a job and everything it started.
@@ -41,28 +97,41 @@ func (c Client) Kill(id string) error {
 	if !validID(id) {
 		return fmt.Errorf("invalid job id %q", id)
 	}
-	return writeAtomic(killPath(c.Root, id), nil, 0o600)
+	return c.with(func(root *os.Root) error {
+		return writeAtomicIn(root, rel("jobs", id, ".kill"), nil)
+	})
 }
 
 // Exit returns a job's exit record if it has finished.
 func (c Client) Exit(id string) (Exit, bool, error) {
-	data, err := os.ReadFile(exitPath(c.Root, id))
-	if errors.Is(err, os.ErrNotExist) {
-		return Exit{}, false, nil
-	}
-	if err != nil {
-		return Exit{}, false, err
-	}
 	var e Exit
-	if err := json.Unmarshal(data, &e); err != nil {
-		return Exit{}, false, err
-	}
-	return e, true, nil
+	var done bool
+	err := c.with(func(root *os.Root) error {
+		data, err := root.ReadFile(rel("out", id, ".exit"))
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		done = true
+		return json.Unmarshal(data, &e)
+	})
+	return e, done, err
 }
 
 // Follow calls fn with each line the job writes to stdout, without the
 // trailing newline, until the job exits or ctx is done.
 func (c Client) Follow(ctx context.Context, id string, fn func(line []byte)) (Exit, error) {
+	if !validID(id) {
+		return Exit{}, fmt.Errorf("invalid job id %q", id)
+	}
+	root, err := c.open()
+	if err != nil {
+		return Exit{}, err
+	}
+	defer root.Close()
+
 	var f *os.File
 	defer func() {
 		if f != nil {
@@ -74,7 +143,7 @@ func (c Client) Follow(ctx context.Context, id string, fn func(line []byte)) (Ex
 	drain := func() error {
 		if f == nil {
 			var err error
-			f, err = os.Open(outPath(c.Root, id))
+			f, err = root.Open(rel("out", id, ".out"))
 			if errors.Is(err, os.ErrNotExist) {
 				return nil
 			}
@@ -106,7 +175,7 @@ func (c Client) Follow(ctx context.Context, id string, fn func(line []byte)) (Ex
 	defer t.Stop()
 	for {
 		// Check for the exit record before draining: the guest writes it
-		// only after the process (and so all its output) is gone.
+		// only after the job's output is complete.
 		exit, done, err := c.Exit(id)
 		if err != nil {
 			return Exit{}, err
@@ -130,7 +199,11 @@ func (c Client) Follow(ctx context.Context, id string, fn func(line []byte)) (Ex
 
 // Stderr returns up to the last max bytes a job wrote to stderr.
 func (c Client) Stderr(id string, max int) string {
-	data, _ := os.ReadFile(errPath(c.Root, id))
+	var data []byte
+	c.with(func(root *os.Root) error {
+		data, _ = root.ReadFile(rel("out", id, ".err"))
+		return nil
+	})
 	if len(data) > max {
 		data = data[len(data)-max:]
 	}
@@ -154,8 +227,36 @@ func (c Client) Cancel(id string, grace time.Duration) {
 
 // Remove deletes everything the spool holds for a job.
 func (c Client) Remove(id string) {
-	for _, p := range []string{jobPath(c.Root, id), killPath(c.Root, id), outPath(c.Root, id), errPath(c.Root, id), exitPath(c.Root, id)} {
-		os.Remove(p)
+	if !validID(id) {
+		return
+	}
+	c.with(func(root *os.Root) error {
+		for _, name := range []string{rel("jobs", id, ".json"), rel("jobs", id, ".kill"), rel("out", id, ".out"), rel("out", id, ".err"), rel("out", id, ".exit")} {
+			root.Remove(name)
+		}
+		return nil
+	})
+}
+
+// Sweep removes every finished job, for cleaning up after a restart.
+func (c Client) Sweep() {
+	var done []string
+	c.with(func(root *os.Root) error {
+		dir, err := root.Open("out")
+		if err != nil {
+			return err
+		}
+		defer dir.Close()
+		names, _ := dir.Readdirnames(-1)
+		for _, n := range names {
+			if id, ok := strings.CutSuffix(n, ".exit"); ok && validID(id) {
+				done = append(done, id)
+			}
+		}
+		return nil
+	})
+	for _, id := range done {
+		c.Remove(id)
 	}
 }
 

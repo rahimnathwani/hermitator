@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -189,16 +188,11 @@ func (g *Gateway) SendText(ctx context.Context, accountID, chat, text string) er
 
 // SendFile implements orchestrator.Messenger. Photos go as images and
 // everything else as a document, which WhatsApp delivers unrecompressed.
-func (g *Gateway) SendFile(ctx context.Context, accountID, chat, path, caption string) error {
+func (g *Gateway) SendFile(ctx context.Context, accountID, chat, name string, data []byte, caption string) error {
 	cli, jid, err := g.target(accountID, chat)
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-	name := displayName(filepath.Base(path))
 	mimeType := mime.TypeByExtension(strings.ToLower(filepath.Ext(name)))
 	if mimeType == "" {
 		mimeType = http.DetectContentType(data)
@@ -283,14 +277,6 @@ func (g *Gateway) target(accountID, chat string) (*whatsmeow.Client, types.JID, 
 		return nil, types.JID{}, err
 	}
 	return cli, jid, nil
-}
-
-// displayName strips the timestamp whatsapp-send puts in front of names.
-func displayName(name string) string {
-	if stamp, rest, ok := strings.Cut(name, "-"); ok && rest != "" && len(stamp) >= 16 && strings.Trim(stamp, "0123456789") == "" {
-		return rest
-	}
-	return name
 }
 
 var _ orchestrator.Messenger = (*Gateway)(nil)

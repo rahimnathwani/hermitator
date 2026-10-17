@@ -8,7 +8,6 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -117,13 +116,7 @@ func (m *Manager) Start(ctx context.Context) error {
 
 // cleanSpool removes finished jobs a previous process never collected.
 func cleanSpool(spec *sandbox.Spec) {
-	client := spec.Spool()
-	entries, _ := os.ReadDir(filepath.Join(spec.SpoolDir(), "out"))
-	for _, e := range entries {
-		if id, ok := strings.CutSuffix(e.Name(), ".exit"); ok {
-			client.Remove(id)
-		}
-	}
+	spec.Spool().Sweep()
 }
 
 func (m *Manager) reapLoop(ctx context.Context) {
@@ -348,8 +341,10 @@ func (m *Manager) Hold(ctx context.Context, agentID string) (release func(), err
 
 type nopMessenger struct{}
 
-func (nopMessenger) SendText(context.Context, string, string, string) error         { return nil }
-func (nopMessenger) SendFile(context.Context, string, string, string, string) error { return nil }
+func (nopMessenger) SendText(context.Context, string, string, string) error { return nil }
+func (nopMessenger) SendFile(context.Context, string, string, string, []byte, string) error {
+	return nil
+}
 func (nopMessenger) React(context.Context, string, string, string, string, string) error {
 	return nil
 }

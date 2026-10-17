@@ -108,20 +108,36 @@ func (s *Spec) SpoolDir() string { return filepath.Join(s.Dir, "spool") }
 // Spool returns a client for submitting jobs to the sandbox.
 func (s *Spec) Spool() spool.Client { return spool.Client{Root: s.SpoolDir()} }
 
-// InboxDir is where incoming media is written for the agent.
-func (s *Spec) InboxDir() string { return filepath.Join(s.SharedDir(), turn.InboxDir) }
-
-// OutboxDir is where the agent leaves files to be sent.
-func (s *Spec) OutboxDir() string { return filepath.Join(s.SharedDir(), turn.OutboxDir) }
+// Shared opens the shared directory for the host to use.
+//
+// The agent can write anything under it, including symlinks that point
+// at host paths, so the host only ever touches it through an os.Root,
+// which refuses to resolve anything outside.
+func (s *Spec) Shared() (*os.Root, error) {
+	if err := os.MkdirAll(s.SharedDir(), 0o755); err != nil {
+		return nil, err
+	}
+	return os.OpenRoot(s.SharedDir())
+}
 
 // prepare creates the host-side directories a sandbox needs.
 func (s *Spec) prepare() error {
-	for _, d := range []string{s.upper(), s.work(), s.merged(), s.InboxDir(), s.OutboxDir(), filepath.Join(s.OutboxDir(), "sent")} {
+	for _, d := range []string{s.upper(), s.work(), s.merged()} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			return err
 		}
 	}
-	return spool.Init(s.SpoolDir())
+	shared, err := s.Shared()
+	if err != nil {
+		return err
+	}
+	defer shared.Close()
+	for _, d := range []string{turn.InboxDir, turn.OutboxDir, turn.OutboxDir + "/sent"} {
+		if err := shared.MkdirAll(d, 0o755); err != nil {
+			return err
+		}
+	}
+	return s.Spool().Prepare()
 }
 
 func (s *Spec) hasCheckpoint() bool {
