@@ -1,0 +1,10 @@
+#!/bin/sh
+# Chromium's own sandbox needs user namespaces and seccomp features that
+# gVisor does not provide, and the gVisor sandbox already isolates it.
+set -e
+for bin in /opt/ms-playwright/chromium-*/chrome-linux*/chrome; do
+  [ -x "$bin" ] && exec "$bin" --no-sandbox --disable-setuid-sandbox \
+    --disable-dev-shm-usage --disable-gpu "$@"
+done
+echo "chromium: no Playwright Chromium found under /opt/ms-playwright" >&2
+exit 127
