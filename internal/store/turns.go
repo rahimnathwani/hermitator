@@ -58,9 +58,11 @@ func scanTurn(row interface{ Scan(...any) error }) (*Turn, error) {
 	return &t, nil
 }
 
-// CreateTurn inserts a running turn.
+// CreateTurn inserts a running turn, assigning an ID unless one is set.
 func (s *Store) CreateTurn(ctx context.Context, t *Turn) error {
-	t.ID = ids.New()
+	if t.ID == "" {
+		t.ID = ids.New()
+	}
 	t.StartedAt = time.Now()
 	t.Status = TurnRunning
 	_, err := s.db.ExecContext(ctx, `INSERT INTO turns (`+turnColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

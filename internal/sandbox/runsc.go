@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/rahimnathwani/hermitator/internal/turn"
 )
 
 // Runsc runs sandboxes with gVisor.
@@ -366,6 +368,12 @@ func resolve(bin string) string {
 	}
 	return bin
 }
+
+// GuestShared implements Runtime.
+func (r *Runsc) GuestShared(s *Spec) string { return turn.SharedDir }
+
+// GuestTools implements Runtime.
+func (r *Runsc) GuestTools(s *Spec) string { return turn.ToolsDir }
 
 var _ Runtime = (*Runsc)(nil)
 

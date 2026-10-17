@@ -151,4 +151,10 @@ func (l *Local) Shell(ctx context.Context, s *Spec, env []string) (*exec.Cmd, er
 	return cmd, nil
 }
 
+// GuestShared implements Runtime.
+func (l *Local) GuestShared(s *Spec) string { return s.SharedDir() }
+
+// GuestTools implements Runtime.
+func (l *Local) GuestTools(s *Spec) string { return s.Tools }
+
 var _ Runtime = (*Local)(nil)

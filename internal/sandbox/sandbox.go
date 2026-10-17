@@ -86,6 +86,10 @@ type Runtime interface {
 	// Shell returns a command that runs an interactive login shell inside
 	// a running sandbox. The caller attaches it to a pseudo-terminal.
 	Shell(ctx context.Context, s *Spec, env []string) (*exec.Cmd, error)
+	// GuestShared and GuestTools are where the agent sees the shared
+	// directory and the guest tools.
+	GuestShared(s *Spec) string
+	GuestTools(s *Spec) string
 }
 
 // Layout of Spec.Dir.
