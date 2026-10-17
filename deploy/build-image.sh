@@ -39,6 +39,8 @@ printf 'nameserver 1.1.1.1\nnameserver 9.9.9.9\noptions edns0\n' >"$tmp/rootfs/e
 printf '127.0.0.1\tlocalhost\n::1\tlocalhost ip6-localhost ip6-loopback\n' >"$tmp/rootfs/etc/hosts"
 echo agent >"$tmp/rootfs/etc/hostname"
 
+# Exported filesystems lose the image's ENV; hermitator reads it from here.
+podman image inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$tag" | sed '/^$/d' >"$tmp/ENV"
 printf '%s\n' "$tag" >"$tmp/IMAGE"
 du -sh "$tmp/rootfs" | cut -f1 >"$tmp/SIZE"
 mv "$tmp" "$dest"
