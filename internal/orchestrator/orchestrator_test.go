@@ -41,7 +41,9 @@ func TestMain(m *testing.M) {
 
 // fakeClaude stands in for Claude Code. It echoes the prompt, and when
 // asked to, sends a file with whatsapp-send the way an agent would.
-const fakeClaude = `#!/bin/sh
+// It runs under bash, not sh: the steering case needs read -t, which
+// dash (Linux's sh) lacks.
+const fakeClaude = `#!/usr/bin/env bash
 read -r line
 printf '%s\n' "$@" > "$HOME/last-args"
 sid=""
