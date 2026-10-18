@@ -136,6 +136,12 @@ new master key, configures Caddy, builds the agent image (about 2.5 GB; the
 first build takes a few minutes) and starts the service. Run it again to
 upgrade. Running sandboxes keep running across upgrades.
 
+hermitator's Caddy site is its own file, `/etc/caddy/conf.d/hermitator.caddy`,
+which the main Caddyfile imports along with anything else in that directory.
+To serve another app from the same server, give it a file of its own there,
+such as `/etc/caddy/conf.d/myapp.caddy`, and `systemctl reload caddy`;
+reinstalling hermitator leaves it alone.
+
 The image pins exact versions of Claude Code, pi and Playwright, and
 their auto-updaters are off, so a new release changes nothing until you
 choose it. To move to the newest, run `make image-bump` (it rewrites the

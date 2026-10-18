@@ -76,18 +76,40 @@ CONF
 fi
 
 if [ -n "$DOMAIN" ]; then
+	# hermitator owns one file in conf.d and nothing else, so other sites
+	# on this server can live beside it in files of their own.
 	say "Caddy for $DOMAIN"
-	mkdir -p /etc/caddy
-	if ! grep -q "^$DOMAIN " /etc/caddy/Caddyfile 2>/dev/null; then
-		cat >/etc/caddy/Caddyfile <<CADDY
-# Managed by hermitator's install.sh.
+	main=/etc/caddy/Caddyfile
+	ours=/etc/caddy/conf.d/hermitator.caddy
+	import='import /etc/caddy/conf.d/*.caddy'
+	mkdir -p /etc/caddy/conf.d
+	if [ ! -f "$main" ] || head -n 1 "$main" | grep -q "^# Managed by hermitator's install.sh"; then
+		# Missing, or the whole-file version earlier releases wrote.
+		cat >"$main" <<CADDY
+# Sites live in /etc/caddy/conf.d, one file each; hermitator's is
+# hermitator.caddy, written by its install.sh. Add your own beside it.
+$import
+CADDY
+	elif ! grep -qxF "$import" "$main"; then
+		printf '\n%s\n' "$import" >>"$main"
+	fi
+	if grep -q "^$DOMAIN[ {]" "$main"; then
+		say "warning: $main serves $DOMAIN itself; not adding hermitator's site"
+	else
+		cat >"$ours" <<CADDY
+# Written by hermitator's install.sh; changes here are overwritten.
 $DOMAIN {
 	reverse_proxy 127.0.0.1:8080
 }
 CADDY
 	fi
 	systemctl enable --now caddy >/dev/null 2>&1
-	systemctl reload caddy
+	if caddy validate --config "$main" --adapter caddyfile >/dev/null 2>&1; then
+		systemctl reload caddy
+	else
+		say "warning: the Caddy configuration does not validate; Caddy keeps running the old one"
+		caddy validate --config "$main" --adapter caddyfile 2>&1 | tail -3
+	fi
 fi
 
 if [ "${WITH_WHISPER:-}" = 1 ] && [ ! -x /usr/local/bin/whisper-cli ]; then
