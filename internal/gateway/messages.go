@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"github.com/rahimnathwani/hermitator/internal/store"
 	"mime"
 	"net/http"
 	"path/filepath"
@@ -80,8 +82,15 @@ func (g *Gateway) convert(ctx context.Context, a *account, e *events.Message) (o
 		d := m.GetDocumentMessage()
 		msg.Text, ctxInfo = d.GetCaption(), d.GetContextInfo()
 		msg.Media = &orchestrator.Media{Kind: "document", MIME: d.GetMimetype(), FileName: d.GetFileName(), Size: int64(d.GetFileLength()), Fetch: download(d, d.GetFileLength())}
+	case m.GetPollUpdateMessage() != nil:
+		text, ok := g.pollAnswer(ctx, cli, e)
+		if !ok {
+			return orchestrator.Message{}, false
+		}
+		// A vote on the agent's poll is addressed to the agent.
+		msg.Text, msg.Mentioned = text, true
 	default:
-		return orchestrator.Message{}, false // reactions, stickers, polls, protocol messages
+		return orchestrator.Message{}, false // reactions, stickers, protocol messages
 	}
 	if ctxInfo != nil {
 		own := []string{}
@@ -231,6 +240,40 @@ func (g *Gateway) SendText(ctx context.Context, accountID, chat, text string) er
 	return err
 }
 
+// SendPoll implements orchestrator.Messenger: a single-choice poll,
+// remembered so its votes can be read back.
+func (g *Gateway) SendPoll(ctx context.Context, accountID, chat, question string, options []string) error {
+	cli, jid, err := g.target(accountID, chat)
+	if err != nil {
+		return err
+	}
+	resp, err := cli.SendMessage(ctx, jid, cli.BuildPollCreation(question, options, 1))
+	if err != nil {
+		return err
+	}
+	g.sent.add(resp.ID)
+	return g.store.PutPoll(ctx, &store.Poll{MessageID: resp.ID, AccountID: accountID, ChatJID: chat, Question: question, Options: options})
+}
+
+// pollAnswer turns a vote on one of the account's polls into text.
+func (g *Gateway) pollAnswer(ctx context.Context, cli *whatsmeow.Client, e *events.Message) (string, bool) {
+	key := e.Message.GetPollUpdateMessage().GetPollCreationMessageKey()
+	poll, err := g.store.Poll(ctx, key.GetID())
+	if err != nil {
+		return "", false // not ours, or forgotten
+	}
+	vote, err := cli.DecryptPollVote(ctx, e)
+	if err != nil {
+		g.log.Warn("decrypt poll vote", "poll", poll.MessageID, "err", err)
+		return "", false
+	}
+	chosen := chosenOptions(poll.Options, vote.GetSelectedOptions())
+	if len(chosen) == 0 {
+		return "", false // a vote taken back
+	}
+	return fmt.Sprintf("[Answer to your poll %q: %s]", poll.Question, strings.Join(chosen, ", ")), true
+}
+
 // SendFile implements orchestrator.Messenger. Photos go as images and
 // everything else as a document, which WhatsApp delivers unrecompressed.
 func (g *Gateway) SendFile(ctx context.Context, accountID, chat, name string, data []byte, caption string) error {
@@ -341,3 +384,17 @@ func (g *Gateway) target(accountID, chat string) (*whatsmeow.Client, types.JID, 
 }
 
 var _ orchestrator.Messenger = (*Gateway)(nil)
+
+// chosenOptions maps a vote's option hashes back to the options' names.
+func chosenOptions(options []string, selected [][]byte) []string {
+	var chosen []string
+	hashes := whatsmeow.HashPollOptions(options)
+	for _, h := range selected {
+		for i, opt := range hashes {
+			if bytes.Equal(h, opt) {
+				chosen = append(chosen, options[i])
+			}
+		}
+	}
+	return chosen
+}

@@ -391,6 +391,7 @@ func (nopMessenger) SendText(context.Context, string, string, string) error { re
 func (nopMessenger) SendFile(context.Context, string, string, string, []byte, string) error {
 	return nil
 }
+func (nopMessenger) SendPoll(context.Context, string, string, string, []string) error { return nil }
 func (nopMessenger) React(context.Context, string, string, string, string, string) error {
 	return nil
 }

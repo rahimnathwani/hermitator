@@ -24,6 +24,9 @@ type HostRequest struct {
 	Name   string `json:"name,omitempty"`
 	Prompt string `json:"prompt,omitempty"`
 	Task   string `json:"task,omitempty"` // for unschedule
+	// Question and Options are for ask: a poll.
+	Question string   `json:"question,omitempty"`
+	Options  []string `json:"options,omitempty"`
 }
 
 // HostAnswer is the host's answer, written next to the request.

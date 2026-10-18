@@ -179,6 +179,12 @@ while a `hermitator-guest hold` file in `/shared/holds` is fresh. A hold
 refreshes its file every 30 seconds and lapses after three minutes
 without, or after twelve hours.
 
+`hermitator-guest ask QUESTION OPTION...` sends a single-choice WhatsApp
+poll the same way. A vote carries only SHA-256 hashes of the chosen
+options, so the host keeps each poll it sends (`polls` table) and maps the
+hashes back to names; the vote then arrives like any message addressed to
+the agent: `[Answer to your poll "Deploy?": Yes]`.
+
 ### Scheduled tasks
 
 The host keeps the timetable (`tasks` table; cron parsing in

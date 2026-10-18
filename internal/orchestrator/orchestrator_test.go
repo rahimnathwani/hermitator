@@ -66,6 +66,8 @@ case "$text" in
   *"go quiet"*)
     printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}'
     sleep 4 ;;
+  *"ask me"*)
+    hermitator-guest ask "Deploy to production?" Yes No "Staging first" >> "$HOME/ask.out" 2>&1 ;;
   *"leak it"*)
     text="key=$STRIPE_KEY gh=$GH_TOKEN author=$GIT_AUTHOR_NAME helper=$GIT_CONFIG_KEY_0" ;;
   *"steer me"*)
@@ -122,6 +124,10 @@ func (r *recorder) SendText(_ context.Context, _, chat, text string) error {
 }
 func (r *recorder) SendFile(_ context.Context, _, chat, name string, data []byte, caption string) error {
 	r.add(sent{"file", chat, caption + "|" + string(data)})
+	return nil
+}
+func (r *recorder) SendPoll(_ context.Context, _, chat, question string, options []string) error {
+	r.add(sent{"poll", chat, question + "|" + strings.Join(options, "|")})
 	return nil
 }
 func (r *recorder) React(_ context.Context, _, chat, _, _, emoji string) error {
@@ -1155,5 +1161,28 @@ func TestWorkAtRisk(t *testing.T) {
 	got, err := e.m.WorkAtRisk(ctx, e.agent.ID)
 	if err != nil || len(got) != 1 || got[0] != (RepoAtRisk{"/workspace/shop", 1, 1}) {
 		t.Fatalf("WorkAtRisk = %+v, %v", got, err)
+	}
+}
+
+func TestAgentAsksWithAPoll(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "ask me", true))
+	if got := e.rec.wait(t, "poll"); got.chat != chat || got.body != "Deploy to production?|Yes|No|Staging first" {
+		t.Fatalf("poll = %+v", got)
+	}
+	e.idle(t)
+	bad := []turn.HostRequest{
+		{Op: "poll", Question: "Q?", Options: []string{"only one"}},
+		{Op: "poll", Question: "Q?", Options: []string{"same", "same"}},
+		{Op: "poll", Question: "", Options: []string{"a", "b"}},
+	}
+	for _, req := range bad {
+		if a := e.m.poll(ctx, chatRef{m: e.m, msg: Message{AccountID: e.acct.ID, Chat: chat}}, req); a.OK {
+			t.Errorf("sent a poll for %+v", req)
+		}
 	}
 }

@@ -172,3 +172,15 @@ func hold(args []string) int {
 	}
 	return 0
 }
+
+// askPoll sends the user a WhatsApp poll.
+func askPoll(args []string) int {
+	if len(args) < 3 {
+		fmt.Fprintln(os.Stderr, `usage: hermitator-guest ask QUESTION OPTION OPTION [OPTION...]
+
+Sends the user a single-choice WhatsApp poll (2 to 12 options). Their
+choice arrives as their next message.`)
+		return 2
+	}
+	return ask(turn.HostRequest{Op: "poll", Question: args[0], Options: args[1:]}, 20*time.Second)
+}

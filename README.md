@@ -42,6 +42,8 @@ keep hundreds of them.
   `/link CODE`. Photos, voice notes (transcribed locally with whisper.cpp)
   and documents go in; files come back when the agent runs `whatsapp-send`.
   Read receipts and a ⏳ reaction say it is working, ✅ says it is done.
+  When an agent needs you to choose ("Deploy to production?"), it can
+  send a WhatsApp poll; your tap comes back to it as a message.
 - **Work that carries on without you.** Ask an agent to do something
   later ("every weekday at 9, check CI and tell me") and it schedules it;
   the host keeps the timetable, so the agent still sleeps until then.

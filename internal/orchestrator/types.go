@@ -64,6 +64,8 @@ type Media struct {
 type Messenger interface {
 	SendText(ctx context.Context, accountID, chat, text string) error
 	SendFile(ctx context.Context, accountID, chat, name string, data []byte, caption string) error
+	// SendPoll sends a single-choice poll; votes come back as messages.
+	SendPoll(ctx context.Context, accountID, chat, question string, options []string) error
 	React(ctx context.Context, accountID, chat, sender, messageID, emoji string) error
 	Typing(ctx context.Context, accountID, chat string, typing bool) error
 	// MarkRead sends a read receipt, where the account wants them.

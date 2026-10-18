@@ -282,8 +282,42 @@ func (m *Manager) answer(ctx context.Context, spec *sandbox.Spec, ag *store.Agen
 		m.writeTasks(ctx, spec, ag)
 		chat.send("📅 " + ag.Name + " cancelled a task: " + t.Name + ".")
 		return turn.HostAnswer{OK: true, Message: "Cancelled " + t.Name + "."}
+	case "poll":
+		return m.poll(ctx, chat, req)
 	}
 	return turn.HostAnswer{Message: "unknown request " + req.Op}
+}
+
+// poll sends a multiple-choice question as a WhatsApp poll; the answer
+// comes back as the user's next message.
+func (m *Manager) poll(ctx context.Context, chat chatRef, req turn.HostRequest) turn.HostAnswer {
+	q := strings.TrimSpace(req.Question)
+	var opts []string
+	seen := map[string]bool{}
+	for _, o := range req.Options {
+		o = strings.TrimSpace(o)
+		if o != "" && !seen[o] {
+			seen[o] = true
+			opts = append(opts, o)
+		}
+	}
+	switch {
+	case !chat.ok():
+		return turn.HostAnswer{Message: "Polls go to a WhatsApp chat, and this conversation is not in one; ask in your reply instead."}
+	case q == "" || len(q) > 255:
+		return turn.HostAnswer{Message: "The question must be between 1 and 255 characters."}
+	case len(opts) < 2 || len(opts) > 12:
+		return turn.HostAnswer{Message: "A poll needs between 2 and 12 different options."}
+	}
+	for _, o := range opts {
+		if len(o) > 100 {
+			return turn.HostAnswer{Message: "Each option must be at most 100 characters."}
+		}
+	}
+	if err := m.msgr.SendPoll(ctx, chat.msg.AccountID, chat.msg.Chat, chat.redact.apply(q), opts); err != nil {
+		return turn.HostAnswer{Message: "Could not send the poll: " + err.Error()}
+	}
+	return turn.HostAnswer{OK: true, Message: "Sent. The answer arrives as the user's next message, like [Answer to your poll \"" + q + "\": " + opts[0] + "]; end your turn now and wait for it."}
 }
 
 // tasksCommand handles /tasks.

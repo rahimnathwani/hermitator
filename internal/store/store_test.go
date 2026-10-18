@@ -341,3 +341,22 @@ func TestTasks(t *testing.T) {
 		t.Fatalf("spent = %v", spent)
 	}
 }
+
+func TestPolls(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	u := &User{Email: "p@example.com", Role: RoleUser}
+	s.CreateUser(ctx, u)
+	acct := &Account{UserID: u.ID, JID: "1:9@s.whatsapp.net", Status: AccountConnected}
+	s.CreateAccount(ctx, acct)
+	if err := s.PutPoll(ctx, &Poll{MessageID: "M1", AccountID: acct.ID, ChatJID: "c", Question: "Q?", Options: []string{"a", "b"}}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.Poll(ctx, "M1")
+	if err != nil || p.Question != "Q?" || len(p.Options) != 2 || p.Options[1] != "b" {
+		t.Fatalf("poll = %+v, %v", p, err)
+	}
+	if _, err := s.Poll(ctx, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing poll: %v", err)
+	}
+}
