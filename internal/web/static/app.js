@@ -47,14 +47,62 @@ document.addEventListener("htmx:afterRequest", (e) => {
   if (form.matches?.("form[data-reset]") && e.detail.successful) form.reset();
 });
 
-// The model field suggests models for whichever harness and provider are
-// selected.
-document.addEventListener("change", (e) => {
-  const form = e.target.closest?.("form[data-models]");
-  if (!form || !e.target.matches('input[name="harness"], select[name="provider"]')) return;
+// A form with model choices shows the set for the selected harness and
+// provider.
+function showModels(form) {
   const harness = form.querySelector('input[name="harness"]:checked')?.value;
-  const provider = form.querySelector('select[name="provider"]')?.value || "openai-codex";
-  form.querySelector('input[name="model"]')?.setAttribute("list", harness === "pi" ? `models-pi-${provider}` : "models-claude");
+  const provider = form.querySelector('input[name="provider"]:checked')?.value;
+  for (const set of form.querySelectorAll(".model-set")) {
+    set.hidden = set.dataset.harness !== harness || (harness === "pi" && set.dataset.provider !== provider);
+  }
+}
+
+// Forms marked data-track show unsaved changes: each changed field is
+// marked, and Save only works once there is something to save. The
+// browser keeps the values the page was served with as the defaults.
+function changed(el) {
+  if (el.type === "radio" || el.type === "checkbox") return el.checked !== el.defaultChecked;
+  if (el.type === "hidden" || el.type === "submit" || el.type === "reset" || el.tagName === "BUTTON") return false;
+  return el.value !== el.defaultValue;
+}
+
+function track(form) {
+  for (const field of form.querySelectorAll(".field")) {
+    field.classList.toggle("changed", [...field.querySelectorAll("input, textarea")].some(changed));
+  }
+  const dirty = [...form.elements].some(changed);
+  form.classList.toggle("dirty", dirty);
+  for (const b of form.querySelectorAll("[data-save]")) b.disabled = !dirty;
+}
+
+function trackAll(root) {
+  const forms = [...root.querySelectorAll("form[data-track]")];
+  if (root.matches?.("form[data-track]")) forms.push(root);
+  forms.forEach(track);
+}
+
+document.addEventListener("DOMContentLoaded", () => trackAll(document));
+document.addEventListener("htmx:load", (e) => trackAll(e.detail.elt));
+
+document.addEventListener("change", (e) => {
+  const form = e.target.form;
+  if (!form) return;
+  if (e.target.matches('input[name="harness"], input[name="provider"]')) showModels(form);
+  if (e.target.value === "+other") e.target.closest(".model-set")?.querySelector(".other")?.focus();
+  if (form.matches("[data-track]")) track(form);
+});
+
+document.addEventListener("input", (e) => {
+  if (e.target.form?.matches("[data-track]")) track(e.target.form);
+});
+
+// "reset" fires before the fields go back, so look once they have.
+document.addEventListener("reset", (e) => {
+  const form = e.target;
+  setTimeout(() => {
+    showModels(form);
+    if (form.matches("[data-track]")) track(form);
+  });
 });
 
 // Cmd/Ctrl+Enter sends from a textarea.

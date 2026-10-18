@@ -361,8 +361,9 @@ func TestModelAndEffortSettings(t *testing.T) {
 	f := setup(t)
 	alice := f.login(t, "alice@example.com")
 	id := alice.createAgent("bot")
-	base := url.Values{"name": {"bot"}, "harness": {"claude"}, "idle_minutes": {"5"}, "memory_mb": {"4096"}}
+	base := url.Values{"name": {"bot"}, "harness": {"claude"}, "provider": {"openai-codex"}, "idle_minutes": {"5"}, "memory_mb": {"4096"}}
 	set := func(extra url.Values) *store.Agent {
+		t.Helper()
 		form := url.Values{}
 		for k, v := range base {
 			form[k] = v
@@ -376,16 +377,66 @@ func TestModelAndEffortSettings(t *testing.T) {
 		a, _ := f.store.Agent(context.Background(), id)
 		return a
 	}
-	if a := set(url.Values{"model": {"opus"}, "effort_claude": {"high"}, "effort_pi": {"minimal"}}); a.Model != "opus" || a.Effort != "high" {
+	page := func() string {
+		_, body := alice.get("/agents/" + id)
+		return body
+	}
+
+	// The segmented form posts one model choice per harness and provider;
+	// only the selected one counts.
+	a := set(url.Values{"model:claude": {"opus"}, "model:pi-deepseek": {"deepseek-flash"}, "effort_claude": {"high"}, "effort_pi": {"minimal"}})
+	if a.Model != "opus" || a.Effort != "high" {
 		t.Fatalf("saved %q/%q", a.Model, a.Effort)
 	}
-	if a := set(url.Values{"model": {"opus"}, "effort_claude": {"ludicrous"}}); a.Effort != "" {
-		t.Fatalf("invalid effort saved: %q", a.Effort)
-	}
-	_, body := alice.get("/agents/" + id)
-	for _, want := range []string{`list="models-claude"`, `<datalist id="models-pi-deepseek">`, `<option value="sonnet">`, "effort_pi"} {
+	body := page()
+	for _, want := range []string{
+		`name="model:claude" value="opus" checked`,
+		`name="effort_claude" value="high" checked`,
+		`name="model:pi-deepseek" value="deepseek-flash"`,
+		`title="~anthropic/claude-opus-latest"`,
+		`name="memory_mb" value="4096" checked`,
+	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("agent page lacks %s", want)
 		}
+	}
+	if strings.Contains(body, "<select") {
+		t.Fatal("agent page still has a dropdown")
+	}
+
+	if a := set(url.Values{"model:claude": {"+other"}, "model-other:claude": {"claude-opus-5-5"}, "effort_claude": {"ludicrous"}}); a.Model != "claude-opus-5-5" || a.Effort != "" {
+		t.Fatalf("other model: saved %q/%q", a.Model, a.Effort)
+	}
+	// html/template writes the "+" of "+other" as &#43; inside attributes.
+	if body := page(); !strings.Contains(body, `value="&#43;other" checked`) || !strings.Contains(body, `value="claude-opus-5-5"`) {
+		t.Fatal("a model off the list does not show as other…")
+	}
+
+	// Scripts can still post a plain model field.
+	if a := set(url.Values{"model": {"sonnet"}}); a.Model != "sonnet" {
+		t.Fatalf("plain model field: saved %q", a.Model)
+	}
+
+	pi := set(url.Values{"harness": {"pi"}, "provider": {"deepseek"}, "model:pi-deepseek": {"deepseek-flash"}, "effort_pi": {"minimal"}, "model:claude": {"opus"}})
+	if pi.Model != "deepseek-flash" || pi.Effort != "minimal" || pi.PiProvider != "deepseek" {
+		t.Fatalf("pi: saved %q/%q/%q", pi.Model, pi.Effort, pi.PiProvider)
+	}
+}
+
+func TestNewAgentTakesModelAndEffort(t *testing.T) {
+	f := setup(t)
+	alice := f.login(t, "alice@example.com")
+	_, body := alice.get("/")
+	if strings.Contains(body, "<select") || !strings.Contains(body, `name="model:pi-openai-codex"`) {
+		t.Fatal("new-agent form is not segmented")
+	}
+	form := url.Values{"name": {"fresh"}, "harness": {"claude"}, "provider": {"openai-codex"}, "model:claude": {"haiku"}, "effort_claude": {"low"}}
+	code, loc := alice.post("/agents", form)
+	if code != http.StatusSeeOther {
+		t.Fatalf("create: %d", code)
+	}
+	a, _ := f.store.Agent(context.Background(), strings.TrimPrefix(loc, "/agents/"))
+	if a.Model != "haiku" || a.Effort != "low" {
+		t.Fatalf("created with %q/%q", a.Model, a.Effort)
 	}
 }

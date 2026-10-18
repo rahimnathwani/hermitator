@@ -10,7 +10,7 @@
     <a class="button" href="/agents/{{$a.ID}}/terminal">Terminal</a>
   </div>
 </div>
-<p class="meta">{{harness $a.Harness}}{{if $a.PiProvider}} · {{$a.PiProvider}}{{end}}{{if $a.Model}} · {{$a.Model}}{{end}}{{if $a.Effort}} · {{$a.Effort}} effort{{end}} · image {{$a.Image}} · {{$a.IP}} · sleeps after {{minutes $a.IdleTimeout}} min idle</p>
+<p class="meta">{{harness $a.Harness}}{{if eq $a.Harness "pi"}} · {{$a.PiProvider}}{{end}}{{if $a.Model}} · {{$a.Model}}{{end}}{{if $a.Effort}} · {{$a.Effort}} effort{{end}} · image {{$a.Image}} · {{$a.IP}} · sleeps after {{minutes $a.IdleTimeout}} min idle</p>
 
 <div class="columns">
   <section class="card console">
@@ -56,15 +56,11 @@
               <button class="small">Unlink</button>
             </form>
           </div>
-          <form method="post" action="/agents/{{$a.ID}}/routes/triggers" class="inline-form triggers">
+          <form method="post" action="/agents/{{$a.ID}}/routes/triggers" class="triggers" data-track>
             <input type="hidden" name="account" value="{{.AccountID}}"><input type="hidden" name="chat" value="{{.ChatJID}}">
-            <label>You wake it
-              <select name="owner">{{template "trigger-options" .OwnerTrigger}}</select>
-            </label>
-            <label>Others wake it
-              <select name="others">{{template "trigger-options" .OthersTrigger}}</select>
-            </label>
-            <button class="small">Save</button>
+            <span class="label">You wake it</span>{{template "seg" (triggers "owner" .OwnerTrigger)}}
+            <span class="label">Others wake it</span>{{template "seg" (triggers "others" .OthersTrigger)}}
+            <div class="form-actions"><button class="small" data-save>Save</button><span class="unsaved">unsaved</span></div>
           </form>
         </li>
         {{end}}
@@ -74,41 +70,21 @@
     </section>
 
     <section class="card">
-      <h2>Settings</h2>
-      <form method="post" action="/agents/{{$a.ID}}/settings" class="settings" data-models>
-        <label>Name <input name="name" value="{{$a.Name}}" required maxlength="40"></label>
-        <fieldset class="choice">
-          <legend>Harness</legend>
-          <label><input type="radio" name="harness" value="claude" {{if eq $a.Harness "claude"}}checked{{end}}> Claude Code</label>
-          <label><input type="radio" name="harness" value="pi" {{if eq $a.Harness "pi"}}checked{{end}}> pi</label>
+      <h2>Settings <span class="unsaved">unsaved changes</span></h2>
+      <form method="post" action="/agents/{{$a.ID}}/settings" class="settings" data-track>
+        <label class="field"><span class="label">Name</span> <input name="name" value="{{$a.Name}}" required maxlength="40"></label>
+        {{template "agent-fields" $d.Fields}}
+        <label class="field"><span class="label">Sleep after</span> <span class="inline"><input type="number" name="idle_minutes" min="1" max="1440" value="{{minutes $a.IdleTimeout}}"> minutes idle</span></label>
+        <fieldset class="field">
+          <legend>Memory limit</legend>
+          {{template "seg" $d.Memory}}
         </fieldset>
-        <label class="pi-only">Provider
-          <select name="provider">
-            {{range $d.Providers}}<option value="{{.ID}}" {{if eq .ID $a.PiProvider}}selected{{end}}>{{.Name}}</option>{{end}}
-          </select>
-        </label>
-        <label>Model <input name="model" value="{{$a.Model}}" placeholder="default" list="{{$d.ModelList}}" autocomplete="off"></label>
-        {{range $id, $models := $d.ModelLists}}<datalist id="{{$id}}">{{range $models}}<option value="{{.}}">{{end}}</datalist>{{end}}
-        <label class="claude-only">Effort
-          <select name="effort_claude">
-            <option value="">default</option>
-            {{range $d.ClaudeEfforts}}<option {{if eq . $a.Effort}}selected{{end}}>{{.}}</option>{{end}}
-          </select>
-        </label>
-        <label class="pi-only">Thinking
-          <select name="effort_pi">
-            <option value="">default</option>
-            {{range $d.PiEfforts}}<option {{if eq . $a.Effort}}selected{{end}}>{{.}}</option>{{end}}
-          </select>
-        </label>
-        <label>Sleep after <span class="inline"><input type="number" name="idle_minutes" min="1" max="1440" value="{{minutes $a.IdleTimeout}}"> minutes idle</span></label>
-        <label>Memory limit
-          <select name="memory_mb">
-            {{range $d.Memory}}<option value="{{.}}" {{if eq . $a.MemoryMB}}selected{{end}}>{{.}} MB</option>{{end}}
-          </select>
-        </label>
-        <p class="muted">Model and effort apply from the next message; you can also change them in the chat with /model and /effort. Switching harness starts a fresh conversation in the same workspace. A new memory limit applies from the next cold boot.</p>
-        <button>Save</button>
+        <p class="muted small">Model and effort apply from the next message; in the chat, /model and /effort change them too. Switching harness starts a fresh conversation in the same workspace. A new memory limit applies from the next cold boot.</p>
+        <div class="form-actions">
+          <button data-save>Save</button>
+          <button type="reset" class="link" data-discard>Discard changes</button>
+          <span class="unsaved">unsaved changes</span>
+        </div>
       </form>
     </section>
 

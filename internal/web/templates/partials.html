@@ -6,7 +6,7 @@
     <a href="/agents/{{.ID}}"><strong>{{.Name}}</strong></a>
     {{template "state" (stateLabel .State .Busy)}}
   </header>
-  <p class="meta">{{harness .Harness}}{{if .PiProvider}} · {{.PiProvider}}{{end}}{{if .Model}} · {{.Model}}{{end}}</p>
+  <p class="meta">{{harness .Harness}}{{if eq .Harness "pi"}} · {{.PiProvider}}{{end}}{{if .Model}} · {{.Model}}{{end}}</p>
   <p class="meta">
     {{- with .Routes}}{{len .}} chat{{if gt (len .) 1}}s{{end}} linked{{else}}No chats linked yet{{end}}
     · active {{ago .LastActive}}
@@ -15,8 +15,41 @@
 </article>
 {{end}}
 
-{{define "trigger-options"}}
-<option value="all" {{if eq . "all"}}selected{{end}}>always</option>
-<option value="mentions" {{if eq . "mentions"}}selected{{end}}>by mentioning it</option>
-<option value="none" {{if eq . "none"}}selected{{end}}>never</option>
+{{define "seg"}}
+<div class="seg">
+  {{- range .Options}}
+  <label{{with .Title}} title="{{.}}"{{end}}><input type="radio" name="{{$.Name}}" value="{{.Value}}"{{if eq .Value $.Current}} checked{{end}}><span>{{.Label}}</span></label>
+  {{- end}}
+</div>
+{{end}}
+
+{{define "agent-fields"}}
+<fieldset class="field">
+  <legend>Harness</legend>
+  {{template "seg" .Harness}}
+  <p class="hint claude-only">Claude Code, with your Claude subscription.</p>
+  <p class="hint pi-only">pi, with a ChatGPT subscription or a DeepSeek or OpenRouter key.</p>
+</fieldset>
+<fieldset class="field pi-only">
+  <legend>Provider</legend>
+  {{template "seg" .Provider}}
+</fieldset>
+<fieldset class="field">
+  <legend>Model</legend>
+  {{range .Models}}
+  <div class="model-set" data-harness="{{.Harness}}" data-provider="{{.Provider}}"{{if .Hidden}} hidden{{end}}>
+    {{template "seg" .Choice}}
+    <input class="other" name="{{.Other}}" value="{{.Custom}}" placeholder="model ID" autocomplete="off" spellcheck="false" aria-label="Model ID">
+    {{with .Default}}<p class="hint">default is <code>{{.}}</code></p>{{end}}
+  </div>
+  {{end}}
+</fieldset>
+<fieldset class="field claude-only">
+  <legend>Effort</legend>
+  {{template "seg" .ClaudeEffort}}
+</fieldset>
+<fieldset class="field pi-only">
+  <legend>Thinking</legend>
+  {{template "seg" .PiEffort}}
+</fieldset>
 {{end}}

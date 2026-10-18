@@ -30,9 +30,10 @@ var funcs = template.FuncMap{
 		}
 		return humanDuration(time.Since(t)) + " ago"
 	},
-	"until": func(t time.Time) string { return humanDuration(time.Until(t)) },
-	"dur":   humanDuration,
-	"ms":    func(n int) string { return humanDuration(time.Duration(n) * time.Millisecond) },
+	"until":    func(t time.Time) string { return humanDuration(time.Until(t)) },
+	"dur":      humanDuration,
+	"triggers": triggerChoice,
+	"ms":       func(n int) string { return humanDuration(time.Duration(n) * time.Millisecond) },
 	"stateLabel": func(state string, busy bool) string {
 		switch {
 		case busy:

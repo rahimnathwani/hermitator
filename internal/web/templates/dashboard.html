@@ -26,22 +26,17 @@
   <h2>New agent</h2>
   {{if $d.CanCreate}}
   <form method="post" action="/agents" class="new-agent">
-    <label>Name <input name="name" required maxlength="40" placeholder="frontend" pattern="[\p{L}\p{N}][\p{L}\p{N} ._\-]{0,39}"></label>
-    <fieldset class="choice">
-      <legend>Harness</legend>
-      <label><input type="radio" name="harness" value="claude" checked> Claude Code <span class="muted">with your Claude subscription</span></label>
-      <label><input type="radio" name="harness" value="pi"> pi <span class="muted">with ChatGPT, DeepSeek or OpenRouter</span></label>
-    </fieldset>
-    <label class="pi-only">Provider
-      <select name="provider">
-        {{range $d.Providers}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
-      </select>
-    </label>
-    <label>Model <span class="muted">optional</span> <input name="model" placeholder="default"></label>
+    <label class="field"><span class="label">Name</span> <input name="name" required maxlength="40" placeholder="frontend" pattern="[\p{L}\p{N}][\p{L}\p{N} ._\-]{0,39}"></label>
+    {{template "agent-fields" $d.Fields}}
     {{if gt (len $d.Images) 1}}
-    <label>Image
-      <select name="image">{{range $d.Images}}<option>{{.}}</option>{{end}}</select>
-    </label>
+    <fieldset class="field">
+      <legend>Image</legend>
+      <div class="seg">
+        {{- range $i, $img := $d.Images}}
+        <label><input type="radio" name="image" value="{{$img}}"{{if eq $i 0}} checked{{end}}><span>{{$img}}</span></label>
+        {{- end}}
+      </div>
+    </fieldset>
     {{end}}
     <button class="primary">Create agent</button>
   </form>

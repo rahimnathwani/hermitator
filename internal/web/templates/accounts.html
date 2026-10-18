@@ -18,28 +18,28 @@
     {{if eq .Status "logged_out"}}
     <p>This device was removed from the phone. Remove it here and link the account again.</p>
     {{end}}
-    <form method="post" action="/accounts/{{.ID}}/kind" class="inline-form">
-      <label>This number belongs to
-        <select name="kind">
-          <option value="agent" {{if not .Personal}}selected{{end}}>my agents</option>
-          <option value="personal" {{if .Personal}}selected{{end}}>me</option>
-        </select>
-      </label>
-      <button class="small">Save</button>
+    <form method="post" action="/accounts/{{.ID}}/kind" class="field-form" data-track>
+      <span class="label">This number belongs to</span>
+      <div class="seg">
+        <label><input type="radio" name="kind" value="agent"{{if not .Personal}} checked{{end}}><span>my agents</span></label>
+        <label><input type="radio" name="kind" value="personal"{{if .Personal}} checked{{end}}><span>me</span></label>
+      </div>
+      <div class="form-actions"><button class="small" data-save>Save</button><span class="unsaved">unsaved</span></div>
     </form>
     <p class="muted small">{{if .Personal}}hermitator stays invisible on your own number: no online status, no read receipts.{{else}}hermitator shows this number as online and sends read receipts and typing indicators.{{end}}</p>
     {{if and (not .Personal) (not $d.Numbers)}}
     <p class="note">Message this number from your own WhatsApp with an agent's <code>/link</code> code. hermitator learns your number from that, so it can tell you apart from strangers.</p>
     {{end}}
-    <form method="post" action="/accounts/{{.ID}}/fallback" class="inline-form">
-      <label>Fallback agent
-        <select name="agent">
-          <option value="">None</option>
-          {{$fb := .FallbackAgentID}}
-          {{range $d.Agents}}<option value="{{.ID}}" {{if eq .ID $fb}}selected{{end}}>{{.Name}}</option>{{end}}
-        </select>
-      </label>
-      <button class="small">Save</button>
+    <form method="post" action="/accounts/{{.ID}}/fallback" class="field-form" data-track>
+      <span class="label">Fallback agent</span>
+      {{$fb := .FallbackAgentID}}
+      <div class="seg">
+        <label><input type="radio" name="agent" value=""{{if not $fb}} checked{{end}}><span>none</span></label>
+        {{- range $d.Agents}}
+        <label><input type="radio" name="agent" value="{{.ID}}"{{if eq .ID $fb}} checked{{end}}><span>{{.Name}}</span></label>
+        {{- end}}
+      </div>
+      <div class="form-actions"><button class="small" data-save>Save</button><span class="unsaved">unsaved</span></div>
     </form>
     <p class="muted small">A fallback agent answers your direct messages to this number without a <code>/link</code>. It only listens to <a href="/settings">your numbers</a>, never to strangers or groups.</p>
     <form method="post" action="/accounts/{{.ID}}/delete">

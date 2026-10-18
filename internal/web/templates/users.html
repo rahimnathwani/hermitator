@@ -48,7 +48,10 @@
   <form method="post" action="/admin/users" class="inline-form">
     <input type="email" name="email" placeholder="email" required autocomplete="off">
     <input type="password" name="password" placeholder="initial password (10+ characters)" minlength="10" required autocomplete="new-password">
-    <select name="role"><option value="user">user</option><option value="admin">admin</option></select>
+    <div class="seg">
+      <label><input type="radio" name="role" value="user" checked><span>user</span></label>
+      <label><input type="radio" name="role" value="admin"><span>admin</span></label>
+    </div>
     <button class="primary">Create</button>
   </form>
 </section>

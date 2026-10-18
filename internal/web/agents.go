@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
-	"slices"
 	"strconv"
 	"time"
 
@@ -84,7 +83,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, v *viewer) {
 		"Agents":      views,
 		"Accounts":    accounts,
 		"Images":      s.Images.Families(),
-		"Providers":   orchestrator.PiProviders,
+		"Fields":      newAgentFields(&store.Agent{Harness: store.HarnessClaude}),
 		"CanCreate":   len(agents) < v.User.MaxAgents,
 		"MaxAgents":   v.User.MaxAgents,
 		"HasAccount":  len(accounts) > 0,
@@ -108,10 +107,11 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request, v *viewer) 
 		s.back(w, r, "/", "Pick a harness.")
 		return
 	}
-	a := &store.Agent{Name: name, Harness: harness, Model: formValue(r, "model")}
+	a := &store.Agent{Name: name, Harness: harness}
 	if harness == store.HarnessPi {
 		a.PiProvider = formValue(r, "provider")
 	}
+	a.Model, a.Effort = formModel(r, harness, a.PiProvider), formEffort(r, harness)
 	image := formValue(r, "image")
 	if image == "" {
 		image = "universal"
@@ -143,39 +143,15 @@ func (s *Server) agentPage(w http.ResponseWriter, r *http.Request, v *viewer) {
 	turns, _ := s.Store.Turns(ctx, a.ID, 30)
 	accounts, _ := s.Store.Accounts(ctx, v.User.ID)
 	s.render(w, r, v, "agent.html", a.Name, "agents", map[string]any{
-		"Agent":         s.view(r, a, true),
-		"LinkCode":      code,
-		"LinkExpires":   expires,
-		"Turns":         turns,
-		"Accounts":      accounts,
-		"Providers":     orchestrator.PiProviders,
-		"Memory":        []int{1024, 2048, 4096, 8192, 16384},
-		"NewerImage":    s.Agents.NewerImage(a),
-		"ModelLists":    modelLists(),
-		"ModelList":     modelListID(a.Harness, a.PiProvider),
-		"ClaudeEfforts": orchestrator.ClaudeEfforts,
-		"PiEfforts":     orchestrator.PiEfforts,
+		"Agent":       s.view(r, a, true),
+		"LinkCode":    code,
+		"LinkExpires": expires,
+		"Turns":       turns,
+		"Accounts":    accounts,
+		"Fields":      newAgentFields(a),
+		"Memory":      memoryChoice(a.MemoryMB),
+		"NewerImage":  s.Agents.NewerImage(a),
 	})
-}
-
-// modelLists are the model suggestions for each harness and pi provider,
-// keyed by the id of the datalist the settings form uses.
-func modelLists() map[string][]string {
-	lists := map[string][]string{modelListID(store.HarnessClaude, ""): orchestrator.ClaudeModels}
-	for _, p := range orchestrator.PiProviders {
-		lists[modelListID(store.HarnessPi, p.ID)] = orchestrator.ModelSuggestions(store.HarnessPi, p.ID)
-	}
-	return lists
-}
-
-func modelListID(harness, provider string) string {
-	if harness == store.HarnessPi {
-		if provider == "" {
-			provider = orchestrator.ProviderCodex
-		}
-		return "models-pi-" + provider
-	}
-	return "models-claude"
 }
 
 func (s *Server) agentCard(w http.ResponseWriter, r *http.Request, v *viewer) {
@@ -206,12 +182,9 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request, v *viewer) 
 	idle = min(max(idle, 1), 24*60)
 	memory, _ := strconv.Atoi(formValue(r, "memory_mb"))
 	memory = min(max(memory, 512), 65536)
-	a.Name, a.Harness, a.Model = name, harness, formValue(r, "model")
-	a.Effort = formValue(r, "effort_"+harness)
-	if !slices.Contains(orchestrator.Efforts(harness), a.Effort) {
-		a.Effort = ""
-	}
+	a.Name, a.Harness = name, harness
 	a.PiProvider = formValue(r, "provider")
+	a.Model, a.Effort = formModel(r, harness, a.PiProvider), formEffort(r, harness)
 	a.IdleTimeout = time.Duration(idle) * time.Minute
 	a.MemoryMB = memory
 	switch err := s.Agents.UpdateAgent(r.Context(), a); {

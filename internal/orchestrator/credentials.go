@@ -29,10 +29,10 @@ const (
 
 // PiProviders lists the pi providers offered in the UI, with their
 // default models.
-var PiProviders = []struct{ ID, Name, DefaultModel string }{
-	{ProviderCodex, "ChatGPT subscription (Codex)", harness.DefaultModels[ProviderCodex]},
-	{ProviderDeepSeek, "DeepSeek API", harness.DefaultModels[ProviderDeepSeek]},
-	{ProviderOpenRouter, "OpenRouter API", harness.DefaultModels[ProviderOpenRouter]},
+var PiProviders = []struct{ ID, Name, Short, DefaultModel string }{
+	{ProviderCodex, "ChatGPT subscription (Codex)", "ChatGPT", harness.DefaultModels[ProviderCodex]},
+	{ProviderDeepSeek, "DeepSeek API", "DeepSeek", harness.DefaultModels[ProviderDeepSeek]},
+	{ProviderOpenRouter, "OpenRouter API", "OpenRouter", harness.DefaultModels[ProviderOpenRouter]},
 }
 
 // Secret returns a user's decrypted secret, or "" if it is unset.
