@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -43,6 +44,7 @@ type fixture struct {
 	store  *store.Store
 	users  map[string]*store.User
 	images string
+	server *Server
 }
 
 func setup(t *testing.T) *fixture {
@@ -68,12 +70,18 @@ func setup(t *testing.T) *fixture {
 	if err := mgr.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{Store: st, Agents: mgr, Gateway: noGateway{}, Images: &sandbox.Images{Dir: images}, Log: log, PublicURL: "http://test"}
+	s := &Server{Store: st, Agents: mgr, Gateway: noGateway{}, Images: &sandbox.Images{Dir: images}, Log: log, PublicURL: "http://test",
+		GitHub: func(_ context.Context, token string) (GitHubUser, error) {
+			if token != "gho_good_token_123" {
+				return GitHubUser{}, errors.New("GitHub said 401 Unauthorized")
+			}
+			return GitHubUser{ID: 42, Login: "ada"}, nil
+		}}
 	h, err := s.Handler()
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{srv: httptest.NewServer(h), store: st, users: map[string]*store.User{}, images: images}
+	f := &fixture{srv: httptest.NewServer(h), store: st, users: map[string]*store.User{}, images: images, server: s}
 	t.Cleanup(f.srv.Close)
 	hash, _ := auth.HashPassword(password)
 	for _, u := range []struct{ email, role string }{{"admin@example.com", store.RoleAdmin}, {"alice@example.com", store.RoleUser}, {"bob@example.com", store.RoleUser}} {
@@ -549,5 +557,45 @@ func TestLimitsAndTasks(t *testing.T) {
 	alice.post("/agents/"+id+"/tasks/"+task.ID+"/delete", nil)
 	if _, err := f.store.Task(ctx, task.ID); err == nil {
 		t.Fatal("not deleted")
+	}
+}
+
+func TestGitHubAndSecrets(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	alice := f.login(t, "alice@example.com")
+	aliceID := f.users["alice@example.com"].ID
+
+	alice.post("/settings/github", url.Values{"value": {"gho_bad"}})
+	if u, _ := f.store.User(ctx, aliceID); u.GitHubLogin != "" {
+		t.Fatal("saved a token GitHub refused")
+	}
+	alice.post("/settings/github", url.Values{"value": {"gho_good_token_123"}})
+	u, _ := f.store.User(ctx, aliceID)
+	if u.GitHubLogin != "ada" || u.GitName != "ada" || u.GitEmail != "42+ada@users.noreply.github.com" {
+		t.Fatalf("after connecting: login %q, identity %q <%q>", u.GitHubLogin, u.GitName, u.GitEmail)
+	}
+	if f.server.Agents.Secret(ctx, aliceID, store.SecretGitHubToken) != "gho_good_token_123" {
+		t.Fatal("token not stored")
+	}
+
+	for name, want := range map[string]bool{"STRIPE_KEY": true, "stripe_key": true, "GH_TOKEN": false, "GIT_ASKPASS": false, "PATH": false, "2FA": false, "A-B": false} {
+		alice.post("/settings/env", url.Values{"name": {name}, "value": {"value-for-" + name}})
+		got := f.server.Agents.Secret(ctx, aliceID, store.SecretEnvPrefix+strings.ToUpper(name)) != ""
+		if got != want {
+			t.Errorf("secret %s saved = %v, want %v", name, got, want)
+		}
+	}
+	_, body := alice.get("/settings")
+	if !strings.Contains(body, "STRIPE_KEY") || strings.Contains(body, "value-for-") || strings.Contains(body, "gho_good") {
+		t.Fatal("the settings page lists secrets wrongly, or shows a value")
+	}
+	alice.post("/settings/env/delete", url.Values{"name": {"STRIPE_KEY"}})
+	if f.server.Agents.Secret(ctx, aliceID, store.SecretEnvPrefix+"STRIPE_KEY") != "" {
+		t.Fatal("secret not removed")
+	}
+	alice.post("/settings/github", url.Values{"remove": {"1"}})
+	if u, _ := f.store.User(ctx, aliceID); u.GitHubLogin != "" || f.server.Agents.Secret(ctx, aliceID, store.SecretGitHubToken) != "" {
+		t.Fatal("GitHub not disconnected")
 	}
 }

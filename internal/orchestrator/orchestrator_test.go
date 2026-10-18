@@ -61,6 +61,8 @@ case "$text" in
     echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"whatsapp-send report.txt"}}]}}'
     ;;
   *"sleep"*) sleep 30 ;;
+  *"leak it"*)
+    text="key=$STRIPE_KEY gh=$GH_TOKEN author=$GIT_AUTHOR_NAME helper=$GIT_CONFIG_KEY_0" ;;
   *"steer me"*)
     # Like Claude Code with stdin left open: take in what arrives while
     # working, then answer once.
@@ -1069,5 +1071,44 @@ func TestSteeringARunningTurn(t *testing.T) {
 	}
 	if !seen {
 		t.Fatal("the steered message was not acknowledged with 👀")
+	}
+}
+
+func TestSecretsReachTheAgentButNotTheChat(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	e.m.PutSecret(ctx, e.user.ID, store.SecretEnvPrefix+"STRIPE_KEY", "sk_live_abcdefgh12345")
+	e.m.PutSecret(ctx, e.user.ID, store.SecretGitHubToken, "github_pat_0123456789abcdef")
+	e.st.SetGitIdentity(ctx, e.user.ID, "Ada Lovelace", "ada@example.com")
+	e.st.SetGitHubLogin(ctx, e.user.ID, "ada")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "leak it", true))
+	got := e.rec.wait(t, "text").body
+	if strings.Contains(got, "sk_live") || strings.Contains(got, "github_pat") {
+		t.Fatalf("a secret reached the chat: %q", got)
+	}
+	if !strings.Contains(got, "key=[secret removed]") || !strings.Contains(got, "gh=[secret removed]") ||
+		!strings.Contains(got, "author=Ada Lovelace") || !strings.Contains(got, "helper=credential.https://github.com.helper") {
+		t.Fatalf("reply = %q", got)
+	}
+	e.idle(t)
+	if turns, _ := e.st.Turns(ctx, e.agent.ID, 1); strings.Contains(turns[0].Output, "sk_live") {
+		t.Fatal("a secret was stored in the turn's output")
+	}
+	if a := e.lastArgs(t); !strings.Contains(a, "secrets as environment variables: STRIPE_KEY") || !strings.Contains(a, "GitHub as @ada") ||
+		!strings.Contains(a, "authored as Ada Lovelace <ada@example.com>") || strings.Contains(a, "sk_live") {
+		t.Fatalf("system prompt does not describe the credentials right:\n%s", a)
+	}
+}
+
+func TestRedactor(t *testing.T) {
+	r := newRedactor([]string{"short", "abcdefgh", "abcdefgh-longer-secret"})
+	if got := r.apply("x abcdefgh-longer-secret y abcdefgh z short"); got != "x [secret removed] y [secret removed] z short" {
+		t.Fatalf("apply = %q", got)
+	}
+	if got := secretStrings(`{"openai-codex":{"access":"eyJhbGciOiJSUzI1NiJ9.payload.sig","type":"oauth","expires":123}}`); len(got) != 1 {
+		t.Fatalf("secretStrings = %q", got)
 	}
 }

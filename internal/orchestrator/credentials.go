@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path"
+	"sort"
 	"strings"
 	"time"
 
@@ -60,6 +61,12 @@ func (m *Manager) PutSecret(ctx context.Context, userID, name, value string) err
 type credentials struct {
 	env   map[string]string
 	files []turn.File
+	// names are the user's own secrets, which the agent is told about.
+	names []string
+	// github is the account git and gh act as, if a token is set.
+	github string
+	// redact holds every secret value, kept out of what is sent or shown.
+	redact []string
 }
 
 // credentials gathers what an agent's harness needs to talk to its model,
@@ -102,7 +109,104 @@ func (m *Manager) credentials(ctx context.Context, a *store.Agent) (credentials,
 			}
 		}
 	}
+	m.extraCredentials(ctx, a, &c)
 	return c, ""
+}
+
+// extraCredentials adds the user's own secrets, GitHub and their commit
+// identity to a turn, and lists every value to redact.
+func (m *Manager) extraCredentials(ctx context.Context, a *store.Agent, c *credentials) {
+	times, _ := m.store.SecretTimes(ctx, a.UserID)
+	for name := range times {
+		key, ok := strings.CutPrefix(name, store.SecretEnvPrefix)
+		if !ok {
+			continue
+		}
+		if v := m.Secret(ctx, a.UserID, name); v != "" {
+			c.env[key] = v
+			c.names = append(c.names, key)
+		}
+	}
+	sort.Strings(c.names)
+	if tok := m.Secret(ctx, a.UserID, store.SecretGitHubToken); tok != "" {
+		c.env["GH_TOKEN"], c.env["GITHUB_TOKEN"] = tok, tok
+		// git over https asks this helper, which answers from the
+		// environment: the token is never written to the sandbox's disk.
+		c.env["GIT_CONFIG_COUNT"] = "1"
+		c.env["GIT_CONFIG_KEY_0"] = "credential.https://github.com.helper"
+		c.env["GIT_CONFIG_VALUE_0"] = `!f() { test "$1" = get && echo username=x-access-token && echo "password=$GH_TOKEN"; }; f`
+		c.github = "GitHub"
+		if u, err := m.store.User(ctx, a.UserID); err == nil && u.GitHubLogin != "" {
+			c.github = "@" + u.GitHubLogin
+		}
+	}
+	if u, err := m.store.User(ctx, a.UserID); err == nil && u.GitName != "" && u.GitEmail != "" {
+		for _, k := range []string{"GIT_AUTHOR_NAME", "GIT_COMMITTER_NAME"} {
+			c.env[k] = u.GitName
+		}
+		for _, k := range []string{"GIT_AUTHOR_EMAIL", "GIT_COMMITTER_EMAIL"} {
+			c.env[k] = u.GitEmail
+		}
+	}
+	for k, v := range c.env {
+		if !strings.HasPrefix(k, "GIT_") {
+			c.redact = append(c.redact, v)
+		}
+	}
+	for _, f := range c.files {
+		c.redact = append(c.redact, secretStrings(f.Content)...)
+	}
+}
+
+// secretStrings picks the long string values out of a JSON credentials
+// file: tokens, not field names or short settings.
+func secretStrings(doc string) []string {
+	var v any
+	if json.Unmarshal([]byte(doc), &v) != nil {
+		return nil
+	}
+	var out []string
+	var walk func(any)
+	walk = func(v any) {
+		switch x := v.(type) {
+		case map[string]any:
+			for _, e := range x {
+				walk(e)
+			}
+		case []any:
+			for _, e := range x {
+				walk(e)
+			}
+		case string:
+			if len(x) >= 20 {
+				out = append(out, x)
+			}
+		}
+	}
+	walk(v)
+	return out
+}
+
+// redactor replaces secret values in text with a marker.
+type redactor []string
+
+func newRedactor(values []string) redactor {
+	var r redactor
+	for _, v := range values {
+		if len(v) >= 8 { // shorter ones would hit ordinary words
+			r = append(r, v)
+		}
+	}
+	// Longest first, so a secret that contains another is caught whole.
+	sort.Slice(r, func(i, j int) bool { return len(r[i]) > len(r[j]) })
+	return r
+}
+
+func (r redactor) apply(s string) string {
+	for _, v := range r {
+		s = strings.ReplaceAll(s, v, "[secret removed]")
+	}
+	return s
 }
 
 func providerOrDefault(p string) string {

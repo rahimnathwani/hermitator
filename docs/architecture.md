@@ -242,13 +242,22 @@ compatible.
 | Claude subscription | `claude setup-token`, pasted into the panel | `CLAUDE_CODE_OAUTH_TOKEN` |
 | ChatGPT subscription | Device-code login, run inside a sandbox by pi's own code | `~/.pi/agent/auth.json`, synced back when pi refreshes it |
 | DeepSeek, OpenRouter | Pasted into the panel | `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY` |
+| GitHub | `gh auth token` or a fine-grained token, checked against GitHub when saved | `GH_TOKEN` and `GITHUB_TOKEN`, plus a git credential helper set through `GIT_CONFIG_*`, so git over https uses it without it touching the disk |
+| The user's own secrets | Name and value in the panel | An environment variable of that name; the agent's instructions list the names |
 
 They are stored encrypted with XChaCha20-Poly1305 under the master key, with
 the owner and name as associated data. They are decrypted per turn and
 travel inside the job (a spool file that the guest deletes when it claims
 it), never on a command line. pi's credential file is removed from the
 sandbox before it is suspended, so it is not left in the upper layer or a
-checkpoint image.
+checkpoint image. Environment variables live only in the turn's processes,
+though background processes started during a turn inherit them.
+
+Every credential value of eight characters or more, and the long strings in
+pi's credential file, is replaced with `[secret removed]` in what the agent
+sends to WhatsApp (replies, messages, captions), in the stored turn, and in
+the live activity view. Files it sends are not inspected. Commit name and
+email travel as `GIT_AUTHOR_*` and `GIT_COMMITTER_*`.
 
 The ChatGPT login runs `pi-login.mjs` inside one of the user's sandboxes. It
 calls pi's own implementation of OpenAI's device-code flow, so hermitator

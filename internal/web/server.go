@@ -58,6 +58,8 @@ type Server struct {
 	// are marked Secure.
 	PublicURL string
 	Version   string
+	// GitHub looks up who a token belongs to; nil asks api.github.com.
+	GitHub func(ctx context.Context, token string) (GitHubUser, error)
 
 	pages   map[string]*template.Template
 	assetV  string
@@ -106,6 +108,10 @@ func (s *Server) Handler() (http.Handler, error) {
 	tenant("POST /agents/{id}/use-image-harnesses", s.useImageHarnesses)
 	tenant("POST /agents/{id}/tasks/{tid}/{action}", s.taskAction)
 	tenant("POST /settings/limits", s.saveLimits)
+	tenant("POST /settings/github", s.saveGitHub)
+	tenant("POST /settings/identity", s.saveIdentity)
+	tenant("POST /settings/env", s.saveEnvSecret)
+	tenant("POST /settings/env/delete", s.deleteEnvSecret)
 	tenant("GET /agents/{id}/settings", s.agentSettingsPage)
 	tenant("POST /agents/{id}/settings", s.updateAgent)
 	tenant("POST /agents/{id}/wake", s.wakeAgent)

@@ -94,6 +94,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	if problem != "" {
 		return fail(problem)
 	}
+	chat.redact = newRedactor(creds.redact)
 
 	spec, err := m.Spec(agent)
 	if err != nil {
@@ -158,7 +159,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		Effort:       effort,
 		Fork:         fork,
 		Provider:     agent.PiProvider,
-		SystemPrompt: m.agentPrompt(spec, loc, last),
+		SystemPrompt: m.agentPrompt(spec, loc, last) + credentialsNote(creds),
 		SteerID:      t.id,
 		Env:          env,
 		Files:        creds.files,
@@ -236,6 +237,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		if ev.Model != "" {
 			rec.Model = ev.Model
 		}
+		ev.Text, ev.Detail = chat.redact.apply(ev.Text), chat.redact.apply(ev.Detail)
 		switch ev.Type {
 		case turn.EventTool:
 			rec.Tools++
@@ -336,6 +338,12 @@ func (m *Manager) accountSession(ctx context.Context, ag *store.Agent, result *t
 
 // finish records the outcome of a turn, then delivers it.
 func (m *Manager) finish(ctx context.Context, chat chatRef, rec *store.Turn, result *turn.Event, failure string, running bool) bool {
+	if result != nil {
+		// What is stored and shown is as clean as what is sent.
+		r := *result
+		r.Text = chat.redact.apply(r.Text)
+		result = &r
+	}
 	var deliver func()
 	switch {
 	case rec.Status == store.TurnAborted:
@@ -551,7 +559,7 @@ func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat ch
 		}
 		data, err := readRegular(root, in(file))
 		if err == nil {
-			err = chat.sendFile(displayName(file), data, meta.Caption)
+			err = chat.sendFile(displayName(file), data, chat.redact.apply(meta.Caption))
 		}
 		if err != nil {
 			m.log.Warn("send outbox file", "agent", spec.ID, "file", file, "err", err)
@@ -593,6 +601,8 @@ type chatRef struct {
 	msg Message
 	// prefix starts the agent's messages: a scheduled task's name.
 	prefix string
+	// redact keeps secret values out of what the agent sends.
+	redact redactor
 }
 
 func (c chatRef) ok() bool { return c.msg.AccountID != "" && c.msg.Chat != "" }
@@ -611,7 +621,7 @@ func (c chatRef) send(text string) {
 }
 
 // sendAgent delivers the agent's Markdown, converted for WhatsApp.
-func (c chatRef) sendAgent(text string) { c.send(c.prefix + wamd.Format(text)) }
+func (c chatRef) sendAgent(text string) { c.send(c.prefix + wamd.Format(c.redact.apply(text))) }
 
 func (c chatRef) sendFile(name string, data []byte, caption string) error {
 	if !c.ok() {
@@ -764,4 +774,19 @@ func (m *Manager) steer(agentID string, t *activeTurn, seq int, msg Message) {
 	}
 	chat.react("👀")
 	m.hub.publish(agentID, UIEvent{Kind: "steer", TurnID: t.id, Input: summarizeBatch([]Message{msg})})
+}
+
+// credentialsNote tells the agent about the secrets and accounts it has.
+func credentialsNote(c credentials) string {
+	var b strings.Builder
+	if len(c.names) > 0 {
+		fmt.Fprintf(&b, "\n- The owner has given you these secrets as environment variables: %s. Use them by name in commands; never print their values or send them anywhere they are not meant for. hermitator removes them from your replies.", strings.Join(c.names, ", "))
+	}
+	if c.github != "" {
+		fmt.Fprintf(&b, "\n- git and gh can reach GitHub as %s: GH_TOKEN is set, and git over https uses it.", c.github)
+	}
+	if c.env["GIT_AUTHOR_NAME"] != "" {
+		fmt.Fprintf(&b, "\n- Your commits are authored as %s <%s>.", c.env["GIT_AUTHOR_NAME"], c.env["GIT_AUTHOR_EMAIL"])
+	}
+	return b.String()
 }

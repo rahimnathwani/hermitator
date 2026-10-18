@@ -290,7 +290,12 @@ What the sandbox protects is the host, and other agents, from an agent:
 What it does not protect:
 
 - **The agent holds your credentials while it works.** It needs them to call
-  the model. Treat an agent like a laptop logged into your accounts.
+  the model, and it gets your GitHub token and your own secrets (set in
+  Settings, never typed into WhatsApp) as environment variables during its
+  turns. Background processes it starts inherit them. hermitator removes
+  their values from everything the agent sends you and from what it stores,
+  but not from files it sends. Treat an agent like a laptop logged into
+  your accounts.
 - **Whatever reaches the agent reaches your model provider.** Other
   people's messages in a linked chat are passed on as context even when they
   do not wake the agent. If you let them wake it, they can drive it, and it

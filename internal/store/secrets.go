@@ -11,6 +11,10 @@ const (
 	SecretPiAuth        = "pi_auth_json"
 	SecretDeepSeekKey   = "deepseek_api_key"
 	SecretOpenRouterKey = "openrouter_api_key"
+	SecretGitHubToken   = "github_token"
+	// SecretEnvPrefix starts the names of secrets the user defines, which
+	// agents get as environment variables: "env:STRIPE_KEY".
+	SecretEnvPrefix = "env:"
 )
 
 // PutSecret stores (or replaces) an encrypted secret.

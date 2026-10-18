@@ -116,6 +116,67 @@
 </section>
 
 <section class="card">
+  <div class="card-head"><div><h2>GitHub and your secrets</h2><p>What your agents can use besides a model. They get these as environment variables during their turns, and hermitator removes the values from anything they send you.</p></div></div>
+
+  <div class="setting">
+    <div class="about">
+      <h3>GitHub {{if $d.GitHub.IsZero}}<span class="badge">Not connected</span>{{else}}<span class="badge ok">@{{$d.GitHubLogin}}</span>{{end}}</h3>
+      <p>Lets agents clone, push and open pull requests as you, with <code>git</code> and <code>gh</code>. Run <code class="copy">gh auth token</code> on your own computer, or make a fine-grained token for just the repositories they need.</p>
+    </div>
+    <div class="control">
+      <div class="form-row">
+      <form method="post" action="/settings/github" class="inline-form">
+        <input type="password" name="value" placeholder="gho_… or github_pat_…" autocomplete="off" aria-label="GitHub token" required>
+        <button>{{if $d.GitHub.IsZero}}Connect{{else}}Replace{{end}}</button>
+      </form>
+      {{if not $d.GitHub.IsZero}}
+      <form method="post" action="/settings/github" data-confirm="Disconnect" data-confirm-title="Disconnect GitHub?">
+        <input type="hidden" name="remove" value="1">
+        <template data-confirm-body><p>Your agents can no longer push, open pull requests or use <code>gh</code> as @{{$d.GitHubLogin}}. Repositories they already cloned stay.</p></template>
+        <button class="danger icon-only" title="Disconnect GitHub" aria-label="Disconnect GitHub">{{icon "trash"}}</button>
+      </form>
+      {{end}}
+      </div>
+    </div>
+  </div>
+
+  <div class="setting">
+    <div class="about"><h3>Commits</h3><p>Who your agents' commits are by. Connecting GitHub fills this in if it is empty.</p></div>
+    <div class="control">
+      <form method="post" action="/settings/identity" class="inline-form" data-track>
+        <input name="git_name" value="{{$d.GitName}}" placeholder="Name" aria-label="Commit name" autocomplete="name">
+        <input name="git_email" value="{{$d.GitEmail}}" placeholder="Email" aria-label="Commit email" autocomplete="email">
+        <button data-save>Save</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="setting">
+    <div class="about"><h3>Secrets</h3><p>API keys and the like, by name. Never paste them into WhatsApp: the chat keeps them, and so does the model's provider.</p></div>
+    <div class="control">
+      {{with $d.Secrets}}
+      <ul class="numbers">
+        {{range .}}
+        <li><span><span class="mono">{{.Name}}</span> <span class="muted small">saved {{ago .Saved}}</span></span>
+          <form method="post" action="/settings/env/delete" data-confirm="Remove secret" data-confirm-title="Remove {{.Name}}?">
+            <input type="hidden" name="name" value="{{.Name}}">
+            <template data-confirm-body><p>Your agents no longer get <code>{{.Name}}</code> from their next message. Anything that needs it stops working until you add it again.</p></template>
+            <button class="small">Remove…</button>
+          </form>
+        </li>
+        {{end}}
+      </ul>
+      {{end}}
+      <form method="post" action="/settings/env" class="inline-form">
+        <input name="name" placeholder="STRIPE_KEY" aria-label="Secret name" autocomplete="off" spellcheck="false" class="mono" style="max-width:180px">
+        <input type="password" name="value" placeholder="Value" aria-label="Secret value" autocomplete="off" required>
+        <button>{{icon "plus"}}Add</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section class="card">
   <div class="card-head"><div><h2>Time zone and spending</h2><p>Scheduled tasks run in your time zone, and agents' clocks show it.</p></div></div>
   <form method="post" action="/settings/limits" class="narrow-form" data-track>
     <label class="field"><span class="label">Time zone</span><input name="timezone" value="{{$d.Timezone}}" placeholder="UTC" autocomplete="off" spellcheck="false" data-tz-input>

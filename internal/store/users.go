@@ -27,7 +27,12 @@ type User struct {
 	// DailyCap and MonthlyCap limit API-equivalent spending; 0 is none.
 	DailyCap   float64
 	MonthlyCap float64
-	CreatedAt  time.Time
+	// GitName and GitEmail are who the user's agents commit as.
+	GitName  string
+	GitEmail string
+	// GitHubLogin is the account the user's GitHub token signs in as.
+	GitHubLogin string
+	CreatedAt   time.Time
 }
 
 // Location is the user's time zone, falling back to UTC.
@@ -41,12 +46,12 @@ func (u *User) Location() *time.Location {
 // IsAdmin reports whether the user administers the instance.
 func (u *User) IsAdmin() bool { return u.Role == RoleAdmin }
 
-const userColumns = `id, email, password_hash, role, max_agents, suspended, timezone, daily_cap, monthly_cap, created_at`
+const userColumns = `id, email, password_hash, role, max_agents, suspended, timezone, daily_cap, monthly_cap, git_name, git_email, github_login, created_at`
 
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	var u User
 	var created string
-	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.MaxAgents, &u.Suspended, &u.Timezone, &u.DailyCap, &u.MonthlyCap, &created); err != nil {
+	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.MaxAgents, &u.Suspended, &u.Timezone, &u.DailyCap, &u.MonthlyCap, &u.GitName, &u.GitEmail, &u.GitHubLogin, &created); err != nil {
 		return nil, one(err)
 	}
 	u.CreatedAt = parseTS(created)
@@ -66,8 +71,8 @@ func (s *Store) CreateUser(ctx context.Context, u *User) error {
 	if u.MaxAgents == 0 {
 		u.MaxAgents = 5
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO users (`+userColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		u.ID, u.Email, u.PasswordHash, u.Role, u.MaxAgents, u.Suspended, u.Timezone, u.DailyCap, u.MonthlyCap, ts(u.CreatedAt))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO users (`+userColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		u.ID, u.Email, u.PasswordHash, u.Role, u.MaxAgents, u.Suspended, u.Timezone, u.DailyCap, u.MonthlyCap, u.GitName, u.GitEmail, u.GitHubLogin, ts(u.CreatedAt))
 	if isUnique(err) {
 		return ErrConflict
 	}
@@ -149,4 +154,14 @@ func (s *Store) SpentSince(ctx context.Context, userID string, t time.Time) (flo
 	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(t.cost_usd), 0) FROM turns t JOIN agents a ON a.id = t.agent_id
 		WHERE a.user_id = ? AND t.started_at >= ?`, userID, ts(t)).Scan(&total)
 	return total, err
+}
+
+// SetGitIdentity sets who the user's agents commit as.
+func (s *Store) SetGitIdentity(ctx context.Context, id, name, email string) error {
+	return affected(s.db.ExecContext(ctx, `UPDATE users SET git_name = ?, git_email = ? WHERE id = ?`, name, email, id))
+}
+
+// SetGitHubLogin records which account the user's GitHub token is for.
+func (s *Store) SetGitHubLogin(ctx context.Context, id, login string) error {
+	return affected(s.db.ExecContext(ctx, `UPDATE users SET github_login = ? WHERE id = ?`, login, id))
 }
