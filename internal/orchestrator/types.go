@@ -28,10 +28,16 @@ type Message struct {
 	SenderName  string
 	ID          string
 	FromMe      bool
-	Mentioned   bool
-	Text        string
-	Time        time.Time
-	Media       *Media
+	// Owner is set by the orchestrator: the message came from the account
+	// itself or from one of its owner's numbers.
+	Owner bool
+	// Mentioned means the message @mentions the account or replies to it.
+	Mentioned bool
+	// GroupSize is the number of participants, for groups.
+	GroupSize int
+	Text      string
+	Time      time.Time
+	Media     *Media
 }
 
 // Media is an attachment. It is only downloaded if the chat is routed.

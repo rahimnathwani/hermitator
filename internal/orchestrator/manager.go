@@ -265,7 +265,7 @@ func (m *Manager) Status(agentID string) Status {
 
 // Prompt queues a message typed in the web UI.
 func (m *Manager) Prompt(agentID, text string) {
-	msg := Message{Text: text, FromMe: true, Time: time.Now(), SenderName: "web"}
+	msg := Message{Text: text, FromMe: true, Owner: true, Time: time.Now(), SenderName: "web"}
 	m.actor(agentID).do(func(a *actor) { a.enqueue(msg) })
 }
 

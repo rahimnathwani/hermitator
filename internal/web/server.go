@@ -109,6 +109,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	tenant("POST /agents/{id}/prompt", s.prompt)
 	tenant("POST /agents/{id}/delete", s.deleteAgent)
 	tenant("POST /agents/{id}/routes/delete", s.deleteRoute)
+	tenant("POST /agents/{id}/routes/triggers", s.routeTriggers)
 	tenant("GET /agents/{id}/events", s.agentEvents)
 	tenant("GET /agents/{id}/terminal", s.terminalPage)
 	tenant("GET /agents/{id}/terminal/ws", s.terminalSocket)

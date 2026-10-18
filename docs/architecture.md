@@ -137,16 +137,25 @@ start.
    then remembered as the owner's. Wrong codes are throttled per sender.
    Direct chats are keyed by phone number even when WhatsApp addresses them
    by LID, so routes keep matching.
-3. The agent's actor collects messages for 1.5 seconds, so a photo and the
-   caption typed after it make one turn, then starts the turn. Messages that
-   arrive mid-turn wait for the next one.
-4. The turn sends read receipts (on agent numbers only), reacts ⏳, shows
+3. Each linked chat says which messages start a turn, separately for the
+   owner and for everyone else: all, mentions (an @mention of the account, a
+   reply to it, or `@agent-name`) or none. A message that does not start a
+   turn is held in the database, with any attachment saved straight into
+   the agent's inbox on the host. Holding wakes nothing and calls no model.
+   The next turn in that chat takes the held messages as a block of labelled
+   context ahead of its own, marks them read, and releases them. A chat
+   holds at most 200.
+4. The agent's actor collects triggering messages for 1.5 seconds, so a
+   photo and the caption typed after it make one turn, then starts the turn
+   for that chat. Messages that arrive mid-turn, or from another chat, wait
+   for the next one.
+5. The turn sends read receipts (on agent numbers only), reacts ⏳, shows
    "typing…", wakes the sandbox, saves attachments
    into `/shared/inbox` (transcribing voice notes on the host), and submits a
    job running `hermitator-guest turn` with the request on stdin.
-5. The guest runs the harness and translates its output into a small event
+6. The guest runs the harness and translates its output into a small event
    stream: `started`, `text`, `tool`, `file`, `result`, `error`.
-6. Files the agent queues with `whatsapp-send` are delivered while the turn is
+7. Files the agent queues with `whatsapp-send` are delivered while the turn is
    still running. When it ends, the reply is converted from Markdown to
    WhatsApp formatting and split into messages, and the reaction becomes ✅.
 

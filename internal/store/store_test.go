@@ -223,3 +223,47 @@ func TestOwnerNumbers(t *testing.T) {
 		t.Fatal("kind not saved")
 	}
 }
+
+func TestHeldMessages(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	u := mkUser(t, s, "a@example.com")
+	a := &Agent{UserID: u.ID, Name: "bot", Image: "universal", Harness: HarnessClaude}
+	s.CreateAgent(ctx, a, netip.MustParsePrefix("10.88.0.0/16"))
+	acct := &Account{UserID: u.ID, JID: "1:1@s.whatsapp.net", Status: AccountConnected}
+	s.CreateAccount(ctx, acct)
+	if err := s.PutRoute(ctx, &Route{AccountID: acct.ID, ChatJID: "g@g.us", AgentID: a.ID}); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := s.Route(ctx, acct.ID, "g@g.us")
+	if r.OwnerTrigger != TriggerAll || r.OthersTrigger != TriggerNone {
+		t.Fatalf("default triggers = %s/%s", r.OwnerTrigger, r.OthersTrigger)
+	}
+
+	base := time.Now()
+	for i := 0; i < MaxHeld+5; i++ {
+		if err := s.Hold(ctx, &HeldMessage{AccountID: acct.ID, ChatJID: "g@g.us", MessageID: "m", Sender: "x", Text: string(rune('a' + i%26)), SentAt: base.Add(time.Duration(i) * time.Second)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	held, _ := s.Held(ctx, acct.ID, "g@g.us")
+	if len(held) != MaxHeld || !held[0].SentAt.Equal(base.Add(5*time.Second).UTC().Truncate(time.Microsecond)) {
+		t.Fatalf("kept %d, oldest at %v", len(held), held[0].SentAt)
+	}
+	if err := s.Release(ctx, []string{held[0].ID, held[1].ID}); err != nil {
+		t.Fatal(err)
+	}
+	if n := s.HeldCount(ctx, acct.ID, "g@g.us"); n != MaxHeld-2 {
+		t.Fatalf("after release: %d", n)
+	}
+	// Relinking a chat to another agent drops what was held for the old one.
+	s.PutRoute(ctx, &Route{AccountID: acct.ID, ChatJID: "g@g.us", AgentID: a.ID})
+	if n := s.HeldCount(ctx, acct.ID, "g@g.us"); n != 0 {
+		t.Fatalf("held messages survived relinking: %d", n)
+	}
+	s.Hold(ctx, &HeldMessage{AccountID: acct.ID, ChatJID: "g@g.us", MessageID: "m", Sender: "x"})
+	s.DeleteRoute(ctx, acct.ID, "g@g.us")
+	if n := s.HeldCount(ctx, acct.ID, "g@g.us"); n != 0 {
+		t.Fatalf("held messages survived unlinking: %d", n)
+	}
+}

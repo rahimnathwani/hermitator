@@ -99,6 +99,13 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	a.do(func(a *actor) { a.setState(sandbox.Running) })
 
 	prompt, images := m.buildPrompt(ctx, spec, batch)
+	var held []*store.HeldMessage
+	if last.AccountID != "" {
+		held, _ = m.store.Held(ctx, last.AccountID, last.Chat)
+	}
+	if context := m.heldContext(ctx, spec, held); context != "" {
+		prompt = context + "\n\n" + prompt
+	}
 	if agent.SessionID == "" {
 		agent.SessionID = ids.UUID()
 		m.store.SetAgentSession(ctx, agent.ID, agent.SessionID)
@@ -130,6 +137,15 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		return m.finish(ctx, chat, rec, nil, "⚠️ Could not hand the turn to the sandbox: "+err.Error(), false)
 	}
 	t.submitted(&client)
+	if len(held) > 0 {
+		// The agent has them now; they are read, and no longer held.
+		ids := make([]string, len(held))
+		for i, h := range held {
+			ids[i] = h.ID
+			chatRef{m: m, msg: Message{AccountID: h.AccountID, Chat: h.ChatJID, Sender: h.Sender, ID: h.MessageID}}.markRead()
+		}
+		m.store.Release(ctx, ids)
+	}
 
 	// Deliver files as soon as the agent queues them.
 	outboxDone := make(chan struct{})
@@ -274,11 +290,16 @@ func summarizeBatch(batch []Message) string {
 // buildPrompt turns a batch of chat messages into one prompt, saving any
 // attachments into the sandbox's inbox.
 func (m *Manager) buildPrompt(ctx context.Context, spec *sandbox.Spec, batch []Message) (string, []turn.Image) {
+	// Messages are labelled with their sender whenever there is anyone but
+	// the owner to tell apart. That also means nobody else's message can
+	// start with a slash and be taken as a harness command.
 	senders := map[string]bool{}
+	labelled := batch[len(batch)-1].IsGroup
 	for _, msg := range batch {
 		senders[msg.Sender] = true
+		labelled = labelled || !msg.Owner
 	}
-	labelled := len(senders) > 1 || batch[len(batch)-1].IsGroup
+	labelled = labelled || len(senders) > 1
 	var parts []string
 	var images []turn.Image
 	for i, msg := range batch {
@@ -376,7 +397,19 @@ func writeShared(spec *sandbox.Spec, name string, data []byte) error {
 		return err
 	}
 	defer root.Close()
+	if err := root.MkdirAll(path.Dir(name), 0o755); err != nil {
+		return err
+	}
 	return root.WriteFile(name, data, 0o644)
+}
+
+func readShared(spec *sandbox.Spec, name string) ([]byte, error) {
+	root, err := spec.Shared()
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	return readRegular(root, name)
 }
 
 // deliverOutbox sends every file the agent has queued.

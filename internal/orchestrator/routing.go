@@ -68,9 +68,6 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) {
 	switch {
 	case err == nil:
 		agentID = route.AgentID
-		if route.RequireMention && !msg.Mentioned && !owner {
-			return
-		}
 	case errors.Is(err, store.ErrNotFound):
 		if acct.FallbackAgentID == "" || msg.FromMe || msg.IsGroup || !owner {
 			return
@@ -81,6 +78,7 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) {
 		m.log.Error("route lookup", "err", err)
 		return
 	}
+	msg.Owner = owner
 
 	if isCmd && owner {
 		m.command(ctx, acct, agentID, route, msg, cmd, reply)
@@ -88,6 +86,17 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) {
 	}
 	if strings.TrimSpace(msg.Text) == "" && msg.Media == nil {
 		return
+	}
+	if route != nil {
+		ag, err := m.store.Agent(ctx, agentID)
+		if err != nil {
+			return
+		}
+		if !triggers(route, ag, msg) {
+			// Kept for the agent's next turn; nothing wakes up.
+			m.hold(ctx, ag, msg)
+			return
+		}
 	}
 	m.actor(agentID).do(func(a *actor) { a.enqueue(msg) })
 }
@@ -152,12 +161,19 @@ func (m *Manager) link(ctx context.Context, acct *store.Account, msg Message, co
 		reply(invalid)
 		return
 	}
-	if err := m.store.PutRoute(ctx, &store.Route{AccountID: acct.ID, ChatJID: msg.Chat, ChatName: msg.ChatName, AgentID: ag.ID}); err != nil {
+	route := &store.Route{AccountID: acct.ID, ChatJID: msg.Chat, ChatName: msg.ChatName, AgentID: ag.ID,
+		OwnerTrigger: store.TriggerAll, OthersTrigger: store.TriggerNone}
+	if msg.IsGroup && msg.GroupSize > 2 {
+		// In a group with other people, the owner talks to them too.
+		route.OwnerTrigger = store.TriggerMentions
+	}
+	if err := m.store.PutRoute(ctx, route); err != nil {
 		reply("⚠️ Could not link this chat: " + err.Error())
 		return
 	}
 	m.store.Audit(ctx, acct.UserID, acct.UserID, "route.link", fmt.Sprintf("agent=%s chat=%s", ag.ID, msg.Chat))
-	text := fmt.Sprintf("✅ Linked this chat to *%s* (%s). Send a message to wake it up; /help lists commands.", ag.Name, harnessName(ag.Harness))
+	text := fmt.Sprintf("✅ Linked this chat to *%s* (%s). %s Change that with /listen or on the agent's page; /help lists commands.",
+		ag.Name, harnessName(ag.Harness), describeTriggers(route, ag.Name))
 	if !msg.FromMe && msg.SenderPhone != "" && !m.store.IsOwnerNumber(ctx, acct.UserID, msg.SenderPhone) {
 		// Whoever had the code is the owner, writing from their own phone.
 		if err := m.store.AddOwnerNumber(ctx, acct.UserID, msg.SenderPhone); err == nil {
@@ -210,6 +226,8 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		reply("🧹 The next message starts a fresh conversation. Files in the sandbox are untouched.")
 	case "status":
 		reply(m.statusText(ctx, ag))
+	case "listen":
+		m.listen(ctx, route, ag, cmd.Arg, reply)
 	case "switch":
 		target := strings.ToLower(cmd.Arg)
 		if target != store.HarnessClaude && target != store.HarnessPi {

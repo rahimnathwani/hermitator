@@ -19,6 +19,7 @@ var commandAliases = map[string]string{
 	"clear":  "new",
 	"reset":  "new",
 	"status": "status",
+	"listen": "listen",
 	"switch": "switch",
 	"help":   "help",
 }
@@ -45,6 +46,7 @@ const helpText = `*hermitator commands*
 /stop: abort the running turn
 /new: start a fresh conversation, keeping all files (alias /clear)
 /switch claude|pi: change harness
+/listen: show or change which messages wake the agent here
 /unlink: disconnect this chat from the agent
 /link CODE: connect this chat to an agent
 /help: this message

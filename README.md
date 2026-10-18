@@ -178,6 +178,7 @@ hermitator answers itself:
 | `/stop` | Abort the current turn |
 | `/new` | Start a fresh conversation; files are kept (alias `/clear`) |
 | `/switch claude` or `/switch pi` | Change harness, same workspace |
+| `/listen` | Show or change which messages wake the agent in this chat |
 | `/link CODE`, `/unlink` | Bind this chat to an agent, or unbind it |
 | `/help` | The list |
 
@@ -186,16 +187,30 @@ agent. Only you can use commands: messages from your own numbers (listed in
 Settings, and learnt from `/link`), or sent by the linked account itself when
 it is your own number.
 
+Each linked chat has two settings: which of **your** messages wake the agent,
+and which of **other people's** do. Each is *always*, *by mentioning it* or
+*never*. Mentioning means an @mention of the agent's number, a reply to one
+of its messages, or typing `@` and the agent's name. When you `/link` a
+direct chat, or a group with just you and the agent's number, your messages
+always wake it and other people's never do. In a group with other people,
+you wake it by mentioning it. Change this on the agent's page or with
+`/listen` (for example `/listen others all`).
+
+A message that does not wake the agent wakes nothing at all: no sandbox, no
+model call. hermitator keeps it, up to the last 200 per chat, and hands it
+to the agent as context with the next message that does. So in a group with
+a friend you can talk among yourselves and then ask *"@shop-frontend, can
+you do what Sam suggested?"*. Commands from you always work, and never wake
+the agent either.
+
 Messages sent in quick succession, a photo and then its caption say, become
 one turn. Messages that arrive while the agent is working wait for the next
-turn. In groups, each message reaches the agent with its sender's name.
+turn.
 
-Anyone else who messages the agents' number is ignored, unless they are in a
-chat you linked, such as a group you added them to.
-
-An account can also have a **fallback agent**, which answers your direct
-messages to the number without a `/link`. It listens only to your numbers,
-never to strangers or groups.
+Anyone who is not in a chat you linked is ignored, so strangers who find the
+agent's number get nothing. An account can also have a **fallback agent**,
+which answers your direct messages to the number without a `/link`. It
+listens only to your numbers, never to strangers or groups.
 
 ## Configuration
 
@@ -223,9 +238,11 @@ What it does not protect:
 
 - **The agent holds your credentials while it works.** It needs them to call
   the model. Treat an agent like a laptop logged into your accounts.
-- **Anyone who can write in a linked chat can drive the agent.** Strangers
-  messaging the agents' number are ignored, but if you link a group, everyone
-  in it can talk to its agent.
+- **Whatever reaches the agent reaches your model provider.** Other
+  people's messages in a linked chat are passed on as context even when they
+  do not wake the agent. If you let them wake it, they can drive it, and it
+  can be talked into revealing what it holds. Strangers messaging the agents'
+  number are ignored.
 - **WhatsApp does not officially support this.** whatsmeow speaks the same
   protocol as WhatsApp Web, but WhatsApp can and does ban numbers it decides
   are automated. A number of its own for the agents keeps your personal one

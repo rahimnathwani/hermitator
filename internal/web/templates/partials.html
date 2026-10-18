@@ -14,3 +14,9 @@
   </p>
 </article>
 {{end}}
+
+{{define "trigger-options"}}
+<option value="all" {{if eq . "all"}}selected{{end}}>always</option>
+<option value="mentions" {{if eq . "mentions"}}selected{{end}}>by mentioning it</option>
+<option value="none" {{if eq . "none"}}selected{{end}}>never</option>
+{{end}}

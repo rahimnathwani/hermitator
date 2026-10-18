@@ -5,22 +5,37 @@ import (
 	"time"
 )
 
-// Route sends one WhatsApp chat to one agent.
-type Route struct {
-	AccountID      string
-	ChatJID        string
-	ChatName       string
-	AgentID        string
-	RequireMention bool
-	CreatedAt      time.Time
+// Triggers: which messages make an agent work.
+const (
+	TriggerAll      = "all"
+	TriggerMentions = "mentions"
+	TriggerNone     = "none"
+)
+
+// ValidTrigger reports whether t is a trigger setting.
+func ValidTrigger(t string) bool {
+	return t == TriggerAll || t == TriggerMentions || t == TriggerNone
 }
 
-const routeColumns = `account_id, chat_jid, chat_name, agent_id, require_mention, created_at`
+// Route sends one WhatsApp chat to one agent.
+type Route struct {
+	AccountID string
+	ChatJID   string
+	ChatName  string
+	AgentID   string
+	// OwnerTrigger and OthersTrigger say which messages, from the owner
+	// and from everyone else, start a turn. The rest are held.
+	OwnerTrigger  string
+	OthersTrigger string
+	CreatedAt     time.Time
+}
+
+const routeColumns = `account_id, chat_jid, chat_name, agent_id, owner_trigger, others_trigger, created_at`
 
 func scanRoute(row interface{ Scan(...any) error }) (*Route, error) {
 	var r Route
 	var created string
-	if err := row.Scan(&r.AccountID, &r.ChatJID, &r.ChatName, &r.AgentID, &r.RequireMention, &created); err != nil {
+	if err := row.Scan(&r.AccountID, &r.ChatJID, &r.ChatName, &r.AgentID, &r.OwnerTrigger, &r.OthersTrigger, &created); err != nil {
 		return nil, one(err)
 	}
 	r.CreatedAt = parseTS(created)
@@ -28,15 +43,39 @@ func scanRoute(row interface{ Scan(...any) error }) (*Route, error) {
 }
 
 // PutRoute binds a chat to an agent, replacing any previous binding.
+// Messages held for a previous agent are dropped.
 func (s *Store) PutRoute(ctx context.Context, r *Route) error {
 	r.CreatedAt = time.Now()
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO routes (`+routeColumns+`) VALUES (?, ?, ?, ?, ?, ?)
+	if r.OwnerTrigger == "" {
+		r.OwnerTrigger = TriggerAll
+	}
+	if r.OthersTrigger == "" {
+		r.OthersTrigger = TriggerNone
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM held_messages WHERE account_id = ? AND chat_jid = ?`, r.AccountID, r.ChatJID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO routes (`+routeColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (account_id, chat_jid) DO UPDATE SET
 			chat_name = excluded.chat_name, agent_id = excluded.agent_id,
-			require_mention = excluded.require_mention, created_at = excluded.created_at`,
-		r.AccountID, r.ChatJID, r.ChatName, r.AgentID, r.RequireMention, ts(r.CreatedAt))
-	return err
+			owner_trigger = excluded.owner_trigger, others_trigger = excluded.others_trigger,
+			created_at = excluded.created_at`,
+		r.AccountID, r.ChatJID, r.ChatName, r.AgentID, r.OwnerTrigger, r.OthersTrigger, ts(r.CreatedAt)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetRouteTriggers changes which messages in a chat start a turn.
+func (s *Store) SetRouteTriggers(ctx context.Context, accountID, chatJID, owner, others string) error {
+	return affected(s.db.ExecContext(ctx, `UPDATE routes SET owner_trigger = ?, others_trigger = ? WHERE account_id = ? AND chat_jid = ?`,
+		owner, others, accountID, chatJID))
 }
 
 // Route returns the binding for a chat.

@@ -96,13 +96,17 @@ func (g *Gateway) convert(ctx context.Context, a *account, e *events.Message) (o
 				msg.Mentioned = true
 			}
 		}
+		// Replying to one of the account's own messages addresses it too.
+		if p, err := types.ParseJID(ctxInfo.GetParticipant()); err == nil && slices.Contains(own, p.ToNonAD().String()) {
+			msg.Mentioned = true
+		}
 		if q := ctxInfo.GetQuotedMessage(); q != nil {
 			if quoted := quotedText(q); quoted != "" {
 				msg.Text = "> " + strings.ReplaceAll(quoted, "\n", "\n> ") + "\n\n" + msg.Text
 			}
 		}
 	}
-	msg.ChatName = g.chatName(ctx, cli, info)
+	msg.ChatName, msg.GroupSize = g.chatName(ctx, cli, info)
 	return msg, true
 }
 
@@ -165,23 +169,26 @@ type nameCache struct {
 
 type cachedName struct {
 	name string
+	size int
 	at   time.Time
 }
 
-func (g *Gateway) chatName(ctx context.Context, cli *whatsmeow.Client, info types.MessageInfo) string {
+// chatName returns a chat's display name and, for groups, its size.
+func (g *Gateway) chatName(ctx context.Context, cli *whatsmeow.Client, info types.MessageInfo) (string, int) {
 	key := info.Chat.String()
 	g.names.mu.Lock()
 	if c, ok := g.names.names[key]; ok && time.Since(c.at) < time.Hour {
 		g.names.mu.Unlock()
-		return c.name
+		return c.name, c.size
 	}
 	g.names.mu.Unlock()
 
 	var name string
+	var size int
 	switch {
 	case info.IsGroup:
 		if gi, err := cli.GetGroupInfo(ctx, info.Chat); err == nil {
-			name = gi.Name
+			name, size = gi.Name, len(gi.Participants)
 		}
 	case cli.Store.ID != nil && (info.Chat.User == cli.Store.ID.User || info.Chat.User == cli.Store.LID.User):
 		name = "Message yourself"
@@ -197,9 +204,9 @@ func (g *Gateway) chatName(ctx context.Context, cli *whatsmeow.Client, info type
 	if g.names.names == nil {
 		g.names.names = map[string]cachedName{}
 	}
-	g.names.names[key] = cachedName{name, time.Now()}
+	g.names.names[key] = cachedName{name, size, time.Now()}
 	g.names.mu.Unlock()
-	return name
+	return name, size
 }
 
 func firstNonEmpty(ss ...string) string {

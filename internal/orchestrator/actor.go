@@ -80,8 +80,17 @@ func (a *actor) startTurn() {
 	if a.turn != nil || len(a.pending) == 0 {
 		return
 	}
-	batch := a.pending
-	a.pending = nil
+	// One turn answers one chat; messages from other chats wait their turn.
+	first := a.pending[0]
+	var batch, rest []Message
+	for _, msg := range a.pending {
+		if msg.AccountID == first.AccountID && msg.Chat == first.Chat {
+			batch = append(batch, msg)
+		} else {
+			rest = append(rest, msg)
+		}
+	}
+	a.pending = rest
 	t := &activeTurn{id: ids.New()}
 	a.turn = t
 	go func() {

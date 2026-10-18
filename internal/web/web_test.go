@@ -326,3 +326,33 @@ func TestOwnerNumbersAndAccountKind(t *testing.T) {
 		t.Fatal("agent page does not explain where to send the link code")
 	}
 }
+
+func TestRouteTriggers(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	alice, bob := f.login(t, "alice@example.com"), f.login(t, "bob@example.com")
+	id := alice.createAgent("bot")
+	acct := &store.Account{UserID: f.users["alice@example.com"].ID, JID: "1:1@s.whatsapp.net", Phone: "15550001111", Status: store.AccountConnected}
+	f.store.CreateAccount(ctx, acct)
+	f.store.PutRoute(ctx, &store.Route{AccountID: acct.ID, ChatJID: "team@g.us", ChatName: "team", AgentID: id})
+	f.store.Hold(ctx, &store.HeldMessage{AccountID: acct.ID, ChatJID: "team@g.us", MessageID: "m1", Sender: "x", Text: "lunch?"})
+
+	if _, body := alice.get("/agents/" + id); !strings.Contains(body, "1 waiting") {
+		t.Fatal("agent page does not show the held message")
+	}
+	form := url.Values{"account": {acct.ID}, "chat": {"team@g.us"}, "owner": {"mentions"}, "others": {"all"}}
+	if code, _ := bob.post("/agents/"+id+"/routes/triggers", form); code != http.StatusNotFound {
+		t.Fatalf("bob changed alice's chat: %d", code)
+	}
+	bad := url.Values{"account": {acct.ID}, "chat": {"team@g.us"}, "owner": {"sometimes"}, "others": {"all"}}
+	if code, _ := alice.post("/agents/"+id+"/routes/triggers", bad); code != http.StatusBadRequest {
+		t.Fatalf("invalid setting accepted: %d", code)
+	}
+	if code, _ := alice.post("/agents/"+id+"/routes/triggers", form); code != http.StatusSeeOther {
+		t.Fatalf("save: %d", code)
+	}
+	r, _ := f.store.Route(ctx, acct.ID, "team@g.us")
+	if r.OwnerTrigger != store.TriggerMentions || r.OthersTrigger != store.TriggerAll {
+		t.Fatalf("triggers = %s/%s", r.OwnerTrigger, r.OthersTrigger)
+	}
+}

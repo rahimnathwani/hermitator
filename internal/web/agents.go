@@ -34,6 +34,7 @@ func (a agentView) State() string {
 type routeView struct {
 	*store.Route
 	Account string
+	Held    int
 }
 
 func (s *Server) agentFor(r *http.Request, v *viewer) (*store.Agent, error) {
@@ -56,7 +57,7 @@ func (s *Server) view(r *http.Request, a *store.Agent, withRoutes bool) agentVie
 			if acct, err := s.Store.Account(r.Context(), rt.AccountID); err == nil {
 				name = "+" + acct.Phone
 			}
-			av.Routes = append(av.Routes, routeView{Route: rt, Account: name})
+			av.Routes = append(av.Routes, routeView{Route: rt, Account: name, Held: s.Store.HeldCount(r.Context(), rt.AccountID, rt.ChatJID)})
 		}
 	}
 	return av
@@ -318,6 +319,31 @@ func (s *Server) deleteRoute(w http.ResponseWriter, r *http.Request, v *viewer) 
 	s.Store.DeleteRoute(ctx, route.AccountID, route.ChatJID)
 	s.audit(r, v, "route.unlink", "agent="+a.ID+" chat="+route.ChatJID)
 	s.back(w, r, "/agents/"+a.ID, "Unlinked.")
+}
+
+func (s *Server) routeTriggers(w http.ResponseWriter, r *http.Request, v *viewer) {
+	a, err := s.agentFor(r, v)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	ctx := r.Context()
+	route, err := s.Store.Route(ctx, formValue(r, "account"), formValue(r, "chat"))
+	if err != nil || route.AgentID != a.ID {
+		http.NotFound(w, r)
+		return
+	}
+	owner, others := formValue(r, "owner"), formValue(r, "others")
+	if !store.ValidTrigger(owner) || !store.ValidTrigger(others) {
+		http.Error(w, "unknown setting", http.StatusBadRequest)
+		return
+	}
+	if err := s.Store.SetRouteTriggers(ctx, route.AccountID, route.ChatJID, owner, others); err != nil {
+		s.back(w, r, "/agents/"+a.ID, "Could not save: "+err.Error())
+		return
+	}
+	s.audit(r, v, "route.triggers", "agent="+a.ID+" chat="+route.ChatJID+" owner="+owner+" others="+others)
+	s.back(w, r, "/agents/"+a.ID, "Saved.")
 }
 
 // agentEvents streams an agent's live activity to its page.

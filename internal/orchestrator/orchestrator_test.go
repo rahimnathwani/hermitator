@@ -57,7 +57,8 @@ case "$text" in
     ;;
   *"sleep"*) sleep 30 ;;
 esac
-echo '{"type":"result","subtype":"success","is_error":false,"result":"**echo:** '"$text"'","session_id":"'"$sid"'","total_cost_usd":0.01}'
+# printf, not echo: some shells' echo expands the \n escapes in the JSON.
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"**echo:** '"$text"'","session_id":"'"$sid"'","total_cost_usd":0.01}'
 `
 
 type sent struct{ kind, chat, body string }
@@ -446,5 +447,112 @@ func TestInboxDoesNotFollowSymlinksOutOfTheSandbox(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(target); len(entries) != 0 {
 		t.Fatalf("attachment was written outside the sandbox: %v", entries)
+	}
+}
+
+// inGroup is a message in a group chat.
+func (e *env) inGroup(phone, text string) Message {
+	m := e.from(phone, text)
+	m.Chat, m.IsGroup, m.GroupSize, m.ChatName = "team@g.us", true, 3, "team"
+	m.SenderName = "+" + phone
+	return m
+}
+
+func TestHeldMessagesWaitForATrigger(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	const me, friend = "447700900123", "15550001111"
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	e.st.AddOwnerNumber(ctx, e.user.ID, me)
+
+	code, _, _ := e.m.LinkCode(ctx, e.agent.ID, false)
+	e.m.HandleMessage(ctx, e.inGroup(me, "/link "+code))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "mentioning @bot") {
+		t.Fatalf("link reply does not explain the group default: %q", got.body)
+	}
+	route, _ := e.st.Route(ctx, e.acct.ID, "team@g.us")
+	if route.OwnerTrigger != store.TriggerMentions || route.OthersTrigger != store.TriggerNone {
+		t.Fatalf("group defaults = %s/%s", route.OwnerTrigger, route.OthersTrigger)
+	}
+
+	// Chatter between people is held. Nothing wakes, nothing is answered.
+	e.m.HandleMessage(ctx, e.inGroup(friend, "lunch at noon?"))
+	e.m.HandleMessage(ctx, e.inGroup(me, "sounds good"))
+	e.m.HandleMessage(ctx, e.inGroup(friend, "@bot are you there?")) // others: none, so held too
+	time.Sleep(300 * time.Millisecond)
+	if n := e.st.HeldCount(ctx, e.acct.ID, "team@g.us"); n != 3 {
+		t.Fatalf("held %d messages, want 3", n)
+	}
+	if st := e.m.Status(e.agent.ID); st.State == sandbox.Running || st.Busy {
+		t.Fatalf("a held message woke the agent: %+v", st)
+	}
+	if turns, _ := e.st.Turns(ctx, e.agent.ID, 10); len(turns) != 0 {
+		t.Fatalf("held messages started %d turns", len(turns))
+	}
+
+	// Mentioning the agent starts a turn that carries the held messages.
+	e.m.HandleMessage(ctx, e.inGroup(me, "@bot what did they say?"))
+	got := e.rec.wait(t, "text")
+	for _, want := range []string{"Earlier messages", "lunch at noon?", "sounds good", "what did they say?"} {
+		if !strings.Contains(got.body, want) {
+			t.Fatalf("reply lacks %q:\n%s", want, got.body)
+		}
+	}
+	if n := e.st.HeldCount(ctx, e.acct.ID, "team@g.us"); n != 0 {
+		t.Fatalf("%d messages still held after delivery", n)
+	}
+	e.idle(t)
+
+	// Replying to the agent counts as a mention.
+	reply := e.inGroup(me, "and tomorrow?")
+	reply.Mentioned = true
+	e.m.HandleMessage(ctx, reply)
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "and tomorrow?") {
+		t.Fatalf("reply-to-agent did not trigger: %q", got.body)
+	}
+	e.idle(t)
+
+	// /listen opens the chat to everyone.
+	e.m.HandleMessage(ctx, e.inGroup(me, "/listen others all"))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "every message from other people") {
+		t.Fatalf("/listen reply = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.inGroup(friend, "hello bot"))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "[+"+friend+"] hello bot") {
+		t.Fatalf("friend's message was not labelled and answered: %q", got.body)
+	}
+}
+
+func TestEachChatGetsItsOwnTurn(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	e.link(t, "one@s.whatsapp.net")
+	e.link(t, "two@s.whatsapp.net")
+	e.m.HandleMessage(ctx, e.msg("one@s.whatsapp.net", "first chat", true))
+	e.m.HandleMessage(ctx, e.msg("two@s.whatsapp.net", "second chat", true))
+	replies := map[string]string{}
+	for len(replies) < 2 {
+		got := e.rec.wait(t, "text")
+		replies[got.chat] = got.body
+	}
+	if !strings.Contains(replies["one@s.whatsapp.net"], "first chat") || strings.Contains(replies["one@s.whatsapp.net"], "second") ||
+		!strings.Contains(replies["two@s.whatsapp.net"], "second chat") {
+		t.Fatalf("replies crossed chats: %+v", replies)
+	}
+}
+
+func TestMentionsName(t *testing.T) {
+	for text, want := range map[string]bool{
+		"@bot hi":         true,
+		"hey @Bot, look":  true,
+		"@bottle of wine": false,
+		"email bot@x.com": false,
+		"no mention":      false,
+		"@bot":            true,
+	} {
+		if got := mentionsName(text, "bot"); got != want {
+			t.Errorf("mentionsName(%q) = %v", text, got)
+		}
 	}
 }

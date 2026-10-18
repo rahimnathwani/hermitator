@@ -48,15 +48,28 @@
       <h3>Linked chats</h3>
       <ul class="routes">
         {{range .}}
-        <li>
-          <span><strong>{{if .ChatName}}{{.ChatName}}{{else}}{{.ChatJID}}{{end}}</strong> <span class="muted">via {{.Account}}</span></span>
-          <form method="post" action="/agents/{{$a.ID}}/routes/delete">
+        <li class="route">
+          <div class="route-head">
+            <span><strong>{{if .ChatName}}{{.ChatName}}{{else}}{{.ChatJID}}{{end}}</strong> <span class="muted">via {{.Account}}</span>{{if .Held}} <span class="muted">· {{.Held}} waiting</span>{{end}}</span>
+            <form method="post" action="/agents/{{$a.ID}}/routes/delete">
+              <input type="hidden" name="account" value="{{.AccountID}}"><input type="hidden" name="chat" value="{{.ChatJID}}">
+              <button class="small">Unlink</button>
+            </form>
+          </div>
+          <form method="post" action="/agents/{{$a.ID}}/routes/triggers" class="inline-form triggers">
             <input type="hidden" name="account" value="{{.AccountID}}"><input type="hidden" name="chat" value="{{.ChatJID}}">
-            <button class="small">Unlink</button>
+            <label>You wake it
+              <select name="owner">{{template "trigger-options" .OwnerTrigger}}</select>
+            </label>
+            <label>Others wake it
+              <select name="others">{{template "trigger-options" .OthersTrigger}}</select>
+            </label>
+            <button class="small">Save</button>
           </form>
         </li>
         {{end}}
       </ul>
+      <p class="muted small">Messages that do not wake the agent are kept, and reach it as context with the next one that does. Mentioning it means an @mention of its number, a reply to one of its messages, or typing <code>@{{$a.Name}}</code>.</p>
       {{end}}
     </section>
 
