@@ -192,6 +192,10 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 	switch cmd.Name {
 	case "help":
 		reply(helpText)
+	case "retry":
+		m.retry(ctx, agentID, msg, reply)
+	case "sh":
+		go m.shell(agentID, cmd.Arg, reply)
 	case "unlink":
 		if route == nil {
 			reply("This chat is not linked; it reaches *" + ag.Name + "* as the account's fallback agent. Change that in hermitator.")

@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -127,5 +128,27 @@ func TestOwnHarnessCopies(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(outside); string(b) != "keep" {
 		t.Fatal("followed a planted symlink out of the upper layer")
+	}
+}
+
+func TestLimitAll(t *testing.T) {
+	for _, c := range []struct{ total, want uint64 }{
+		{64 << 30, 60 << 30},       // the reserve is at most 4 GiB
+		{8 << 30, 8<<30 - 8<<30/5}, // a fifth
+		{2 << 30, 1 << 30},         // at least 1 GiB
+	} {
+		root := t.TempDir()
+		got, err := LimitAll(root, c.total)
+		if err != nil || got != c.want {
+			t.Fatalf("LimitAll(%d) = %d, %v; want %d", c.total, got, err, c.want)
+		}
+		b, _ := os.ReadFile(filepath.Join(root, AgentsCgroup, "memory.max"))
+		w, _ := os.ReadFile(filepath.Join(root, AgentsCgroup, "cpu.weight"))
+		if string(b) != fmt.Sprint(c.want) || string(w) != "50" {
+			t.Fatalf("wrote memory.max=%s cpu.weight=%s", b, w)
+		}
+	}
+	if _, err := LimitAll(t.TempDir(), 512<<20); err == nil {
+		t.Fatal("limited a machine with less memory than the reserve")
 	}
 }

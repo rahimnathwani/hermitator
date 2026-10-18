@@ -77,6 +77,13 @@ func serve() error {
 		if err := network.Setup(ctx); err != nil {
 			return fmt.Errorf("network: %w", err)
 		}
+		if total, err := sandbox.MemTotal(); err != nil {
+			log.Warn("agents' shared limits not set", "err", err)
+		} else if limit, err := sandbox.LimitAll("/sys/fs/cgroup", total); err != nil {
+			log.Warn("agents' shared limits not set", "err", err)
+		} else {
+			log.Info("all agents together", "memory_max_gib", limit>>30, "cpu_weight", "half of the host's")
+		}
 		runsc := &sandbox.Runsc{Binary: cfg.Runsc, Root: cfg.RunscRoot, Platform: cfg.Platform, Network: network, Log: log}
 		if err := runsc.Check(ctx); err != nil {
 			return err

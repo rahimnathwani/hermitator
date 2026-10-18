@@ -200,6 +200,8 @@ hermitator answers itself:
 | `/status` | What the agent is doing, its state and disk use |
 | `/sleep` | Suspend it now (alias `/exit`) |
 | `/stop` | Abort the current turn |
+| `/retry` | Run the last message again, after a failure or a restart |
+| `/sh COMMAND` | Run a shell command in the sandbox and get its output, without the model |
 | `/new` | Start a fresh conversation; files are kept (alias `/clear`) |
 | `/model`, `/model opus`, `/model default` | Show or change the model |
 | `/effort`, `/effort high`, `/effort default` | Show or change how hard it thinks |

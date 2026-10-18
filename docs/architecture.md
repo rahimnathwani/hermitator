@@ -248,5 +248,19 @@ Sandboxes are separate processes in their own cgroups, and runsc keeps its
 state in `/run/hermitator`, which systemd preserves across service restarts.
 So upgrading hermitator does not touch running agents. At startup it marks
 turns that were in flight as interrupted, reconciles each agent's state, and
-the reaper picks up running agents as usual. After a host reboot, every agent
-is stopped or checkpointed and wakes on its next message.
+the reaper picks up running agents as usual. Each chat whose turn was cut
+short is told so once WhatsApp reconnects, and `/retry` sends the turn's
+whole prompt again (turns keep it for exactly this), prefaced with a note
+to check what was already done. Nothing is retried automatically, since a
+turn may have pushed code or sent something before it stopped. After a
+host reboot, every agent is stopped or checkpointed and wakes on its next
+message.
+
+## Shared limits
+
+Each sandbox has its own memory limit, and all of them sit under one
+cgroup, `/hermitator`, which hermitator caps at startup: memory at the
+host's total less a fifth (at least 1 GiB, at most 4 GiB kept back), and
+CPU weight at half the default. Agents that are each within their limit
+can then still not exhaust the host between them; if they try, the OOM
+killer chooses among sandboxes, never hermitator, Caddy or sshd.

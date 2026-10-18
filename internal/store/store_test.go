@@ -186,9 +186,12 @@ func TestTurns(t *testing.T) {
 	if err := s.FinishTurn(ctx, t1); err != nil {
 		t.Fatal(err)
 	}
-	n, err := s.InterruptRunningTurns(ctx)
-	if err != nil || n != 1 {
-		t.Fatalf("InterruptRunningTurns = %d, %v", n, err)
+	cut, err := s.InterruptRunningTurns(ctx)
+	if err != nil || len(cut) != 1 || cut[0].ID != t2.ID {
+		t.Fatalf("InterruptRunningTurns = %v, %v", cut, err)
+	}
+	if last, err := s.LastChatTurn(ctx, a.ID, t2.AccountID, t2.ChatJID); err != nil || last.ID != t2.ID {
+		t.Fatalf("LastChatTurn = %v, %v", last, err)
 	}
 	turns, err := s.Turns(ctx, a.ID, 10)
 	if err != nil || len(turns) != 2 || turns[0].ID != t2.ID || turns[0].Status != TurnInterrupted {

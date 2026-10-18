@@ -31,6 +31,11 @@ type Config struct {
 	ReapInterval time.Duration
 	// MaxTurn bounds a single turn.
 	MaxTurn time.Duration
+	// RetryNoticeDelay is how long to wait between attempts to tell chats
+	// that a restart interrupted their turn.
+	RetryNoticeDelay time.Duration
+	// ShellTimeout bounds a /sh command.
+	ShellTimeout time.Duration
 	// PublicURL is the web UI's address, used in replies.
 	PublicURL string
 }
@@ -64,6 +69,12 @@ func New(cfg Config, st *store.Store, box *secrets.Box, rt sandbox.Runtime, log 
 	if cfg.MaxTurn == 0 {
 		cfg.MaxTurn = 2 * time.Hour
 	}
+	if cfg.RetryNoticeDelay == 0 {
+		cfg.RetryNoticeDelay = 15 * time.Second
+	}
+	if cfg.ShellTimeout == 0 {
+		cfg.ShellTimeout = 2 * time.Minute
+	}
 	return &Manager{cfg: cfg, store: st, box: box, rt: rt, log: log, actors: map[string]*actor{}, msgr: nopMessenger{}}
 }
 
@@ -78,10 +89,13 @@ func (m *Manager) SetTranscriber(t Transcriber) { m.stt = t }
 // are put to sleep once they have been idle for their timeout.
 func (m *Manager) Start(ctx context.Context) error {
 	m.ctx = ctx
-	if n, err := m.store.InterruptRunningTurns(ctx); err != nil {
+	cut, err := m.store.InterruptRunningTurns(ctx)
+	if err != nil {
 		return err
-	} else if n > 0 {
-		m.log.Warn("marked turns interrupted by restart", "count", n)
+	}
+	if len(cut) > 0 {
+		m.log.Warn("marked turns interrupted by restart", "count", len(cut))
+		go m.tellInterrupted(cut)
 	}
 	agents, err := m.store.Agents(ctx, "")
 	if err != nil {

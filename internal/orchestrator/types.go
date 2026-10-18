@@ -42,6 +42,9 @@ type Message struct {
 	// turn; /once sets them.
 	Model  string
 	Effort string
+	// Prompt, when set, is sent as it is instead of Text: /retry replays
+	// a stored prompt this way.
+	Prompt string
 }
 
 // Media is an attachment. It is only downloaded if the chat is routed.

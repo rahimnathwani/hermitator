@@ -104,7 +104,7 @@ func TestClaude(t *testing.T) {
 	}
 
 	a := args()
-	for _, want := range []string{"--input-format\nstream-json", "--dangerously-skip-permissions", "--model\nopus", "--effort\nhigh", "--session-id\n4a0d6c4e-8a5c-4bb8-9c55-a1d7e1f2c3b4", "--append-system-prompt\nBe brief."} {
+	for _, want := range []string{"--input-format\nstream-json", "--dangerously-skip-permissions", "--model\nopus", "--effort\nhigh", "--disallowedTools\nAskUserQuestion,EnterPlanMode,ExitPlanMode", "--session-id\n4a0d6c4e-8a5c-4bb8-9c55-a1d7e1f2c3b4", "--append-system-prompt\nBe brief."} {
 		if !strings.Contains(a, want) {
 			t.Errorf("args missing %q:\n%s", want, a)
 		}

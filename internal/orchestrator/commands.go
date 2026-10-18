@@ -25,6 +25,8 @@ var commandAliases = map[string]string{
 	"once":   "once",
 	"switch": "switch",
 	"help":   "help",
+	"retry":  "retry",
+	"sh":     "sh",
 }
 
 // ParseCommand recognises hermitator's chat commands. Anything else that
@@ -47,6 +49,8 @@ const helpText = `*hermitator commands*
 /status: what this agent is doing
 /sleep: suspend the sandbox now (alias /exit)
 /stop: abort the running turn
+/retry: run the last message again, after a failure or a restart
+/sh COMMAND: run a shell command in the sandbox and see its output (no model)
 /new: start a fresh conversation, keeping all files (alias /clear)
 /model [NAME]: show or change the model (/model default to reset)
 /effort [LEVEL]: show or change how hard it thinks

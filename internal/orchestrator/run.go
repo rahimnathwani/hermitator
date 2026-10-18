@@ -36,6 +36,7 @@ const systemPrompt = `You are running inside hermitator: an isolated Linux machi
 - When nobody is talking to you the machine is suspended. Background processes you leave running (dev servers, databases) are frozen and continue when the next message arrives. Start them with their output redirected to a file, for example: nohup npm run dev > /tmp/dev.log 2>&1 &. The shell you start them from goes away at the end of your turn.
 - For screenshots and browser automation there is Playwright for Python (from playwright.sync_api import sync_playwright) and for Node (require("playwright")), plus a chromium command for one-off captures. After taking a screenshot, look at it before sending it, so you know the page really loaded.
 - Claude Code and pi come with this machine and are updated for you. Do not update or reinstall them yourself (npm install -g, claude update, pi update self): a copy you install hides every later update. Plugins, extensions, skills and MCP servers are yours to install.
+- A table, chart or diagram wider than a phone screen is unreadable in WhatsApp. Render it to an image instead (HTML or Mermaid through Playwright), look at it, and send it with whatsapp-send.
 - Each message starts you afresh in the same conversation, so anything you install or configure is loaded from the next message, not this one; say so when you install something. Add MCP servers for the whole machine (claude mcp add --scope user ...), not in a project .mcp.json, which needs approval you cannot give here. A server that signs in through a browser cannot sign in from here: tell the user to open your Terminal tab on the hermitator page, run claude, and sign in with /mcp.`
 
 func (m *Manager) agentPrompt(spec *sandbox.Spec, last Message) string {
@@ -115,7 +116,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 
 	rec := &store.Turn{
 		ID: t.id, AgentID: agent.ID, AccountID: last.AccountID, ChatJID: last.Chat,
-		Harness: agent.Harness, SessionID: agent.SessionID, Input: clip(prompt, 4000), Wake: wake, WakeMS: wakeMS,
+		Harness: agent.Harness, SessionID: agent.SessionID, Input: clip(prompt, 4000), Prompt: prompt, Wake: wake, WakeMS: wakeMS,
 	}
 	if err := m.store.CreateTurn(ctx, rec); err != nil {
 		log.Error("record turn", "err", err)
@@ -161,6 +162,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	}
 
 	// Deliver files as soon as the agent queues them.
+	var filesSent atomic.Int32
 	outboxDone := make(chan struct{})
 	outboxStopped := make(chan struct{})
 	go func() {
@@ -172,7 +174,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 			case <-outboxDone:
 				return
 			case <-tick.C:
-				m.deliverOutbox(ctx, spec, chat)
+				filesSent.Add(int32(m.deliverOutbox(ctx, spec, chat)))
 			}
 		}
 	}()
@@ -222,7 +224,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	stopFollow()
 	close(outboxDone)
 	<-outboxStopped
-	m.deliverOutbox(ctx, spec, chat)
+	filesSent.Add(int32(m.deliverOutbox(ctx, spec, chat)))
 	if err != nil && !died.Load() {
 		client.Cancel(t.id, 15*time.Second)
 	} else {
@@ -249,6 +251,11 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 			detail = exit.String()
 		}
 		return m.finish(ctx, chat, rec, nil, "⚠️ The agent exited without replying: "+detail, true)
+	case result.Type == turn.EventResult && !result.IsError && strings.TrimSpace(result.Text) == "" && filesSent.Load() == 0:
+		// Said nothing and sent nothing: from the chat, indistinguishable
+		// from a turn that failed, so it counts as one.
+		rec.CostUSD = result.CostUSD
+		return m.finish(ctx, chat, rec, nil, "⚠️ The agent finished without replying. Send /retry to try again.", true)
 	}
 	return m.finish(ctx, chat, rec, result, "", true)
 }
@@ -296,9 +303,8 @@ func (m *Manager) finish(ctx context.Context, chat chatRef, rec *store.Turn, res
 	default:
 		rec.Status, rec.Output, rec.CostUSD = store.TurnOK, result.Text, result.CostUSD
 		deliver = func() {
-			if strings.TrimSpace(result.Text) == "" {
-				chat.send("_(the agent finished without a reply)_")
-			} else {
+			// No text is fine when the agent's answer was the files it sent.
+			if strings.TrimSpace(result.Text) != "" {
 				chat.sendAgent(result.Text)
 			}
 			chat.react("✅")
@@ -345,6 +351,10 @@ func (m *Manager) buildPrompt(ctx context.Context, spec *sandbox.Spec, batch []M
 	var parts []string
 	var images []turn.Image
 	for i, msg := range batch {
+		if msg.Prompt != "" {
+			parts = append(parts, msg.Prompt)
+			continue
+		}
 		var lines []string
 		if msg.Media != nil {
 			note, img := m.saveMedia(ctx, spec, msg, i)
@@ -455,15 +465,15 @@ func readShared(spec *sandbox.Spec, name string) ([]byte, error) {
 }
 
 // deliverOutbox sends every file the agent has queued.
-func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat chatRef) {
+func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat chatRef) (sentFiles int) {
 	root, err := spec.Shared()
 	if err != nil {
-		return
+		return 0
 	}
 	defer root.Close()
 	dir, err := root.Open(turn.OutboxDir)
 	if err != nil {
-		return
+		return 0
 	}
 	names, _ := dir.Readdirnames(-1)
 	dir.Close()
@@ -491,11 +501,14 @@ func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat ch
 		if err != nil {
 			m.log.Warn("send outbox file", "agent", spec.ID, "file", file, "err", err)
 			chat.send(fmt.Sprintf("⚠️ Could not send %s: %v", displayName(file), err))
+		} else {
+			sentFiles++
 		}
 		root.Rename(in(file), sent(file))
 		root.Rename(in(name), sent(name))
 		m.hub.publish(spec.ID, UIEvent{Kind: "event", Event: &turn.Event{Type: "sent", Text: file}})
 	}
+	return sentFiles
 }
 
 // readRegular reads a regular file of at most maxOutboxFile bytes.
@@ -608,4 +621,62 @@ func clip(s string, n int) string {
 		return string(r[:n-1]) + "…"
 	}
 	return s
+}
+
+// tellInterrupted tells each chat whose turn a restart cut short, once
+// WhatsApp is back: until then sends fail, so it tries for a few minutes.
+func (m *Manager) tellInterrupted(turns []*store.Turn) {
+	const text = "⚠️ hermitator restarted while working on your last message, so it stopped partway. Send /retry to run it again."
+	pending := map[[2]string]bool{}
+	for _, t := range turns {
+		if t.AccountID != "" && t.ChatJID != "" {
+			pending[[2]string{t.AccountID, t.ChatJID}] = true
+		}
+	}
+	for try := 0; try < 12 && len(pending) > 0; try++ {
+		select {
+		case <-m.ctx.Done():
+			return
+		case <-time.After(m.cfg.RetryNoticeDelay):
+		}
+		for chat := range pending {
+			if err := m.msgr.SendText(m.ctx, chat[0], chat[1], text); err == nil {
+				delete(pending, chat)
+			}
+		}
+	}
+}
+
+// retry runs the last turn in this chat again, if it did not succeed.
+func (m *Manager) retry(ctx context.Context, agentID string, msg Message, reply func(string)) {
+	last, err := m.store.LastChatTurn(ctx, agentID, msg.AccountID, msg.Chat)
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		reply("There is nothing to retry in this chat yet.")
+		return
+	case err != nil:
+		reply("⚠️ Could not look up the last message: " + err.Error())
+		return
+	case last.Status == store.TurnRunning:
+		reply("It is still working on that one.")
+		return
+	case last.Status == store.TurnOK:
+		reply("The last message here went through, so there is nothing to retry.")
+		return
+	case last.Prompt == "":
+		reply("That message is from before hermitator kept enough to retry it. Please send it again.")
+		return
+	}
+	why := "failed"
+	switch last.Status {
+	case store.TurnInterrupted:
+		why = "was cut short by a restart"
+	case store.TurnAborted:
+		why = "was stopped"
+	}
+	again := msg
+	again.Text, again.Media = "", nil
+	again.Prompt = "(The user asked to retry this message; the previous attempt " + why +
+		". Check what was already done before repeating any step.)\n\n" + last.Prompt
+	m.actor(agentID).do(func(a *actor) { a.enqueue(again) })
 }

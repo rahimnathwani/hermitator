@@ -60,6 +60,9 @@ func runClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit
 		"--verbose",
 		// The gVisor sandbox is the permission boundary.
 		"--dangerously-skip-permissions",
+		// Nobody is at a screen to answer these; the agent asks in its
+		// reply instead, and the user answers in the chat.
+		"--disallowedTools", "AskUserQuestion,EnterPlanMode,ExitPlanMode",
 	}
 	if req.SessionID != "" {
 		if claudeSessionExists(req.SessionID) {

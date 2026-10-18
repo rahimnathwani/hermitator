@@ -58,6 +58,16 @@ case "$text" in
     echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"whatsapp-send report.txt"}}]}}'
     ;;
   *"sleep"*) sleep 30 ;;
+  *"say nothing"*)
+    printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"","session_id":"'"$sid"'","total_cost_usd":0.001}'
+    exit 0 ;;
+  *"flaky"*)
+    # Fails the first time only, like a transient upstream error.
+    if [ ! -f "$HOME/flaked" ]; then
+      touch "$HOME/flaked"
+      printf '%s\n' '{"type":"result","subtype":"error","is_error":true,"result":"upstream overloaded","session_id":"'"$sid"'"}'
+      exit 0
+    fi ;;
 esac
 # Like Claude Code, report the session's running total: a cent per turn.
 total=$(wc -l < "$HOME/modes" | tr -d ' ')
@@ -718,5 +728,99 @@ func TestParseOnce(t *testing.T) {
 	pi := &store.Agent{Harness: store.HarnessPi, PiProvider: ProviderDeepSeek}
 	if m, e, text := parseOnce(pi, "deepseek-flash minimal: hi"); m != "deepseek-flash" || e != "minimal" || text != "hi" {
 		t.Errorf("pi parseOnce = %q, %q, %q", m, e, text)
+	}
+}
+
+func TestRetryAfterAFailure(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	say := func(text string) { e.m.HandleMessage(ctx, e.msg(chat, text, true)) }
+
+	say("/retry")
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "nothing to retry") {
+		t.Fatalf("/retry with no turns = %q", got.body)
+	}
+	say("flaky thing")
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "upstream overloaded") {
+		t.Fatalf("failure = %q", got.body)
+	}
+	e.idle(t)
+	say("/retry")
+	got := e.rec.wait(t, "text")
+	if !strings.Contains(got.body, "flaky thing") || !strings.Contains(got.body, "retry") {
+		t.Fatalf("retried reply = %q", got.body)
+	}
+	e.idle(t)
+	say("/retry")
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "went through") {
+		t.Fatalf("/retry after success = %q", got.body)
+	}
+}
+
+func TestSilentTurnIsAFailure(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "say nothing", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "without replying") || !strings.Contains(got.body, "/retry") {
+		t.Fatalf("silent turn = %q", got.body)
+	}
+	if got := e.rec.wait(t, "react"); got.body != "❌" {
+		t.Fatalf("silent turn reaction = %q", got.body)
+	}
+	e.idle(t)
+	turns, _ := e.st.Turns(ctx, e.agent.ID, 1)
+	if turns[0].Status != store.TurnError || turns[0].CostUSD == 0 {
+		t.Fatalf("silent turn recorded as %s costing %v", turns[0].Status, turns[0].CostUSD)
+	}
+}
+
+func TestRestartTellsTheChat(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.cfg.RetryNoticeDelay = 10 * time.Millisecond
+	left := &store.Turn{AgentID: e.agent.ID, AccountID: e.acct.ID, ChatJID: chat, Harness: store.HarnessClaude, Prompt: "deploy the site"}
+	e.st.CreateTurn(ctx, left)
+	cut, _ := e.st.InterruptRunningTurns(ctx)
+	go e.m.tellInterrupted(cut)
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "restarted") || !strings.Contains(got.body, "/retry") {
+		t.Fatalf("restart notice = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/retry", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "deploy the site") || !strings.Contains(got.body, "restart") {
+		t.Fatalf("retry of an interrupted turn = %q", got.body)
+	}
+}
+
+func TestShellCommand(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "/sh echo hello; echo oops >&2; exit 3", true))
+	got := e.rec.wait(t, "text")
+	if !strings.Contains(got.body, "```hello\noops```") || !strings.Contains(got.body, "3") {
+		t.Fatalf("/sh reply = %q", got.body)
+	}
+	if turns, _ := e.st.Turns(ctx, e.agent.ID, 1); len(turns) != 0 {
+		t.Fatal("/sh ran a model turn")
+	}
+	// Someone else in the chat cannot run commands.
+	e.m.HandleMessage(ctx, e.from("15550009999", "/sh id"))
+	time.Sleep(300 * time.Millisecond)
+	e.rec.mu.Lock()
+	defer e.rec.mu.Unlock()
+	for _, s := range e.rec.log {
+		if strings.Contains(s.body, "uid=") {
+			t.Fatal("a stranger ran /sh")
+		}
 	}
 }
