@@ -82,3 +82,10 @@ func TestInstallTools(t *testing.T) {
 		t.Fatal("unreferenced bundle survived pruning")
 	}
 }
+
+func TestOverlayCanChangeImage(t *testing.T) {
+	s := &Spec{Dir: "/a", Image: Image{Rootfs: "/img/universal-2/rootfs"}}
+	if opts := overlayOptions(s); !strings.Contains(opts, "index=off") {
+		t.Fatalf("overlay options %q would pin the upper layer to its first image", opts)
+	}
+}

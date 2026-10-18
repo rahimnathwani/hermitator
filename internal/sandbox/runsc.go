@@ -371,9 +371,19 @@ func (r *Runsc) mount(ctx context.Context, s *Spec) error {
 	if _, err := os.Stat(filepath.Join(s.Image.Rootfs, "bin")); err != nil {
 		return fmt.Errorf("image %s is missing: %w", s.Image.Name, err)
 	}
-	opts := "lowerdir=" + s.Image.Rootfs + ",upperdir=" + s.upper() + ",workdir=" + s.work()
-	_, err := command(ctx, "mount", "-t", "overlay", "overlay", "-o", opts, s.merged())
+	_, err := command(ctx, "mount", "-t", "overlay", "overlay", "-o", overlayOptions(s), s.merged())
 	return err
+}
+
+// overlayOptions are the OverlayFS mount options for a sandbox's root.
+//
+// index=off: with the index feature (on by default in some kernels, Arch's
+// among them) an upper layer records the lower layer it was first used
+// with and refuses any other, which would make moving an agent to a newer
+// image impossible. hermitator needs nothing the index provides
+// (hard-link consistency on copy-up, NFS export).
+func overlayOptions(s *Spec) string {
+	return "lowerdir=" + s.Image.Rootfs + ",upperdir=" + s.upper() + ",workdir=" + s.work() + ",index=off"
 }
 
 // mounted reports whether path is a mount point.
