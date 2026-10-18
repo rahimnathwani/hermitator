@@ -86,6 +86,16 @@ func modelKey(harness, provider string) string {
 	return harness
 }
 
+// providerName is a pi provider's short display name.
+func providerName(id string) string {
+	for _, p := range orchestrator.PiProviders {
+		if p.ID == providerOrCodex(id) {
+			return p.Short
+		}
+	}
+	return id
+}
+
 func providerOrCodex(p string) string {
 	if p == "" {
 		return orchestrator.ProviderCodex

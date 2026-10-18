@@ -1,5 +1,21 @@
 {{define "content"}}
-<h1>{{.Title}}</h1>
-<p>{{.Data}}</p>
-<p><a href="/">Back to hermitator</a></p>
+{{if .V}}
+<section class="card empty">
+  <div class="tile">{{icon "alert"}}</div>
+  <h2>{{.Title}}</h2>
+  <p>{{.Data}}</p>
+  <a class="button" href="/">{{icon "back"}}Back to hermitator</a>
+</section>
+{{else}}
+<div class="auth">
+  <div class="auth-box">
+    <section class="card empty">
+      <div class="tile">{{icon "alert"}}</div>
+      <h2>{{.Title}}</h2>
+      <p>{{.Data}}</p>
+      <a class="button" href="/">{{icon "back"}}Back to hermitator</a>
+    </section>
+  </div>
+</div>
+{{end}}
 {{end}}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/orchestrator"
@@ -79,7 +80,14 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, v *viewer) {
 	_, hasPi := secrets[store.SecretPiAuth]
 	_, hasDeepSeek := secrets[store.SecretDeepSeekKey]
 	_, hasOpenRouter := secrets[store.SecretOpenRouterKey]
+	done := 0
+	for _, ok := range []bool{len(accounts) > 0, hasClaude || hasPi || hasDeepSeek || hasOpenRouter, len(agents) > 0, linked} {
+		if ok {
+			done++
+		}
+	}
 	s.render(w, r, v, "dashboard.html", "Agents", "agents", map[string]any{
+		"Done":        done,
 		"Agents":      views,
 		"Accounts":    accounts,
 		"CanCreate":   len(agents) < v.User.MaxAgents,
@@ -140,26 +148,55 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request, v *viewer) 
 	http.Redirect(w, r, "/agents/"+a.ID, http.StatusSeeOther)
 }
 
+// The agent page has tabs; each is its own URL so it can be linked and
+// reloaded, and saving a form returns to the tab it came from.
 func (s *Server) agentPage(w http.ResponseWriter, r *http.Request, v *viewer) {
+	s.agentTab(w, r, v, "overview", "agent.html", "")
+}
+
+func (s *Server) agentChatsPage(w http.ResponseWriter, r *http.Request, v *viewer) {
+	s.agentTab(w, r, v, "chats", "agent-chats.html", "Chats")
+}
+
+func (s *Server) agentSettingsPage(w http.ResponseWriter, r *http.Request, v *viewer) {
+	s.agentTab(w, r, v, "settings", "agent-settings.html", "Settings")
+}
+
+func (s *Server) agentTab(w http.ResponseWriter, r *http.Request, v *viewer, tab, page, title string) {
 	a, err := s.agentFor(r, v)
 	if err != nil {
 		s.fail(w, r, v, http.StatusNotFound, "No such agent.")
 		return
 	}
+	if title == "" {
+		title = a.Name
+	} else {
+		title = a.Name + " " + strings.ToLower(title)
+	}
+	s.render(w, r, v, page, title, "agents", s.agentData(r, a, tab))
+}
+
+// agentData is what every tab of the agent page shows or may show.
+func (s *Server) agentData(r *http.Request, a *store.Agent, tab string) map[string]any {
 	ctx := r.Context()
 	code, expires, _ := s.Agents.LinkCode(ctx, a.ID, false)
-	turns, _ := s.Store.Turns(ctx, a.ID, 30)
-	accounts, _ := s.Store.Accounts(ctx, v.User.ID)
-	s.render(w, r, v, "agent.html", a.Name, "agents", map[string]any{
+	accounts, _ := s.Store.Accounts(ctx, a.UserID)
+	d := map[string]any{
+		"Tab":         tab,
 		"Agent":       s.view(r, a, true),
 		"LinkCode":    code,
 		"LinkExpires": expires,
-		"Turns":       turns,
 		"Accounts":    accounts,
-		"Fields":      newAgentFields(a),
-		"Memory":      memoryChoice(a.MemoryMB),
 		"NewerImage":  s.Agents.NewerImage(a),
-	})
+	}
+	switch tab {
+	case "overview":
+		d["Turns"], _ = s.Store.Turns(ctx, a.ID, 30)
+	case "settings":
+		d["Fields"] = newAgentFields(a)
+		d["Memory"] = memoryChoice(a.MemoryMB)
+	}
+	return d
 }
 
 func (s *Server) agentCard(w http.ResponseWriter, r *http.Request, v *viewer) {
@@ -168,7 +205,7 @@ func (s *Server) agentCard(w http.ResponseWriter, r *http.Request, v *viewer) {
 		http.NotFound(w, r)
 		return
 	}
-	s.partial(w, "agent-card", s.view(r, a, true))
+	s.partial(w, "agent-row", s.view(r, a, true))
 }
 
 func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request, v *viewer) {

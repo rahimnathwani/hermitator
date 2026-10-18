@@ -1,88 +1,109 @@
 {{define "content"}}
 {{$d := .Data}}
-<div class="page-head"><h1>Settings</h1></div>
-<p class="muted">Credentials are encrypted at rest and handed to your agents' sandboxes only for the turns that need them.</p>
+<div class="page-head">
+  <div>
+    <h1>Settings</h1>
+    <p class="lede">Credentials are encrypted at rest, and handed to your agents' sandboxes only for the turns that need them.</p>
+  </div>
+</div>
 
-<div class="columns">
 <section class="card">
-  <h2>Your WhatsApp numbers</h2>
-  <p>Messages from these numbers count as you: they can run commands like <code>/status</code> and reach your fallback agents. A number is added when you send a <code>/link</code> code from it.</p>
+  <div class="card-head"><div><h2>Model credentials</h2><p>What your agents think with. Each harness uses its own.</p></div></div>
+
+  <div class="setting">
+    <div class="about">
+      <h3>Claude Code {{if $d.Claude.IsZero}}<span class="badge">Not set</span>{{else}}<span class="badge ok">Saved {{ago $d.Claude}}</span>{{end}}</h3>
+      <p>Uses your Claude subscription. On your own computer, run <code class="copy">claude setup-token</code> and paste the token it prints.</p>
+    </div>
+    <div class="control">
+      <form method="post" action="/settings/secret" class="inline-form">
+        <input type="hidden" name="field" value="claude">
+        <input type="password" name="value" placeholder="sk-ant-oat01-…" autocomplete="off" aria-label="Claude token"{{if $d.Claude.IsZero}} required{{end}}>
+        <button>{{if $d.Claude.IsZero}}Save{{else}}Replace{{end}}</button>
+        {{if not $d.Claude.IsZero}}<button name="remove" value="1" class="danger icon-only" title="Remove the token" aria-label="Remove the token">{{icon "trash"}}</button>{{end}}
+      </form>
+    </div>
+  </div>
+
+  <div class="setting">
+    <div class="about">
+      <h3>ChatGPT {{if $d.Codex}}<span class="badge ok">Connected {{ago $d.CodexSince}}</span>{{else}}<span class="badge">Not connected</span>{{end}}</h3>
+      <p>pi agents can use a ChatGPT Plus or Pro subscription, through OpenAI's Codex login.</p>
+    </div>
+    <div class="control">
+      {{if $d.Codex}}
+      <form method="post" action="/settings/codex/disconnect"><button class="small danger">Disconnect</button></form>
+      {{else if $d.HasAgents}}
+      <div data-mount="codex" data-src="/settings/codex/login">
+        <button data-start>{{icon "external"}}Connect ChatGPT</button>
+        <div data-device hidden class="section">
+          <p>Open <a data-url target="_blank" rel="noopener"></a> and enter</p>
+          <div class="codebox"><code data-user-code></code></div>
+          <p class="hint">Waiting for you to approve the login…</p>
+        </div>
+        <p data-message role="status" class="hint"></p>
+      </div>
+      {{else}}
+      <p class="muted small">Create an agent first: the login runs inside its sandbox.</p>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="setting">
+    <div class="about">
+      <h3>DeepSeek {{if $d.DeepSeek.IsZero}}<span class="badge">Not set</span>{{else}}<span class="badge ok">Saved {{ago $d.DeepSeek}}</span>{{end}}</h3>
+      <p>An API key from platform.deepseek.com, for pi agents.</p>
+    </div>
+    <div class="control">
+      <form method="post" action="/settings/secret" class="inline-form">
+        <input type="hidden" name="field" value="deepseek">
+        <input type="password" name="value" placeholder="sk-…" autocomplete="off" aria-label="DeepSeek API key">
+        <button>{{if $d.DeepSeek.IsZero}}Save{{else}}Replace{{end}}</button>
+        {{if not $d.DeepSeek.IsZero}}<button name="remove" value="1" class="danger icon-only" title="Remove the key" aria-label="Remove the key">{{icon "trash"}}</button>{{end}}
+      </form>
+    </div>
+  </div>
+
+  <div class="setting">
+    <div class="about">
+      <h3>OpenRouter {{if $d.OpenRouter.IsZero}}<span class="badge">Not set</span>{{else}}<span class="badge ok">Saved {{ago $d.OpenRouter}}</span>{{end}}</h3>
+      <p>An API key from openrouter.ai, for pi agents. One key reaches many vendors' models.</p>
+    </div>
+    <div class="control">
+      <form method="post" action="/settings/secret" class="inline-form">
+        <input type="hidden" name="field" value="openrouter">
+        <input type="password" name="value" placeholder="sk-or-…" autocomplete="off" aria-label="OpenRouter API key">
+        <button>{{if $d.OpenRouter.IsZero}}Save{{else}}Replace{{end}}</button>
+        {{if not $d.OpenRouter.IsZero}}<button name="remove" value="1" class="danger icon-only" title="Remove the key" aria-label="Remove the key">{{icon "trash"}}</button>{{end}}
+      </form>
+    </div>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-head"><div><h2>Your WhatsApp numbers</h2><p>Messages from these numbers count as you: they can run commands like <code>/status</code> and reach your fallback agents. A number is added when you send a <code>/link</code> code from it.</p></div></div>
   {{with $d.Numbers}}
-  <ul class="routes">
+  <ul class="numbers">
     {{range .}}
-    <li><span>+{{.}}</span>
+    <li><span class="mono">+{{.}}</span>
       <form method="post" action="/settings/numbers/delete"><input type="hidden" name="phone" value="{{.}}"><button class="small">Remove</button></form>
     </li>
     {{end}}
   </ul>
   {{end}}
   <form method="post" action="/settings/numbers" class="inline-form">
-    <input type="tel" name="phone" placeholder="+44 7700 900123" required>
-    <button>Add</button>
+    <input type="tel" name="phone" placeholder="+44 7700 900123" required aria-label="Phone number">
+    <button>{{icon "plus"}}Add number</button>
   </form>
 </section>
 
 <section class="card">
-  <h2>Claude Code</h2>
-  <p>Agents running Claude Code use your Claude subscription. On your own computer, run</p>
-  <pre><code class="copy">claude setup-token</code></pre>
-  <p>and paste the token it prints.</p>
-  {{if not $d.Claude.IsZero}}<p class="ok">Token saved {{ago $d.Claude}}.</p>{{end}}
-  <form method="post" action="/settings/secret" class="inline-form">
-    <input type="hidden" name="field" value="claude">
-    <input type="password" name="value" placeholder="sk-ant-oat01-…" autocomplete="off" {{if $d.Claude.IsZero}}required{{end}}>
-    <button>{{if $d.Claude.IsZero}}Save{{else}}Replace{{end}}</button>
-    {{if not $d.Claude.IsZero}}<button name="remove" value="1" class="danger">Remove</button>{{end}}
+  <div class="card-head"><div><h2>Password</h2><p>At least 10 characters. Changing it logs out your other sessions.</p></div></div>
+  <form method="post" action="/account/password" class="narrow-form">
+    <label class="field"><span class="label">Current password</span><input type="password" name="current" autocomplete="current-password" required></label>
+    <label class="field"><span class="label">New password</span><input type="password" name="new" autocomplete="new-password" minlength="10" required></label>
+    <label class="field"><span class="label">Repeat it</span><input type="password" name="confirm" autocomplete="new-password" minlength="10" required></label>
+    <div class="form-actions"><button>{{icon "lock"}}Change password</button></div>
   </form>
 </section>
-
-<section class="card">
-  <h2>ChatGPT for pi</h2>
-  <p>pi agents can use a ChatGPT Plus or Pro subscription through OpenAI's Codex login.</p>
-  {{if $d.Codex}}
-  <p class="ok">Connected {{ago $d.CodexSince}}.</p>
-  <form method="post" action="/settings/codex/disconnect"><button class="danger small">Disconnect</button></form>
-  {{else if $d.HasAgents}}
-  <div data-mount="codex" data-src="/settings/codex/login">
-    <button data-start class="primary">Connect ChatGPT</button>
-    <div data-device hidden>
-      <p>Open <a data-url target="_blank" rel="noopener"></a> and enter</p>
-      <p class="code" data-user-code></p>
-      <p class="muted">Waiting for you to approve the login…</p>
-    </div>
-    <p data-message role="status"></p>
-  </div>
-  {{else}}
-  <p class="muted">Create an agent first: the login runs inside its sandbox.</p>
-  {{end}}
-</section>
-
-<section class="card">
-  <h2>API keys for pi</h2>
-  <form method="post" action="/settings/secret" class="inline-form">
-    <input type="hidden" name="field" value="deepseek">
-    <label>DeepSeek {{if not $d.DeepSeek.IsZero}}<span class="ok">saved {{ago $d.DeepSeek}}</span>{{end}}
-      <input type="password" name="value" placeholder="sk-…" autocomplete="off"></label>
-    <button>Save</button>
-    {{if not $d.DeepSeek.IsZero}}<button name="remove" value="1" class="danger">Remove</button>{{end}}
-  </form>
-  <form method="post" action="/settings/secret" class="inline-form">
-    <input type="hidden" name="field" value="openrouter">
-    <label>OpenRouter {{if not $d.OpenRouter.IsZero}}<span class="ok">saved {{ago $d.OpenRouter}}</span>{{end}}
-      <input type="password" name="value" placeholder="sk-or-…" autocomplete="off"></label>
-    <button>Save</button>
-    {{if not $d.OpenRouter.IsZero}}<button name="remove" value="1" class="danger">Remove</button>{{end}}
-  </form>
-</section>
-
-<section class="card">
-  <h2>Password</h2>
-  <form method="post" action="/account/password" class="stack">
-    <label>Current password <input type="password" name="current" autocomplete="current-password" required></label>
-    <label>New password <input type="password" name="new" autocomplete="new-password" minlength="10" required></label>
-    <label>Repeat it <input type="password" name="confirm" autocomplete="new-password" minlength="10" required></label>
-    <button>Change password</button>
-  </form>
-</section>
-</div>
 {{end}}

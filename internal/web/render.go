@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -33,7 +34,46 @@ var funcs = template.FuncMap{
 	"until":    func(t time.Time) string { return humanDuration(time.Until(t)) },
 	"dur":      humanDuration,
 	"triggers": triggerChoice,
-	"ms":       func(n int) string { return humanDuration(time.Duration(n) * time.Millisecond) },
+	"icon":     icon,
+	"capital": func(s string) string {
+		if s == "" {
+			return s
+		}
+		return strings.ToUpper(s[:1]) + s[1:]
+	},
+	"turnStatus": func(s string) string {
+		switch s {
+		case "ok":
+			return "Done"
+		case "error":
+			return "Failed"
+		case "aborted":
+			return "Stopped"
+		}
+		return strings.ToUpper(s[:1]) + s[1:]
+	},
+	"triggerLabel": func(t string) string {
+		for _, o := range triggerChoice("", "").Options {
+			if o.Value == t {
+				return o.Label
+			}
+		}
+		return t
+	},
+	"memory": func(mb int) string {
+		if mb%1024 == 0 {
+			return strconv.Itoa(mb/1024) + " GB"
+		}
+		return strconv.Itoa(mb) + " MB"
+	},
+	"provider": providerName,
+	"initial": func(email string) string {
+		if email == "" {
+			return "?"
+		}
+		return strings.ToUpper(email[:1])
+	},
+	"ms": func(n int) string { return humanDuration(time.Duration(n) * time.Millisecond) },
 	"stateLabel": func(state string, busy bool) string {
 		switch {
 		case busy:

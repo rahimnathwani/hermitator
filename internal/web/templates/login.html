@@ -1,13 +1,19 @@
 {{define "content"}}
-<section class="login">
-  <h1><img src="/static/favicon.svg" alt="" width="40" height="40"> hermitator</h1>
-  <p class="muted">Coding agents that wake up when you message them.</p>
-  {{with .Data.Error}}<p class="error" role="alert">{{.}}</p>{{end}}
-  <form method="post" action="/login" hx-boost="false">
-    <input type="hidden" name="next" value="{{.Data.Next}}">
-    <label>Email <input type="email" name="email" value="{{.Data.Email}}" autocomplete="username" required autofocus></label>
-    <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
-    <button class="primary">Log in</button>
-  </form>
-</section>
+<div class="auth">
+  <div class="auth-box">
+    <div class="auth-brand"><img src="/static/favicon.svg" alt="" width="32" height="32">hermitator</div>
+    <section class="card">
+      <h1>Log in</h1>
+      <p class="lede">Your coding agents, on WhatsApp.</p>
+      {{with .Data.Error}}<div class="callout danger" role="alert">{{icon "alert"}}<span>{{.}}</span></div>{{end}}
+      <form method="post" action="/login" hx-boost="false">
+        <input type="hidden" name="next" value="{{.Data.Next}}">
+        <label class="field"><span class="label">Email</span><input type="email" name="email" value="{{.Data.Email}}" autocomplete="username" required autofocus></label>
+        <label class="field"><span class="label">Password</span><input type="password" name="password" autocomplete="current-password" required></label>
+        <button class="primary">Log in</button>
+      </form>
+    </section>
+    <p class="foot">Self-hosted. Ask whoever runs this server for an account.</p>
+  </div>
+</div>
 {{end}}

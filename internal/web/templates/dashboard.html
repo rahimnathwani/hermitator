@@ -1,31 +1,64 @@
 {{define "content"}}
 {{$d := .Data}}
 <div class="page-head">
-  <h1>Agents</h1>
-  {{if $d.CanCreate}}<a class="button primary" href="/agents/new">New agent</a>{{else}}<span class="muted small">{{$d.MaxAgents}} of {{$d.MaxAgents}} agents</span>{{end}}
+  <div>
+    <h1>Agents</h1>
+    <p class="lede">Sandboxed coding agents, each asleep until you message it.</p>
+  </div>
+  <div class="actions">
+    {{if $d.CanCreate}}<a class="button primary" href="/agents/new">{{icon "plus"}}New agent</a>{{else}}<span class="muted small">{{$d.MaxAgents}} of {{$d.MaxAgents}} agents used</span>{{end}}
+  </div>
 </div>
 
 {{if $d.ShowGuide}}
 <section class="card guide">
-  <h2>Getting started</h2>
+  <div class="card-head">
+    <div>
+      <h2>Get set up</h2>
+      <p>{{$d.Done}} of 4 done. Four steps, and then you can message your agent from WhatsApp.</p>
+    </div>
+  </div>
+  <div class="progress" data-done="{{$d.Done}}"><span></span></div>
   <ol class="steps">
-    <li class="{{if $d.HasAccount}}done{{end}}"><a href="/accounts">Link a WhatsApp number</a> for your agents, the way WhatsApp Web is linked.</li>
-    <li class="{{if $d.HasModel}}done{{end}}"><a href="/settings">Add model credentials</a>: a Claude token for Claude Code, or a ChatGPT login or API key for pi.</li>
-    <li class="{{if $d.HasAgent}}done{{end}}"><a href="/agents/new">Create an agent</a>. Each agent is its own sandboxed Linux machine.</li>
-    <li class="{{if $d.HasLink}}done{{end}}">Open the agent and send its <code>/link</code> code to the agent's number from your own WhatsApp.</li>
+    <li class="{{if $d.HasAccount}}done{{end}}">
+      {{if $d.HasAccount}}{{icon "done"}}{{else}}{{icon "circle"}}{{end}}
+      <span><strong>Link a WhatsApp number</strong><span class="muted">The number your agents use, linked the way WhatsApp Web is.</span></span>
+      {{if not $d.HasAccount}}<a class="button small" href="/accounts">Link a number</a>{{end}}
+    </li>
+    <li class="{{if $d.HasModel}}done{{end}}">
+      {{if $d.HasModel}}{{icon "done"}}{{else}}{{icon "circle"}}{{end}}
+      <span><strong>Add model credentials</strong><span class="muted">A Claude token for Claude Code, or a ChatGPT login or an API key for pi.</span></span>
+      {{if not $d.HasModel}}<a class="button small" href="/settings">Add credentials</a>{{end}}
+    </li>
+    <li class="{{if $d.HasAgent}}done{{end}}">
+      {{if $d.HasAgent}}{{icon "done"}}{{else}}{{icon "circle"}}{{end}}
+      <span><strong>Create an agent</strong><span class="muted">Its own Linux machine, asleep until it has work.</span></span>
+      {{if and (not $d.HasAgent) $d.CanCreate}}<a class="button small" href="/agents/new">New agent</a>{{end}}
+    </li>
+    <li class="{{if $d.HasLink}}done{{end}}">
+      {{if $d.HasLink}}{{icon "done"}}{{else}}{{icon "circle"}}{{end}}
+      <span><strong>Link a chat</strong><span class="muted">Send the agent's <code>/link</code> code from your own WhatsApp.</span></span>
+      {{if and $d.HasAgent (not $d.HasLink)}}{{with index $d.Agents 0}}<a class="button small" href="/agents/{{.ID}}/chats">Get the code</a>{{end}}{{end}}
+    </li>
   </ol>
 </section>
 {{end}}
 
 {{with $d.Agents}}
-<section class="grid">
-  {{range .}}{{template "agent-card" .}}{{end}}
+<section class="card flush{{if $d.ShowGuide}} section{{end}}">
+  <div class="list-head"><span>Agent</span><span>Status</span><span>Chats</span><span>Last active</span><span></span></div>
+  <ul class="list">
+    {{range .}}{{template "agent-row" .}}{{end}}
+  </ul>
 </section>
 {{else}}
-<section class="card empty-state">
-  <p>No agents yet. Each one is its own Linux machine with a coding agent in it, asleep until you message it.</p>
-  <a class="button primary" href="/agents/new">New agent</a>
+{{if not $d.ShowGuide}}
+<section class="card empty">
+  <div class="tile">{{icon "agents"}}</div>
+  <h2>No agents yet</h2>
+  <p>Create one to get a sandboxed coding agent you can message from WhatsApp.</p>
+  <a class="button primary" href="/agents/new">{{icon "plus"}}New agent</a>
 </section>
 {{end}}
-
+{{end}}
 {{end}}

@@ -153,7 +153,7 @@ func TestLogin(t *testing.T) {
 		t.Fatalf("unknown user: %d", code)
 	}
 	c = f.login(t, "ALICE@example.com")
-	if code, body := c.get("/"); code != http.StatusOK || !strings.Contains(body, "Getting started") {
+	if code, body := c.get("/"); code != http.StatusOK || !strings.Contains(body, "Get set up") {
 		t.Fatalf("dashboard: %d", code)
 	}
 	c.post("/logout", nil)
@@ -378,7 +378,7 @@ func TestModelAndEffortSettings(t *testing.T) {
 		return a
 	}
 	page := func() string {
-		_, body := alice.get("/agents/" + id)
+		_, body := alice.get("/agents/" + id + "/settings")
 		return body
 	}
 
@@ -442,5 +442,21 @@ func TestNewAgentTakesModelAndEffort(t *testing.T) {
 	a, _ := f.store.Agent(context.Background(), strings.TrimPrefix(loc, "/agents/"))
 	if a.Model != "haiku" || a.Effort != "low" {
 		t.Fatalf("created with %q/%q", a.Model, a.Effort)
+	}
+}
+
+func TestAgentTabs(t *testing.T) {
+	f := setup(t)
+	alice := f.login(t, "alice@example.com")
+	bob := f.login(t, "bob@example.com")
+	id := alice.createAgent("bot")
+	for _, tab := range []string{"", "/chats", "/settings", "/terminal"} {
+		code, body := alice.get("/agents/" + id + tab)
+		if code != http.StatusOK || !strings.Contains(body, `href="/agents/`+id+tab+`" aria-current="page"`) {
+			t.Fatalf("tab %q: %d, or not marked current", tab, code)
+		}
+		if code, _ := bob.get("/agents/" + id + tab); code != http.StatusNotFound {
+			t.Fatalf("someone else's tab %q: %d", tab, code)
+		}
 	}
 }

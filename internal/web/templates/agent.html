@@ -1,135 +1,78 @@
 {{define "content"}}
 {{$d := .Data}}{{$a := $d.Agent}}
-<div class="page-head">
-  <h1>{{$a.Name}} <span data-agent-state>{{template "state" (stateLabel $a.State $a.Busy)}}</span></h1>
-  <div class="actions">
-    <form method="post" action="/agents/{{$a.ID}}/wake"><button>Wake</button></form>
-    <form method="post" action="/agents/{{$a.ID}}/sleep"><button>Sleep</button></form>
-    <form method="post" action="/agents/{{$a.ID}}/stop"><button>Stop turn</button></form>
-    <form method="post" action="/agents/{{$a.ID}}/new-session"><button>New conversation</button></form>
-    <a class="button" href="/agents/{{$a.ID}}/terminal">Terminal</a>
-  </div>
-</div>
-<p class="meta">{{harness $a.Harness}}{{if eq $a.Harness "pi"}} · {{$a.PiProvider}}{{end}}{{if $a.Model}} · {{$a.Model}}{{end}}{{if $a.Effort}} · {{$a.Effort}} effort{{end}} · image {{$a.Image}} · {{$a.IP}} · sleeps after {{minutes $a.IdleTimeout}} min idle</p>
-
+{{template "agent-head" $d}}
 <div class="columns">
   <section class="card console">
-    <h2>Activity</h2>
+    <div class="card-head"><div><h2>Activity</h2><p>Live: each message, and what the agent does with it.</p></div></div>
     <div class="log" data-mount="log" data-src="/agents/{{$a.ID}}/events" aria-live="polite">
-      <p class="muted empty">Waiting for activity. Messages from WhatsApp and from the box below show up here as the agent works.</p>
+      <p class="empty-log">Nothing yet. When a message reaches {{$a.Name}}, from WhatsApp or from the box below, you can watch it work here.</p>
     </div>
-    <form method="post" action="/agents/{{$a.ID}}/prompt" class="prompt" data-reset hx-swap="none">
-      <textarea name="text" rows="2" placeholder="Message the agent from here (replies stay on this page)" required></textarea>
-      <button class="primary">Send</button>
+    <form method="post" action="/agents/{{$a.ID}}/prompt" class="composer" data-reset hx-swap="none">
+      <textarea name="text" rows="1" placeholder="Message {{$a.Name}}…" aria-label="Message" required></textarea>
+      <button class="primary icon-only" title="Send (Ctrl or ⌘ + Enter)" aria-label="Send">{{icon "send"}}</button>
     </form>
   </section>
 
-  <div class="side">
+  <div class="stack">
     <section class="card">
-      <h2>Link a chat</h2>
-      {{if $d.Accounts}}
-      <p>Send this code to start talking to the agent:</p>
-      <p class="code"><code class="copy">/link {{$d.LinkCode}}</code></p>
-      <ul class="how">
-        {{range $d.Accounts}}
-        {{if .Personal}}
-        <li>On your own number +{{.Phone}}: in <em>Message yourself</em>, or any chat you want the agent in.</li>
-        {{else}}
-        <li>From your own WhatsApp, as a message to <strong class="copy">+{{.Phone}}</strong>, or in a group that includes that number.</li>
-        {{end}}
-        {{end}}
-      </ul>
-      <p class="muted">Valid for {{until $d.LinkExpires}}, once. The chat you send it in becomes this agent's.</p>
-      <form method="post" action="/agents/{{$a.ID}}/link-code"><button class="small">New code</button></form>
-      {{else}}
-      <p><a href="/accounts">Link a WhatsApp account</a> first.</p>
-      {{end}}
+      <div class="card-head"><h2>Details</h2><a href="/agents/{{$a.ID}}/settings">Edit</a></div>
+      <dl class="dl">
+        <dt>Status</dt><dd><span data-agent-state>{{template "state" (stateLabel $a.State $a.Busy)}}</span></dd>
+        <dt>Harness</dt><dd>{{harness $a.Harness}}{{if eq $a.Harness "pi"}} · {{provider $a.PiProvider}}{{end}}</dd>
+        <dt>Model</dt><dd>{{if $a.Model}}{{$a.Model}}{{else}}<span class="muted">default</span>{{end}}</dd>
+        <dt>Effort</dt><dd>{{if $a.Effort}}{{$a.Effort}}{{else}}<span class="muted">default</span>{{end}}</dd>
+        <dt>Sleeps after</dt><dd>{{minutes $a.IdleTimeout}} min idle</dd>
+        <dt>Memory</dt><dd>{{memory $a.MemoryMB}}</dd>
+        <dt>Image</dt><dd><span class="mono">{{$a.Image}}</span>{{with $d.NewerImage}}<br><a class="small" href="/agents/{{$a.ID}}/settings">Update available</a>{{end}}</dd>
+        <dt>Address</dt><dd class="mono">{{$a.IP}}</dd>
+        <dt>Created</dt><dd>{{ago $a.CreatedAt}}</dd>
+      </dl>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Chats</h2><a href="/agents/{{$a.ID}}/chats">Manage</a></div>
       {{with $a.Routes}}
-      <h3>Linked chats</h3>
-      <ul class="routes">
+      <ul class="mini-routes">
         {{range .}}
-        <li class="route">
-          <div class="route-head">
-            <span><strong>{{if .ChatName}}{{.ChatName}}{{else}}{{.ChatJID}}{{end}}</strong> <span class="muted">via {{.Account}}</span>{{if .Held}} <span class="muted">· {{.Held}} waiting</span>{{end}}</span>
-            <form method="post" action="/agents/{{$a.ID}}/routes/delete">
-              <input type="hidden" name="account" value="{{.AccountID}}"><input type="hidden" name="chat" value="{{.ChatJID}}">
-              <button class="small">Unlink</button>
-            </form>
-          </div>
-          <form method="post" action="/agents/{{$a.ID}}/routes/triggers" class="triggers" data-track>
-            <input type="hidden" name="account" value="{{.AccountID}}"><input type="hidden" name="chat" value="{{.ChatJID}}">
-            <span class="label">You wake it</span>{{template "seg" (triggers "owner" .OwnerTrigger)}}
-            <span class="label">Others wake it</span>{{template "seg" (triggers "others" .OthersTrigger)}}
-            <div class="form-actions"><button class="small" data-save>Save</button><span class="unsaved">unsaved</span></div>
-          </form>
-        </li>
+        <li><span class="tile">{{icon "chat"}}</span><span><strong>{{if .ChatName}}{{.ChatName}}{{else}}{{.ChatJID}}{{end}}</strong><span class="sub">You: {{triggerLabel .OwnerTrigger}} · others: {{triggerLabel .OthersTrigger}}{{if .Held}} · {{.Held}} waiting{{end}}</span></span></li>
         {{end}}
       </ul>
-      <p class="muted small">Messages that do not wake the agent are kept, and reach it as context with the next one that does. Mentioning it means an @mention of its number, a reply to one of its messages, or typing <code>@{{$a.Name}}</code>.</p>
+      {{else}}
+      {{if $d.Accounts}}
+      <p class="muted small">Not in any chat yet. To start, send this from your WhatsApp:</p>
+      {{template "link-code" $d}}
+      {{else}}
+      <p class="muted small">Not in any chat yet. <a href="/accounts">Link a WhatsApp number</a> first.</p>
+      {{end}}
       {{end}}
     </section>
-
-    <section class="card">
-      <h2>Settings <span class="unsaved">unsaved changes</span></h2>
-      <form method="post" action="/agents/{{$a.ID}}/settings" class="settings" data-track>
-        <label class="field"><span class="label">Name</span> <input name="name" value="{{$a.Name}}" required maxlength="40"></label>
-        {{template "agent-fields" $d.Fields}}
-        <label class="field"><span class="label">Sleep after</span> <span class="inline"><input type="number" name="idle_minutes" min="1" max="1440" value="{{minutes $a.IdleTimeout}}"> minutes idle</span></label>
-        <fieldset class="field">
-          <legend>Memory limit</legend>
-          {{template "seg" $d.Memory}}
-        </fieldset>
-        <p class="muted small">Model and effort apply from the next message; in the chat, /model and /effort change them too. Switching harness starts a fresh conversation in the same workspace. A new memory limit applies from the next cold boot.</p>
-        <div class="form-actions">
-          <button data-save>Save</button>
-          <button type="reset" class="link" data-discard>Discard changes</button>
-          <span class="unsaved">unsaved changes</span>
-        </div>
-      </form>
-    </section>
-
-    {{with $d.NewerImage}}
-    <section class="card">
-      <h2>Newer image</h2>
-      <p>This agent runs <code>{{$a.Image}}</code>. <code>{{.}}</code> is newer, with updated tools.</p>
-      <p class="muted small">Upgrading stops the sandbox; it boots from the new image with the next message. Every file the agent made is kept. Anything running, or saved in a checkpoint, is not.</p>
-      <form method="post" action="/agents/{{$a.ID}}/upgrade-image"><button>Upgrade to {{.}}</button></form>
-    </section>
-    {{end}}
-
-    <details class="card danger">
-      <summary>Delete agent</summary>
-      <p>Deletes the sandbox and every file in it. This cannot be undone.</p>
-      <form method="post" action="/agents/{{$a.ID}}/delete">
-        <label>Type <strong>{{$a.Name}}</strong> to confirm <input name="confirm" autocomplete="off" required></label>
-        <button class="danger">Delete {{$a.Name}}</button>
-      </form>
-    </details>
   </div>
 </div>
 
-<section class="card">
-  <h2>Recent turns</h2>
+<section class="card flush section">
+  <div class="card-head"><div><h2>Recent turns</h2><p>The last 30. Cost is what each turn would cost at API prices, not what a subscription charges.</p></div></div>
   {{if $d.Turns}}
-  <table class="turns">
-    <thead><tr><th>When</th><th>Result</th><th>Message</th><th>Reply</th><th>Tools</th><th>Wake</th><th>Took</th><th>Cost</th></tr></thead>
+  <div class="table-wrap">
+  <table class="table-cards turns">
+    <thead><tr><th>When</th><th>Result</th><th>Message</th><th>Reply</th><th class="num">Tools</th><th>Wake</th><th class="num">Took</th><th class="num">Cost</th></tr></thead>
     <tbody>
     {{range $d.Turns}}
       <tr>
-        <td class="when" title="{{.StartedAt}}">{{ago .StartedAt}}</td>
-        <td class="result"><span class="status status-{{.Status}}">{{.Status}}</span>{{with .Model}} <span class="model">{{.}}</span>{{end}}</td>
+        <td class="when nowrap" title="{{.StartedAt}}">{{ago .StartedAt}}</td>
+        <td class="result nowrap"><span class="status status-{{.Status}}">{{turnStatus .Status}}</span>{{with .Model}}<span class="sub">{{.}}</span>{{end}}</td>
         <td class="text input">{{clip 160 .Input}}</td>
         <td class="text output">{{clip 240 .Output}}</td>
-        <td class="stat" data-label="tools">{{.Tools}}</td>
-        <td class="stat" data-label="wake">{{.Wake}}{{if .WakeMS}} <span class="muted">{{ms .WakeMS}}</span>{{end}}</td>
-        <td class="stat" data-label="took">{{dur .Duration}}</td>
-        <td class="stat" data-label="cost">{{money .CostUSD}}</td>
+        <td class="num stat" data-label="tools">{{.Tools}}</td>
+        <td class="nowrap stat" data-label="wake">{{.Wake}}{{if .WakeMS}} <span class="muted">{{ms .WakeMS}}</span>{{end}}</td>
+        <td class="num stat" data-label="took">{{dur .Duration}}</td>
+        <td class="num stat" data-label="cost">{{money .CostUSD}}</td>
       </tr>
     {{end}}
     </tbody>
   </table>
+  </div>
   {{else}}
-  <p class="muted">No turns yet.</p>
+  <div class="empty"><p>No turns yet. Each message the agent answers shows up here, with what it cost.</p></div>
   {{end}}
 </section>
 {{end}}

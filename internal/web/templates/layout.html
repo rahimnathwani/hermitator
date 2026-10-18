@@ -15,29 +15,40 @@
 {{- if .Impersonating}}
 <div class="banner">
   <span>Acting as <strong>{{.User.Email}}</strong>. Everything you do here is logged under your name.</span>
-  <form method="post" action="/admin/stop-impersonating"><button class="small">Stop</button></form>
+  <form method="post" action="/admin/stop-impersonating"><button class="small">Stop acting as them</button></form>
 </div>
 {{- end}}
-<header class="top">
-  <a class="brand" href="/"><img src="/static/favicon.svg?v={{$.Version}}" alt="" width="22" height="22">hermitator</a>
-  <nav>
-  {{- if .User.IsAdmin}}
-    <a href="/admin/users" {{if eq $.Nav "users"}}aria-current="page"{{end}}>Users</a>
-    <a href="/admin/audit" {{if eq $.Nav "audit"}}aria-current="page"{{end}}>Audit log</a>
-  {{- else}}
-    <a href="/" {{if eq $.Nav "agents"}}aria-current="page"{{end}}>Agents</a>
-    <a href="/accounts" {{if eq $.Nav "accounts"}}aria-current="page"{{end}}>WhatsApp</a>
-    <a href="/settings" {{if eq $.Nav "settings"}}aria-current="page"{{end}}>Settings</a>
-  {{- end}}
-  </nav>
-  <span class="who">{{.Actor.Email}}</span>
-  <form method="post" action="/logout"><button class="link">Log out</button></form>
-</header>
-{{- end}}
-<main{{if not .V}} class="narrow"{{end}}>
-{{- with .Flash}}<p class="flash" role="status">{{.}}</p>{{end}}
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="/"><img src="/static/favicon.svg?v={{$.Version}}" alt="" width="24" height="24">hermitator</a>
+    <nav class="nav" aria-label="Main">
+    {{- if .User.IsAdmin}}
+      <a href="/admin/users"{{if eq $.Nav "users"}} aria-current="page"{{end}}>{{icon "users"}}Users</a>
+      <a href="/admin/audit"{{if eq $.Nav "audit"}} aria-current="page"{{end}}>{{icon "audit"}}Audit log</a>
+    {{- else}}
+      <a href="/"{{if eq $.Nav "agents"}} aria-current="page"{{end}}>{{icon "agents"}}Agents</a>
+      <a href="/accounts"{{if eq $.Nav "accounts"}} aria-current="page"{{end}}>{{icon "chat"}}WhatsApp</a>
+      <a href="/settings"{{if eq $.Nav "settings"}} aria-current="page"{{end}}>{{icon "settings"}}Settings</a>
+    {{- end}}
+    </nav>
+    <div class="account">
+      <span class="avatar" aria-hidden="true">{{initial .Actor.Email}}</span>
+      <span class="who" title="{{.Actor.Email}}">{{.Actor.Email}}</span>
+      <form method="post" action="/logout"><button class="ghost icon-only small" title="Log out" aria-label="Log out">{{icon "logout"}}</button></form>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="content">
+    {{template "content" $}}
+    </div>
+  </main>
+</div>
+{{- else}}
 {{template "content" .}}
-</main>
+{{- end}}
+{{- with .Flash}}
+<div class="toast" role="status" data-toast>{{icon "check"}}<span>{{.}}</span><button type="button" aria-label="Dismiss" data-dismiss>{{icon "x"}}</button></div>
+{{- end}}
 </body>
 </html>
 {{end}}

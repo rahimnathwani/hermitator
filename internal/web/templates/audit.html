@@ -1,21 +1,28 @@
 {{define "content"}}
-<div class="page-head"><h1>Audit log</h1></div>
-<section class="card">
-  <table>
+<div class="page-head">
+  <div>
+    <h1>Audit log</h1>
+    <p class="lede">Every sign-in and every change, newest first. When an admin acts as someone, both names are recorded.</p>
+  </div>
+</div>
+<section class="card flush">
+  <div class="table-wrap">
+  <table class="table-cards">
     <thead><tr><th>When</th><th>Who</th><th>Acting as</th><th>Action</th><th>Detail</th></tr></thead>
     <tbody>
     {{range .Data.Entries}}
     <tr>
-      <td title="{{.CreatedAt}}">{{ago .CreatedAt}}</td>
-      <td>{{.Actor}}</td>
-      <td>{{if ne .ActorID .EffectiveID}}<strong>{{.Effective}}</strong>{{end}}</td>
+      <td class="nowrap" title="{{.CreatedAt}}">{{ago .CreatedAt}}</td>
+      <td class="lead">{{.Actor}}</td>
+      <td>{{if ne .ActorID .EffectiveID}}<span class="badge warn">{{.Effective}}</span>{{end}}</td>
       <td><code>{{.Action}}</code></td>
-      <td class="text">{{.Detail}}</td>
+      <td class="text mono small">{{.Detail}}</td>
     </tr>
     {{else}}
-    <tr><td colspan="5" class="muted">Nothing yet.</td></tr>
+    <tr><td colspan="5" class="empty-row">Nothing yet.</td></tr>
     {{end}}
     </tbody>
   </table>
+  </div>
 </section>
 {{end}}

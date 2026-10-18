@@ -1,0 +1,42 @@
+{{define "content"}}
+{{$d := .Data}}{{$a := $d.Agent}}
+{{template "agent-head" $d}}
+<div class="narrow">
+<section class="card">
+  <div class="card-head"><div><h2>Settings</h2><p>Model and effort apply from the next message; in the chat, <code>/model</code> and <code>/effort</code> change them too.</p></div></div>
+  <form method="post" action="/agents/{{$a.ID}}/settings" class="settings" data-track>
+    <label class="field"><span class="label">Name</span><input name="name" value="{{$a.Name}}" required maxlength="40"></label>
+    {{template "agent-fields" $d.Fields}}
+    <label class="field"><span class="label">Sleep after</span><span class="inline"><input type="number" name="idle_minutes" min="1" max="1440" value="{{minutes $a.IdleTimeout}}"> minutes without a message</span>
+      <p class="hint">Asleep, it uses no memory. Background processes survive a checkpoint.</p></label>
+    <fieldset class="field">
+      <legend>Memory limit</legend>
+      {{template "seg" $d.Memory}}
+      <p class="hint">Applies from the next cold boot.</p>
+    </fieldset>
+    <p class="hint">Switching harness starts a fresh conversation in the same workspace.</p>
+    <div class="savebar form-actions">
+      <span class="unsaved">Unsaved changes</span>
+      <button type="reset" data-discard>Discard</button>
+      <button data-save>Save changes</button>
+    </div>
+  </form>
+</section>
+
+{{with $d.NewerImage}}
+<section class="card">
+  <div class="card-head"><div><h2>Image</h2><p>This agent runs <code>{{$a.Image}}</code>. <code>{{.}}</code> is newer, with updated tools.</p></div></div>
+  <p class="muted small">Upgrading stops the sandbox; it boots from the new image with the next message. Every file the agent made is kept. Anything running, or saved in a checkpoint, is not.</p>
+  <form method="post" action="/agents/{{$a.ID}}/upgrade-image" class="form-actions"><button>{{icon "upgrade"}}Upgrade to {{.}}</button></form>
+</section>
+{{end}}
+
+<section class="card danger-zone">
+  <div class="card-head"><div><h2>Delete agent</h2><p>Deletes the sandbox and every file in it. This cannot be undone.</p></div></div>
+  <form method="post" action="/agents/{{$a.ID}}/delete" class="inline-form">
+    <input name="confirm" autocomplete="off" required placeholder="Type {{$a.Name}} to confirm" aria-label="Type the agent's name to confirm">
+    <button class="danger solid">{{icon "trash"}}Delete {{$a.Name}}</button>
+  </form>
+</section>
+</div>
+{{end}}

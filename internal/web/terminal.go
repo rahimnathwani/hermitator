@@ -18,7 +18,7 @@ func (s *Server) terminalPage(w http.ResponseWriter, r *http.Request, v *viewer)
 		s.fail(w, r, v, http.StatusNotFound, "No such agent.")
 		return
 	}
-	s.render(w, r, v, "terminal.html", a.Name+" terminal", "agents", map[string]any{"Agent": a})
+	s.render(w, r, v, "terminal.html", a.Name+" terminal", "agents", s.agentData(r, a, "terminal"))
 }
 
 // terminalSocket bridges xterm.js to a login shell inside the sandbox.

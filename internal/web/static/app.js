@@ -100,6 +100,7 @@ document.addEventListener("input", (e) => {
 document.addEventListener("reset", (e) => {
   const form = e.target;
   setTimeout(() => {
+    for (const t of form.querySelectorAll("textarea")) t.style.height = "";
     showModels(form);
     if (form.matches("[data-track]")) track(form);
   });
@@ -113,15 +114,38 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
-// Click to copy.
+// Click to copy: a .copy element copies its text, a [data-copy] button
+// copies the attribute.
 document.addEventListener("click", async (e) => {
-  const el = e.target.closest(".copy");
+  const el = e.target.closest(".copy, [data-copy]");
   if (!el) return;
   try {
-    await navigator.clipboard.writeText(el.textContent.trim());
+    await navigator.clipboard.writeText(el.dataset.copy ?? el.textContent.trim());
     el.classList.add("copied");
-    setTimeout(() => el.classList.remove("copied"), 900);
+    setTimeout(() => el.classList.remove("copied"), 1200);
   } catch {}
+});
+
+// The flash message is a toast that leaves on its own, or when dismissed.
+function toast(root) {
+  for (const t of root.querySelectorAll?.("[data-toast]") ?? []) {
+    if (t._timer) continue;
+    const leave = () => {
+      t.classList.add("leaving");
+      setTimeout(() => t.remove(), 300);
+    };
+    t._timer = setTimeout(leave, 5000);
+    t.querySelector("[data-dismiss]")?.addEventListener("click", leave);
+  }
+}
+document.addEventListener("DOMContentLoaded", () => toast(document));
+document.addEventListener("htmx:load", (e) => toast(e.detail.elt.ownerDocument ?? document));
+
+// The message box grows with what you type.
+document.addEventListener("input", (e) => {
+  if (!e.target.matches(".composer textarea")) return;
+  e.target.style.height = "auto";
+  e.target.style.height = `${e.target.scrollHeight}px`;
 });
 
 function h(tag, attrs = {}, ...children) {
@@ -146,8 +170,10 @@ const stateLabels = { running: "awake", checkpointed: "checkpointed", stopped: "
 
 function setState(label) {
   for (const el of document.querySelectorAll("[data-agent-state]")) {
-    el.replaceChildren(h("span", { class: `state state-${label}` }, label));
+    el.replaceChildren(h("span", { class: `state state-${label}` }, label[0].toUpperCase() + label.slice(1)));
   }
+  // Stop turn only makes sense while one is running.
+  for (const el of document.querySelectorAll("[data-busy-only]")) el.hidden = label !== "working";
 }
 
 function mountLog(el) {
@@ -156,7 +182,7 @@ function mountLog(el) {
   let busy = false;
 
   const add = (kind, ...body) => {
-    el.querySelector(".empty")?.remove();
+    el.querySelector(".empty-log")?.remove();
     const when = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" });
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     el.append(h("div", { class: `entry ${kind}` }, h("span", { class: "when" }, when), h("div", { class: "body" }, ...body)));
@@ -215,10 +241,11 @@ function mountPair(el) {
     const ev = data(e);
     qr.replaceChildren(h("img", { src: ev.qr, alt: "WhatsApp pairing code", width: 320, height: 320 }));
   });
-  src.addEventListener("code", (e) => {
-    code.hidden = false;
-    code.textContent = data(e).code;
-  });
+  const showCode = (text) => {
+    code.textContent = text;
+    code.closest("[data-code-box]").hidden = false;
+  };
+  src.addEventListener("code", (e) => showCode(data(e).code));
   src.addEventListener("success", () => {
     say("Linked. Taking you back…");
     src.close();
@@ -238,8 +265,7 @@ function mountPair(el) {
     const res = await fetch(form.action, { method: "POST", body: new FormData(form) });
     const text = await res.text();
     if (res.ok) {
-      code.hidden = false;
-      code.textContent = text;
+      showCode(text);
       say("Type this code on your phone.");
     } else {
       say(text);

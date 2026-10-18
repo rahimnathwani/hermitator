@@ -138,8 +138,8 @@ upgrade. Running sandboxes keep running across upgrades.
 
 To refresh the tools inside agents (Claude Code, pi, browsers), rebuild the
 image with `deploy/build-image.sh` on the server. New agents get the newest
-image; existing ones offer an *Upgrade image* button, which keeps all their
-files. To also build
+image; existing ones offer an upgrade on their Settings tab, which keeps all
+their files. To also build
 whisper.cpp for voice notes, prefix the command with `WITH_WHISPER=1`.
 
 Or, without Go, on the server itself: download a release from
@@ -193,8 +193,8 @@ hermitator answers itself:
 Model and effort changes apply from the next message, and the conversation
 carries on. Claude Code takes `fable`, `opus`, `sonnet`, `haiku` or a full
 model ID, with effort from `low` to `max`; pi takes its provider's models,
-with thinking from `off` to `max`. The agent's page has the same settings,
-and shows which model each turn actually ran on.
+with thinking from `off` to `max`. The agent's Settings tab has the same
+choices, and its Overview shows which model each turn actually ran on.
 
 Other slash commands, such as Claude Code's `/compact`, pass through to the
 agent. Only you can use commands: messages from your own numbers (listed in
@@ -207,7 +207,7 @@ and which of **other people's** do. Each is *always*, *by mentioning it* or
 of its messages, or typing `@` and the agent's name. When you `/link` a
 direct chat, or a group with just you and the agent's number, your messages
 always wake it and other people's never do. In a group with other people,
-you wake it by mentioning it. Change this on the agent's page or with
+you wake it by mentioning it. Change this on the agent's Chats tab or with
 `/listen` (for example `/listen others all`).
 
 A message that does not wake the agent wakes nothing at all: no sandbox, no
@@ -221,7 +221,7 @@ Messages sent in quick succession, a photo and then its caption say, become
 one turn. Messages that arrive while the agent is working wait for the next
 turn.
 
-Each turn's cost appears on the agent's page. It is what the model would
+Each turn's cost appears under Recent turns on the agent's Overview. It is what the model would
 have charged at API prices: on a Claude or ChatGPT subscription you are not
 billed per token, but it is a fair measure of how much of your allowance a
 turn used.

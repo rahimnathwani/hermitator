@@ -1,24 +1,29 @@
 {{define "content"}}
-<div class="page-head"><h1>Link WhatsApp</h1></div>
-<div class="columns pair" data-mount="pair" data-src="/accounts/pair/{{.Data.ID}}/events">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/accounts">WhatsApp</a>{{icon "chevron"}}<span>Link a number</span></nav>
+<div class="page-head">
+  <div>
+    <h1>Link a number</h1>
+    <p class="lede">hermitator joins the number as a linked device, the way WhatsApp Web does. The phone keeps working as usual.</p>
+  </div>
+</div>
+<div class="columns even" data-mount="pair" data-src="/accounts/pair/{{.Data.ID}}/events">
   <section class="card">
-    <h2>Scan the code</h2>
-    <ol>
-      <li>Open WhatsApp on the phone with the number hermitator should use, usually your agent's own number.</li>
-      <li>Go to <strong>Settings</strong>, then <strong>Linked devices</strong>, then <strong>Link a device</strong>.</li>
-      <li>Point your phone at this code.</li>
+    <div class="card-head"><h2>Scan the QR code</h2></div>
+    <ol class="numbered">
+      <li><span>Open WhatsApp on the phone with the number hermitator should use, usually your agent's own number.</span></li>
+      <li><span>Go to <strong>Settings</strong>, then <strong>Linked devices</strong>, then <strong>Link a device</strong>.</span></li>
+      <li><span>Point the phone at this code.</span></li>
     </ol>
-    <div class="qr" data-qr><p class="muted">Getting a code from WhatsApp…</p></div>
+    <div class="qr" data-qr><p>Getting a code from WhatsApp…</p></div>
   </section>
   <section class="card">
-    <h2>Or use your phone number</h2>
-    <p>If you cannot scan, enter that number here and type the code into WhatsApp under <strong>Link with phone number instead</strong>.</p>
+    <div class="card-head"><div><h2>Or use the phone number</h2><p>If you cannot scan, enter the number and type the code into WhatsApp under <strong>Link with phone number instead</strong>.</p></div></div>
     <form method="post" action="/accounts/pair/{{.Data.ID}}/phone" class="inline-form" data-pair-phone hx-boost="false">
-      <input name="phone" type="tel" placeholder="+44 7700 900123" required>
+      <input name="phone" type="tel" placeholder="+44 7700 900123" required aria-label="Phone number">
       <button>Get code</button>
     </form>
-    <p class="code" data-code hidden></p>
+    <div class="codebox section" data-code-box hidden><code data-code></code></div>
+    <p class="status-line" data-status role="status"></p>
   </section>
 </div>
-<p class="status-line" data-status role="status"></p>
 {{end}}

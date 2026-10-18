@@ -1,58 +1,64 @@
 {{define "content"}}
 {{$d := .Data}}{{$me := .V.Actor.ID}}
-<div class="page-head"><h1>Users</h1></div>
-<p class="muted">Admins manage people; they do not own agents. To look at or fix someone's agents, act as them.</p>
-<section class="card">
-  <table>
-    <thead><tr><th>Email</th><th>Role</th><th>Agents</th><th>WhatsApp</th><th>Limit</th><th>Created</th><th></th></tr></thead>
+<div class="page-head">
+  <div>
+    <h1>Users</h1>
+    <p class="lede">Admins manage people; they do not own agents. To look at or fix someone's agents, act as them. Everything you do as them is logged under your name.</p>
+  </div>
+</div>
+<section class="card flush">
+  <div class="table-wrap">
+  <table class="table-cards">
+    <thead><tr><th>User</th><th>Role</th><th class="num">Agents</th><th class="num">WhatsApp</th><th>Agent limit</th><th>Created</th><th></th></tr></thead>
     <tbody>
     {{range $d.Users}}
     <tr class="{{if .Suspended}}suspended{{end}}">
-      <td>{{.Email}}{{if .Suspended}} <span class="state state-error">suspended</span>{{end}}</td>
-      <td>{{.Role}}</td>
-      <td>{{if .IsAdmin}}–{{else}}{{.Agents}}{{end}}</td>
-      <td>{{if .IsAdmin}}–{{else}}{{.Accounts}}{{end}}</td>
+      <td class="lead wide"><strong>{{.Email}}</strong>{{if .Suspended}} <span class="badge danger">Suspended</span>{{end}}</td>
+      <td>{{if .IsAdmin}}<span class="badge info">Admin</span>{{else}}<span class="badge">User</span>{{end}}</td>
+      <td class="num" data-label="agents">{{if .IsAdmin}}–{{else}}{{.Agents}}{{end}}</td>
+      <td class="num" data-label="numbers">{{if .IsAdmin}}–{{else}}{{.Accounts}}{{end}}</td>
       <td>
         {{if not .IsAdmin}}
-        <form method="post" action="/admin/users/{{.ID}}/quota" class="inline-form">
-          <input type="number" name="max_agents" value="{{.MaxAgents}}" min="0" max="1000" class="tiny"><button class="small">Set</button>
+        <form method="post" action="/admin/users/{{.ID}}/quota" class="inline-form" data-track>
+          <input type="number" name="max_agents" value="{{.MaxAgents}}" min="0" max="1000" class="tiny" aria-label="Agent limit"><button class="small" data-save>Set</button>
         </form>
         {{end}}
       </td>
-      <td>{{ago .CreatedAt}}</td>
-      <td class="row-actions">
+      <td class="nowrap" data-label="created">{{ago .CreatedAt}}</td>
+      <td><div class="row-actions">
         {{if and (not .IsAdmin) (not .Suspended)}}
-        <form method="post" action="/admin/impersonate/{{.ID}}"><button class="small primary">Act as</button></form>
+        <form method="post" action="/admin/impersonate/{{.ID}}"><button class="small">{{icon "user"}}Act as</button></form>
         {{end}}
         {{if ne .ID $me}}
-        <details class="menu">
-          <summary>More</summary>
-          <form method="post" action="/admin/users/{{.ID}}/suspend"><button class="small">{{if .Suspended}}Reinstate{{else}}Suspend{{end}}</button></form>
+        <button class="small icon-only" popovertarget="menu-{{.ID}}" style="anchor-name: --menu-{{.ID}}" title="More" aria-label="More actions">{{icon "more"}}</button>
+        <div class="popover" id="menu-{{.ID}}" popover style="position-anchor: --menu-{{.ID}}">
+          <form method="post" action="/admin/users/{{.ID}}/suspend"><button class="small">{{if .Suspended}}Reinstate{{else}}Suspend{{end}} {{.Email}}</button></form>
           <form method="post" action="/admin/users/{{.ID}}/password" class="inline-form">
-            <input type="password" name="password" placeholder="new password" minlength="10" required autocomplete="new-password"><button class="small">Reset password</button>
+            <input type="password" name="password" placeholder="New password" minlength="10" required autocomplete="new-password" aria-label="New password"><button class="small">Reset</button>
           </form>
           <form method="post" action="/admin/users/{{.ID}}/delete" class="inline-form">
-            <input name="confirm" placeholder="type {{.Email}}" required autocomplete="off"><button class="small danger">Delete</button>
+            <input name="confirm" placeholder="Type {{.Email}}" required autocomplete="off" aria-label="Type the email to confirm"><button class="small danger">Delete</button>
           </form>
-        </details>
+        </div>
         {{end}}
-      </td>
+      </div></td>
     </tr>
     {{end}}
     </tbody>
   </table>
+  </div>
 </section>
 
-<section class="card">
-  <h2>New user</h2>
+<section class="card section">
+  <div class="card-head"><div><h2>New user</h2><p>They log in with this email and password, and can change the password in Settings.</p></div></div>
   <form method="post" action="/admin/users" class="inline-form">
-    <input type="email" name="email" placeholder="email" required autocomplete="off">
-    <input type="password" name="password" placeholder="initial password (10+ characters)" minlength="10" required autocomplete="new-password">
+    <input type="email" name="email" placeholder="Email" required autocomplete="off" aria-label="Email">
+    <input type="password" name="password" placeholder="Initial password, 10+ characters" minlength="10" required autocomplete="new-password" aria-label="Initial password">
     <div class="seg">
-      <label><input type="radio" name="role" value="user" checked><span>user</span></label>
-      <label><input type="radio" name="role" value="admin"><span>admin</span></label>
+      <label><input type="radio" name="role" value="user" checked><span>User</span></label>
+      <label><input type="radio" name="role" value="admin"><span>Admin</span></label>
     </div>
-    <button class="primary">Create</button>
+    <button class="primary">{{icon "plus"}}Create user</button>
   </form>
 </section>
 {{end}}

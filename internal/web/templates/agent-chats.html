@@ -1,0 +1,49 @@
+{{define "content"}}
+{{$d := .Data}}{{$a := $d.Agent}}
+{{template "agent-head" $d}}
+<div class="narrow">
+<section class="card">
+  <div class="card-head">
+    <div><h2>Link a chat</h2><p>Send this code in a WhatsApp chat to hand that chat to {{$a.Name}}.</p></div>
+    {{if $d.Accounts}}<form method="post" action="/agents/{{$a.ID}}/link-code"><button class="small">{{icon "restart"}}New code</button></form>{{end}}
+  </div>
+  {{if $d.Accounts}}
+  {{template "link-code" $d}}
+  {{else}}
+  <div class="callout">{{icon "info"}}<span><a href="/accounts">Link a WhatsApp number</a> first. Your agents talk through it.</span></div>
+  {{end}}
+</section>
+
+<section class="card">
+  <div class="card-head"><div><h2>Linked chats</h2><p>Choose who wakes the agent in each chat. Messages that do not wake it are kept, and reach it as context with the next one that does.</p></div></div>
+  {{with $a.Routes}}
+  <ul class="routes">
+    {{range .}}
+    <li class="route">
+      <div class="route-head">
+        <span><strong>{{if .ChatName}}{{.ChatName}}{{else}}{{.ChatJID}}{{end}}</strong><span class="muted small">via {{.Account}}{{if .Held}} · {{.Held}} waiting{{end}}</span></span>
+        <form method="post" action="/agents/{{$a.ID}}/routes/delete">
+          <input type="hidden" name="account" value="{{.AccountID}}"><input type="hidden" name="chat" value="{{.ChatJID}}">
+          <button class="small">{{icon "link"}}Unlink</button>
+        </form>
+      </div>
+      <form method="post" action="/agents/{{$a.ID}}/routes/triggers" class="triggers" data-track>
+        <input type="hidden" name="account" value="{{.AccountID}}"><input type="hidden" name="chat" value="{{.ChatJID}}">
+        <span class="label">You wake it</span>{{template "seg" (triggers "owner" .OwnerTrigger)}}
+        <span class="label">Others wake it</span>{{template "seg" (triggers "others" .OthersTrigger)}}
+        <div class="form-actions"><button class="small" data-save>Save</button><span class="unsaved">Unsaved</span></div>
+      </form>
+    </li>
+    {{end}}
+  </ul>
+  <p class="hint">Mentioning it means an @mention of its number, a reply to one of its messages, or typing <code>@{{$a.Name}}</code>.</p>
+  {{else}}
+  <div class="empty">
+    <div class="tile">{{icon "chat"}}</div>
+    <h2>No chats yet</h2>
+    <p>Send the code above from your own WhatsApp: to the agent's number directly, or in a group that includes it.</p>
+  </div>
+  {{end}}
+</section>
+</div>
+{{end}}

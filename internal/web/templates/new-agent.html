@@ -1,14 +1,19 @@
 {{define "content"}}
 {{$d := .Data}}
+<div class="narrow">
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">Agents</a>{{icon "chevron"}}<span>New agent</span></nav>
 <div class="page-head">
-  <h1>New agent</h1>
+  <div>
+    <h1>New agent</h1>
+    <p class="lede">A sandboxed Linux machine with a coding agent in it, asleep until you message it. You can change all of this later.</p>
+  </div>
 </div>
-<p class="muted">Each agent is its own sandboxed Linux machine with a coding agent in it, asleep until you message it. You can change all of this later on the agent's page.</p>
 
-<section class="card narrow-card">
+<section class="card">
   {{if $d.CanCreate}}
   <form method="post" action="/agents" class="new-agent">
-    <label class="field"><span class="label">Name</span> <input name="name" required maxlength="40" placeholder="frontend" pattern="[\p{L}\p{N}][\p{L}\p{N} ._\-]{0,39}" autofocus></label>
+    <label class="field"><span class="label">Name</span><input name="name" required maxlength="40" placeholder="frontend" pattern="[\p{L}\p{N}][\p{L}\p{N} ._\-]{0,39}" autofocus>
+      <p class="hint">Up to 40 letters, digits, spaces, dots, dashes or underscores. In a group, typing <code>@name</code> mentions it.</p></label>
     {{template "agent-fields" $d.Fields}}
     {{if gt (len $d.Images) 1}}
     <fieldset class="field">
@@ -22,12 +27,17 @@
     {{end}}
     <div class="form-actions">
       <button class="primary">Create agent</button>
-      <a href="/">Cancel</a>
+      <a class="button" href="/">Cancel</a>
     </div>
   </form>
   {{else}}
-  <p>You have reached your limit of {{$d.MaxAgents}} agents. Delete one, or ask an admin for a higher limit.</p>
-  <p><a href="/">Back to your agents</a></p>
+  <div class="empty">
+    <div class="tile">{{icon "agents"}}</div>
+    <h2>You have reached your limit</h2>
+    <p>Your account allows {{$d.MaxAgents}} agents. Delete one, or ask an admin for a higher limit.</p>
+    <a class="button" href="/">Back to your agents</a>
+  </div>
   {{end}}
 </section>
+</div>
 {{end}}

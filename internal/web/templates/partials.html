@@ -1,18 +1,59 @@
-{{define "state"}}<span class="state state-{{.}}">{{.}}</span>{{end}}
+{{define "state"}}<span class="state state-{{.}}">{{capital .}}</span>{{end}}
 
-{{define "agent-card"}}
-<article class="card agent" id="agent-{{.ID}}" hx-get="/agents/{{.ID}}/card" hx-trigger="every 5s" hx-swap="outerHTML">
-  <header>
-    <a href="/agents/{{.ID}}"><strong>{{.Name}}</strong></a>
-    {{template "state" (stateLabel .State .Busy)}}
-  </header>
-  <p class="meta">{{harness .Harness}}{{if eq .Harness "pi"}} · {{.PiProvider}}{{end}}{{if .Model}} · {{.Model}}{{end}}</p>
-  <p class="meta">
-    {{- with .Routes}}{{len .}} chat{{if gt (len .) 1}}s{{end}} linked{{else}}No chats linked yet{{end}}
-    · active {{ago .LastActive}}
-    {{- if .Status.Queued}} · {{.Status.Queued}} queued{{end}}
-  </p>
-</article>
+{{define "agent-row"}}
+<li class="list-row" id="agent-{{.ID}}" hx-get="/agents/{{.ID}}/card" hx-trigger="every 5s" hx-swap="outerHTML">
+  <a href="/agents/{{.ID}}">
+    <span class="list-main">
+      <span class="tile">{{icon "agents"}}</span>
+      <span><strong>{{.Name}}</strong><span class="sub">{{template "agent-model" .Agent}}</span></span>
+    </span>
+    <span class="list-state">{{template "state" (stateLabel .State .Busy)}}</span>
+    <span class="list-cell list-chats">{{with .Routes}}{{len .}} chat{{if gt (len .) 1}}s{{end}}{{else}}No chats{{end}}{{if .Status.Queued}} · {{.Status.Queued}} queued{{end}}</span>
+    <span class="list-cell list-when">{{if .LastActive.IsZero}}Never active{{else}}{{ago .LastActive}}{{end}}</span>
+    {{icon "chevron"}}
+  </a>
+</li>
+{{end}}
+
+{{define "agent-model"}}{{harness .Harness}}{{if eq .Harness "pi"}} · {{provider .PiProvider}}{{end}} · {{if .Model}}{{.Model}}{{else}}default model{{end}}{{with .Effort}} · {{.}}{{end}}{{end}}
+
+{{define "agent-head"}}
+{{$a := .Agent}}
+<nav class="crumbs" aria-label="Breadcrumb"><a href="/">Agents</a>{{icon "chevron"}}<span>{{$a.Name}}</span></nav>
+<div class="page-head">
+  <div>
+    <h1>{{$a.Name}} <span data-agent-state>{{template "state" (stateLabel $a.State $a.Busy)}}</span></h1>
+    <p class="lede">{{template "agent-model" $a.Agent}}</p>
+  </div>
+  <div class="actions">
+    <div class="btn-group">
+      <form method="post" action="/agents/{{$a.ID}}/wake"><button title="Boot or restore the sandbox now">{{icon "wake"}}Wake</button></form>
+      <form method="post" action="/agents/{{$a.ID}}/sleep"><button title="Checkpoint or stop the sandbox now">{{icon "sleep"}}Sleep</button></form>
+    </div>
+    <form method="post" action="/agents/{{$a.ID}}/stop" data-busy-only{{if not $a.Busy}} hidden{{end}}><button class="danger" title="Stop the turn in progress">{{icon "stop"}}Stop turn</button></form>
+    <form method="post" action="/agents/{{$a.ID}}/new-session"><button title="The next message starts a fresh conversation">{{icon "restart"}}New conversation</button></form>
+  </div>
+</div>
+<nav class="tabs" aria-label="Agent">
+  <a href="/agents/{{$a.ID}}"{{if eq .Tab "overview"}} aria-current="page"{{end}}>Overview</a>
+  <a href="/agents/{{$a.ID}}/chats"{{if eq .Tab "chats"}} aria-current="page"{{end}}>Chats{{with $a.Routes}} <span class="count">{{len .}}</span>{{end}}</a>
+  <a href="/agents/{{$a.ID}}/settings"{{if eq .Tab "settings"}} aria-current="page"{{end}}>Settings</a>
+  <a href="/agents/{{$a.ID}}/terminal"{{if eq .Tab "terminal"}} aria-current="page"{{end}}>Terminal</a>
+</nav>
+{{end}}
+
+{{define "link-code"}}
+<div class="codebox"><code>/link {{.LinkCode}}</code><button type="button" class="ghost icon-only small" data-copy="/link {{.LinkCode}}" title="Copy" aria-label="Copy the link command">{{icon "copy"}}</button></div>
+<ul class="how">
+  {{range .Accounts}}
+  {{if .Personal}}
+  <li>On your own number <strong>+{{.Phone}}</strong>, send it in <em>Message yourself</em> or in any chat you want the agent in.</li>
+  {{else}}
+  <li>From your own WhatsApp, send it to <strong class="copy">+{{.Phone}}</strong>, or in a group that includes that number.</li>
+  {{end}}
+  {{end}}
+</ul>
+<p class="hint">Valid for {{until .LinkExpires}}, once. The chat you send it in becomes this agent's.</p>
 {{end}}
 
 {{define "seg"}}
@@ -27,8 +68,8 @@
 <fieldset class="field">
   <legend>Harness</legend>
   {{template "seg" .Harness}}
-  <p class="hint claude-only">Claude Code, with your Claude subscription.</p>
-  <p class="hint pi-only">pi, with a ChatGPT subscription or a DeepSeek or OpenRouter key.</p>
+  <p class="hint claude-only">Anthropic's Claude Code, on your Claude subscription.</p>
+  <p class="hint pi-only">The pi coding agent, on a ChatGPT subscription or a DeepSeek or OpenRouter key.</p>
 </fieldset>
 <fieldset class="field pi-only">
   <legend>Provider</legend>
@@ -40,7 +81,7 @@
   <div class="model-set" data-harness="{{.Harness}}" data-provider="{{.Provider}}"{{if .Hidden}} hidden{{end}}>
     {{template "seg" .Choice}}
     <input class="other" name="{{.Other}}" value="{{.Custom}}" placeholder="model ID" autocomplete="off" spellcheck="false" aria-label="Model ID">
-    {{with .Default}}<p class="hint">default is <code>{{.}}</code></p>{{end}}
+    {{with .Default}}<p class="hint">The default is <code>{{.}}</code>.</p>{{end}}
   </div>
   {{end}}
 </fieldset>
