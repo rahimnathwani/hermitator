@@ -42,6 +42,14 @@ func main() {
 		os.Exit(turnMain())
 	case "send":
 		os.Exit(send(os.Args[2:]))
+	case "schedule":
+		os.Exit(schedule(os.Args[2:]))
+	case "unschedule":
+		os.Exit(unschedule(os.Args[2:]))
+	case "tasks":
+		os.Exit(tasks())
+	case "hold":
+		os.Exit(hold(os.Args[2:]))
 	case "version":
 		fmt.Println(version)
 	default:
@@ -50,7 +58,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: hermitator-guest init | turn | send FILE [CAPTION] | version")
+	fmt.Fprintln(os.Stderr, "usage: hermitator-guest init | turn | send FILE [CAPTION] | schedule ... | unschedule ID | tasks | hold COMMAND | version")
 	os.Exit(2)
 }
 
@@ -102,18 +110,15 @@ func turnMain() int {
 	return 0
 }
 
-// outboxMeta is the sidecar the host looks for in the outbox.
-type outboxMeta struct {
-	File    string `json:"file"`
-	Caption string `json:"caption,omitempty"`
-}
-
 const maxSendBytes = 100 << 20 // WhatsApp's own limit for documents
 
 func send(args []string) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
-		fmt.Fprintln(os.Stderr, "usage: whatsapp-send FILE [CAPTION...]\n\nSends FILE to the WhatsApp chat you are talking to. Images are sent as\nphotos, anything else as a document.")
+		fmt.Fprintln(os.Stderr, "usage: whatsapp-send FILE [CAPTION...]\n       whatsapp-send --text MESSAGE...\n\nSends FILE, or a text message, to the WhatsApp chat you are talking to.\nImages are sent as photos, anything else as a document. It works from\nbackground jobs too, after your turn has ended.")
 		return 2
+	}
+	if args[0] == "--text" {
+		return sendText(strings.Join(args[1:], " "))
 	}
 	src := args[0]
 	caption := strings.Join(args[1:], " ")
@@ -140,7 +145,7 @@ func send(args []string) int {
 		fmt.Fprintln(os.Stderr, "whatsapp-send:", err)
 		return 1
 	}
-	meta, _ := json.Marshal(outboxMeta{File: name, Caption: caption})
+	meta, _ := json.Marshal(turn.OutboxMeta{File: name, Caption: caption})
 	// The host acts on the sidecar, so it appears atomically and last.
 	tmp := filepath.Join(outbox, "."+name+".meta.json")
 	err = os.WriteFile(tmp, meta, 0o644)
@@ -170,4 +175,30 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+func sendText(text string) int {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		fmt.Fprintln(os.Stderr, "usage: whatsapp-send --text MESSAGE...")
+		return 2
+	}
+	outbox := filepath.Join(harness.Getenv("HERMITATOR_SHARED", turn.SharedDir), turn.OutboxDir)
+	if err := os.MkdirAll(outbox, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "whatsapp-send:", err)
+		return 1
+	}
+	name := fmt.Sprintf("%d-text", time.Now().UnixNano())
+	meta, _ := json.Marshal(turn.OutboxMeta{Text: text})
+	tmp := filepath.Join(outbox, "."+name+".meta.json")
+	err := os.WriteFile(tmp, meta, 0o644)
+	if err == nil {
+		err = os.Rename(tmp, filepath.Join(outbox, name+".meta.json"))
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "whatsapp-send:", err)
+		return 1
+	}
+	fmt.Println("Queued the message for WhatsApp.")
+	return 0
 }

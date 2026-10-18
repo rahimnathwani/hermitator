@@ -6,6 +6,11 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/rahimnathwani/hermitator/internal/turn"
 )
 
 // Harness is a coding agent the image ships, and the files an agent
@@ -98,4 +103,43 @@ func (s *Spec) DropOwnCopies() error {
 		}
 	}
 	return nil
+}
+
+// maxHold is the longest one `hermitator-guest hold` keeps a sandbox
+// awake, and holdFresh how recently it must have refreshed its file.
+const (
+	maxHold   = 12 * time.Hour
+	holdFresh = 3 * time.Minute
+)
+
+// Holding reports whether a background job in the sandbox has asked to
+// keep it awake, with `hermitator-guest hold`. The guest refreshes its
+// file every 30 seconds; stale or over-long holds are removed.
+func (s *Spec) Holding(now time.Time) bool {
+	root, err := s.Shared()
+	if err != nil {
+		return false
+	}
+	defer root.Close()
+	dir, err := root.Open(turn.HoldsDir)
+	if err != nil {
+		return false
+	}
+	entries, _ := dir.ReadDir(-1)
+	dir.Close()
+	held := false
+	for _, e := range entries {
+		info, err := e.Info()
+		if err != nil || !e.Type().IsRegular() {
+			continue
+		}
+		startedAt, _, _ := strings.Cut(e.Name(), "-")
+		start, err := strconv.ParseInt(startedAt, 10, 64)
+		if err != nil || now.Sub(time.Unix(start, 0)) > maxHold || now.Sub(info.ModTime()) > holdFresh {
+			root.Remove(turn.HoldsDir + "/" + e.Name())
+			continue
+		}
+		held = true
+	}
+	return held
 }

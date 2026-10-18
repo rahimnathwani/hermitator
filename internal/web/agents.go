@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"regexp"
@@ -202,6 +203,7 @@ func (s *Server) agentData(r *http.Request, a *store.Agent, tab string) map[stri
 	switch tab {
 	case "overview":
 		d["Turns"], _ = s.Store.Turns(ctx, a.ID, 30)
+		d["Tasks"] = s.taskViews(ctx, a)
 	case "settings":
 		d["Fields"] = newAgentFields(a)
 		d["Memory"] = memoryChoice(a.MemoryMB)
@@ -320,6 +322,55 @@ func (s *Server) useImageHarnesses(w http.ResponseWriter, r *http.Request, v *vi
 	default:
 		s.audit(r, v, "agent.harness_reset", "agent="+a.ID)
 		s.back(w, r, "/agents/"+a.ID+"/settings", "Removed. It runs the image's version from its next message.")
+	}
+}
+
+// taskView is a scheduled task as the agent page shows it.
+type taskView struct {
+	*store.Task
+	When string // "cron 0 9 * * 1-5" or "once"
+	Next string
+}
+
+func (s *Server) taskViews(ctx context.Context, a *store.Agent) []taskView {
+	tasks, _ := s.Store.Tasks(ctx, a.ID)
+	loc := s.Agents.Location(ctx, a)
+	var out []taskView
+	for _, t := range tasks {
+		v := taskView{Task: t, When: "once", Next: t.NextRun.In(loc).Format("Mon 2 Jan 15:04 MST")}
+		if t.Cron != "" {
+			v.When = "cron " + t.Cron
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+func (s *Server) taskAction(w http.ResponseWriter, r *http.Request, v *viewer) {
+	a, err := s.agentFor(r, v)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	ctx := r.Context()
+	t, err := s.Store.Task(ctx, r.PathValue("tid"))
+	if err != nil || t.AgentID != a.ID {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.PathValue("action") {
+	case "pause":
+		s.Agents.PauseTask(ctx, a, t, true)
+		s.back(w, r, "/agents/"+a.ID, "Paused "+t.Name+".")
+	case "resume":
+		next, _ := s.Agents.PauseTask(ctx, a, t, false)
+		s.back(w, r, "/agents/"+a.ID, "Resumed "+t.Name+"; next "+next.In(s.Agents.Location(ctx, a)).Format("Mon 2 Jan 15:04")+".")
+	case "delete":
+		s.Agents.DeleteTask(ctx, a, t)
+		s.audit(r, v, "task.delete", "agent="+a.ID+" task="+t.ID)
+		s.back(w, r, "/agents/"+a.ID, "Deleted "+t.Name+".")
+	default:
+		http.NotFound(w, r)
 	}
 }
 

@@ -20,6 +20,14 @@ const (
 const (
 	InboxDir  = "inbox"
 	OutboxDir = "outbox"
+	// RequestsDir holds requests from guest commands, such as schedule,
+	// for the host, and its answers to them.
+	RequestsDir = "requests"
+	// HoldsDir holds a file per running `hermitator-guest hold`, which
+	// keeps the sandbox awake.
+	HoldsDir = "holds"
+	// TasksFile lists the agent's scheduled tasks, written by the host.
+	TasksFile = "tasks.json"
 )
 
 // PiAuthPath is where pi keeps credentials, relative to $HOME.

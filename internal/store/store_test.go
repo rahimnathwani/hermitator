@@ -290,3 +290,54 @@ func TestReassignAgentIP(t *testing.T) {
 		t.Fatalf("b -> %s", ipB)
 	}
 }
+
+func TestTasks(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	u := &User{Email: "a@example.com", Role: RoleUser, Timezone: "Europe/London"}
+	s.CreateUser(ctx, u)
+	if got, _ := s.User(ctx, u.ID); got.Location().String() != "Europe/London" {
+		t.Fatalf("time zone = %v", got.Location())
+	}
+	a := &Agent{UserID: u.ID, Name: "a", Image: "img", Harness: HarnessClaude, State: "stopped"}
+	if err := s.CreateAgent(ctx, a, netip.MustParsePrefix("10.231.0.0/16")); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	soon := &Task{AgentID: a.ID, Name: "soon", Prompt: "p", Cron: "* * * * *", NextRun: now.Add(-time.Second), CreatedBy: TaskByAgent}
+	later := &Task{AgentID: a.ID, Name: "later", Prompt: "p", NextRun: now.Add(time.Hour), CreatedBy: TaskByOwner}
+	for _, tk := range []*Task{later, soon} {
+		if err := s.CreateTask(ctx, tk); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if due, _ := s.DueTasks(ctx, now); len(due) != 1 || due[0].ID != soon.ID {
+		t.Fatalf("due = %+v", due)
+	}
+	if list, _ := s.Tasks(ctx, a.ID); len(list) != 2 || list[0].ID != soon.ID {
+		t.Fatalf("tasks = %+v", list)
+	}
+	// A one-off that has run is gone from the list.
+	s.TaskRan(ctx, later.ID, now, time.Time{})
+	if list, _ := s.Tasks(ctx, a.ID); len(list) != 1 {
+		t.Fatalf("after the one-off ran: %d tasks", len(list))
+	}
+	s.SetTaskPaused(ctx, soon.ID, true, time.Time{})
+	if due, _ := s.DueTasks(ctx, now); len(due) != 0 {
+		t.Fatal("a paused task is due")
+	}
+	for i := 0; i < MaxTasks-1; i++ {
+		s.CreateTask(ctx, &Task{AgentID: a.ID, Name: "n", Prompt: "p", NextRun: now.Add(time.Hour), CreatedBy: TaskByAgent})
+	}
+	if err := s.CreateTask(ctx, &Task{AgentID: a.ID, Name: "n", Prompt: "p", NextRun: now.Add(time.Hour), CreatedBy: TaskByAgent}); !errors.Is(err, ErrTooManyTasks) {
+		t.Fatalf("task over the limit: %v", err)
+	}
+
+	tr := &Turn{AgentID: a.ID, Harness: HarnessClaude}
+	s.CreateTurn(ctx, tr)
+	tr.Status, tr.CostUSD = TurnOK, 0.25
+	s.FinishTurn(ctx, tr)
+	if spent, _ := s.SpentSince(ctx, u.ID, now.Add(-time.Minute)); spent != 0.25 {
+		t.Fatalf("spent = %v", spent)
+	}
+}

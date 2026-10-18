@@ -42,6 +42,12 @@ keep hundreds of them.
   `/link CODE`. Photos, voice notes (transcribed locally with whisper.cpp)
   and documents go in; files come back when the agent runs `whatsapp-send`.
   Read receipts and a ⏳ reaction say it is working, ✅ says it is done.
+- **Work that carries on without you.** Ask an agent to do something
+  later ("every weekday at 9, check CI and tell me") and it schedules it;
+  the host keeps the timetable, so the agent still sleeps until then.
+  Background jobs report back with `whatsapp-send --text` after the turn
+  has ended, and `/sh` runs a quick command without the model. Optional
+  daily and monthly spending limits stop anything running away.
 - **A control panel.** Live activity per agent, a console for talking to it
   from the browser, a terminal inside the sandbox, users with an admin who can
   act as them, and an audit log.
@@ -202,6 +208,8 @@ hermitator answers itself:
 | `/stop` | Abort the current turn |
 | `/retry` | Run the last message again, after a failure or a restart |
 | `/sh COMMAND` | Run a shell command in the sandbox and get its output, without the model |
+| `/tasks`, `/tasks pause N`, `/tasks resume N`, `/tasks delete N` | Scheduled tasks |
+| `/timezone Europe/London` | The time zone schedules use (also in Settings) |
 | `/new` | Start a fresh conversation; files are kept (alias `/clear`) |
 | `/model`, `/model opus`, `/model default` | Show or change the model |
 | `/effort`, `/effort high`, `/effort default` | Show or change how hard it thinks |

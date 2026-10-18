@@ -36,10 +36,12 @@ const systemPrompt = `You are running inside hermitator: an isolated Linux machi
 - When nobody is talking to you the machine is suspended. Background processes you leave running (dev servers, databases) are frozen and continue when the next message arrives. Start them with their output redirected to a file, for example: nohup npm run dev > /tmp/dev.log 2>&1 &. The shell you start them from goes away at the end of your turn.
 - For screenshots and browser automation there is Playwright for Python (from playwright.sync_api import sync_playwright) and for Node (require("playwright")), plus a chromium command for one-off captures. After taking a screenshot, look at it before sending it, so you know the page really loaded.
 - Claude Code and pi come with this machine and are updated for you. Do not update or reinstall them yourself (npm install -g, claude update, pi update self): a copy you install hides every later update. Plugins, extensions, skills and MCP servers are yours to install.
+- To do something later, run: hermitator-guest schedule --at 9am|--in 2h|--cron "0 9 * * 1-5" --name "short name" PROMPT. At that time PROMPT reaches you here as a message, in this conversation, and your reply goes to this chat. Times are the owner's (%s; TZ is set to it, so date shows their time). hermitator-guest tasks lists tasks, hermitator-guest unschedule ID cancels one. Schedule only what the user asked for or agreed to; hermitator tells them about every task you set.
+- To report on background work after your turn has ended, have the job finish with whatsapp-send --text "..." (or send a file). A background job freezes when the machine sleeps; to keep it awake until the job ends, start it as: nohup hermitator-guest hold -- sh -c 'CMD > /tmp/job.log 2>&1; whatsapp-send --text "done: ..."' >/dev/null 2>&1 &
 - A table, chart or diagram wider than a phone screen is unreadable in WhatsApp. Render it to an image instead (HTML or Mermaid through Playwright), look at it, and send it with whatsapp-send.
 - Each message starts you afresh in the same conversation, so anything you install or configure is loaded from the next message, not this one; say so when you install something. Add MCP servers for the whole machine (claude mcp add --scope user ...), not in a project .mcp.json, which needs approval you cannot give here. A server that signs in through a browser cannot sign in from here: tell the user to open your Terminal tab on the hermitator page, run claude, and sign in with /mcp.`
 
-func (m *Manager) agentPrompt(spec *sandbox.Spec, last Message) string {
+func (m *Manager) agentPrompt(spec *sandbox.Spec, loc *time.Location, last Message) string {
 	who := "The user talks to you over WhatsApp."
 	switch {
 	case last.AccountID == "":
@@ -49,7 +51,7 @@ func (m *Manager) agentPrompt(spec *sandbox.Spec, last Message) string {
 	case last.SenderName != "" && !last.FromMe:
 		who = fmt.Sprintf("You are talking to %s over WhatsApp.", last.SenderName)
 	}
-	return fmt.Sprintf(systemPrompt, who, path.Join(m.rt.GuestShared(spec), turn.InboxDir))
+	return fmt.Sprintf(systemPrompt, who, path.Join(m.rt.GuestShared(spec), turn.InboxDir), loc)
 }
 
 // runTurn runs one turn for a batch of messages and delivers the reply.
@@ -59,6 +61,9 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	defer cancel()
 	last := batch[len(batch)-1]
 	chat := chatRef{m: m, msg: last}
+	if last.TaskName != "" {
+		chat.prefix = "⏰ *" + last.TaskName + "*\n\n"
+	}
 
 	agent, err := m.store.Agent(ctx, a.id)
 	if err != nil {
@@ -82,6 +87,9 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		return false
 	}
 
+	if over := m.overCap(ctx, agent); over != "" {
+		return fail(over)
+	}
 	creds, problem := m.credentials(ctx, agent)
 	if problem != "" {
 		return fail(problem)
@@ -123,6 +131,12 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	}
 	log.Info("turn started", "harness", agent.Harness, "wake", wake, "wake_ms", wakeMS, "messages", len(batch))
 
+	// The agent's clock shows the owner's time, which schedules use too.
+	loc := m.location(ctx, agent)
+	env := map[string]string{"TZ": loc.String()}
+	for k, v := range creds.env {
+		env[k] = v
+	}
 	// /once overrides the agent's model and effort for this turn.
 	model, effort := agent.Model, agent.Effort
 	for _, msg := range batch {
@@ -141,10 +155,11 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		Model:        model,
 		Effort:       effort,
 		Provider:     agent.PiProvider,
-		SystemPrompt: m.agentPrompt(spec, last),
-		Env:          creds.env,
+		SystemPrompt: m.agentPrompt(spec, loc, last),
+		Env:          env,
 		Files:        creds.files,
 	}
+	m.writeTasks(ctx, spec, agent)
 	stdin, _ := json.Marshal(req)
 	client := spec.Spool()
 	if err := client.Submit(spool.Job{ID: t.id, Argv: []string{"hermitator-guest", "turn"}, Stdin: stdin}); err != nil {
@@ -175,6 +190,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 				return
 			case <-tick.C:
 				filesSent.Add(int32(m.deliverOutbox(ctx, spec, chat)))
+				m.handleRequests(ctx, spec, agent, chat)
 			}
 		}
 	}()
@@ -225,6 +241,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	close(outboxDone)
 	<-outboxStopped
 	filesSent.Add(int32(m.deliverOutbox(ctx, spec, chat)))
+	m.handleRequests(ctx, spec, agent, chat)
 	if err != nil && !died.Load() {
 		client.Cancel(t.id, 15*time.Second)
 	} else {
@@ -312,6 +329,7 @@ func (m *Manager) finish(ctx context.Context, chat chatRef, rec *store.Turn, res
 	}
 	if !rec.StartedAt.IsZero() {
 		m.store.FinishTurn(ctx, rec)
+		defer m.capWarning(ctx, chat, rec)
 		m.store.TouchAgent(ctx, rec.AgentID)
 		m.hub.publish(rec.AgentID, UIEvent{Kind: "turn_end", TurnID: rec.ID, Status: rec.Status, Output: clip(rec.Output, 4000)})
 		m.log.Info("turn finished", "agent", rec.AgentID, "turn", rec.ID, "status", rec.Status, "tools", rec.Tools,
@@ -416,12 +434,6 @@ func (m *Manager) saveMedia(ctx context.Context, spec *sandbox.Spec, msg Message
 	}
 }
 
-// outboxMeta mirrors what whatsapp-send writes.
-type outboxMeta struct {
-	File    string `json:"file"`
-	Caption string `json:"caption"`
-}
-
 // transcribe works on a private copy: the copy in the inbox belongs to the
 // agent, which could swap it for something else.
 func (m *Manager) transcribe(ctx context.Context, data []byte, name string) (string, error) {
@@ -466,6 +478,11 @@ func readShared(spec *sandbox.Spec, name string) ([]byte, error) {
 
 // deliverOutbox sends every file the agent has queued.
 func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat chatRef) (sentFiles int) {
+	// A turn and the background tick may both look; only one at a time
+	// may, or a file could go out twice.
+	a := m.actor(spec.ID)
+	a.outbox.Lock()
+	defer a.outbox.Unlock()
 	root, err := spec.Shared()
 	if err != nil {
 		return 0
@@ -484,10 +501,16 @@ func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat ch
 		if strings.HasPrefix(name, ".") || !strings.HasSuffix(name, ".meta.json") {
 			continue
 		}
-		var meta outboxMeta
+		var meta turn.OutboxMeta
 		raw, err := root.ReadFile(in(name))
 		if err == nil {
 			err = json.Unmarshal(raw, &meta)
+		}
+		if err == nil && meta.File == "" && strings.TrimSpace(meta.Text) != "" {
+			chat.sendAgent(clip(meta.Text, maxMessage))
+			sentFiles++
+			root.Rename(in(name), sent(name))
+			continue
 		}
 		file := filepath.Base(meta.File)
 		if err != nil || meta.File == "" || file == "." || file == "/" {
@@ -536,6 +559,8 @@ func readRegular(root *os.Root, name string) ([]byte, error) {
 type chatRef struct {
 	m   *Manager
 	msg Message
+	// prefix starts the agent's messages: a scheduled task's name.
+	prefix string
 }
 
 func (c chatRef) ok() bool { return c.msg.AccountID != "" && c.msg.Chat != "" }
@@ -554,7 +579,7 @@ func (c chatRef) send(text string) {
 }
 
 // sendAgent delivers the agent's Markdown, converted for WhatsApp.
-func (c chatRef) sendAgent(text string) { c.send(wamd.Format(text)) }
+func (c chatRef) sendAgent(text string) { c.send(c.prefix + wamd.Format(text)) }
 
 func (c chatRef) sendFile(name string, data []byte, caption string) error {
 	if !c.ok() {

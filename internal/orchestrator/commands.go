@@ -10,23 +10,26 @@ type Command struct {
 }
 
 var commandAliases = map[string]string{
-	"link":   "link",
-	"unlink": "unlink",
-	"sleep":  "sleep",
-	"exit":   "sleep",
-	"stop":   "stop",
-	"new":    "new",
-	"clear":  "new",
-	"reset":  "new",
-	"status": "status",
-	"listen": "listen",
-	"model":  "model",
-	"effort": "effort",
-	"once":   "once",
-	"switch": "switch",
-	"help":   "help",
-	"retry":  "retry",
-	"sh":     "sh",
+	"link":     "link",
+	"unlink":   "unlink",
+	"sleep":    "sleep",
+	"exit":     "sleep",
+	"stop":     "stop",
+	"new":      "new",
+	"clear":    "new",
+	"reset":    "new",
+	"status":   "status",
+	"listen":   "listen",
+	"model":    "model",
+	"effort":   "effort",
+	"once":     "once",
+	"switch":   "switch",
+	"help":     "help",
+	"retry":    "retry",
+	"tasks":    "tasks",
+	"timezone": "timezone",
+	"tz":       "timezone",
+	"sh":       "sh",
 }
 
 // ParseCommand recognises hermitator's chat commands. Anything else that
@@ -51,6 +54,8 @@ const helpText = `*hermitator commands*
 /stop: abort the running turn
 /retry: run the last message again, after a failure or a restart
 /sh COMMAND: run a shell command in the sandbox and see its output (no model)
+/tasks: scheduled tasks (/tasks pause|resume|delete N)
+/timezone [ZONE]: show or set the time zone schedules use
 /new: start a fresh conversation, keeping all files (alias /clear)
 /model [NAME]: show or change the model (/model default to reset)
 /effort [LEVEL]: show or change how hard it thinks

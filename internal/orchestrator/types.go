@@ -45,6 +45,9 @@ type Message struct {
 	// Prompt, when set, is sent as it is instead of Text: /retry replays
 	// a stored prompt this way.
 	Prompt string
+	// TaskName is set when a scheduled task sent the message; the
+	// agent's reply is headed with it.
+	TaskName string
 }
 
 // Media is an attachment. It is only downloaded if the chat is routed.

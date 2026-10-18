@@ -25,6 +25,12 @@ type actor struct {
 	holds      int
 	lastActive time.Time
 	state      string
+
+	// outbox serialises outbox delivery between a turn and the background
+	// tick, which run outside the actor; bgSent, under it, rate-limits
+	// what the agent sends between turns.
+	outbox sync.Mutex
+	bgSent []time.Time
 }
 
 func (a *actor) loop(ctx context.Context) {
@@ -124,7 +130,14 @@ func (a *actor) reap() {
 	if err != nil {
 		return
 	}
-	if time.Since(a.lastActive) < ag.IdleTimeout {
+	spec, err := a.m.Spec(ag)
+	if err != nil {
+		return
+	}
+	// Between turns, deliver what background jobs send, and answer their
+	// requests; outside the actor, since sending takes a while.
+	go a.m.background(spec, ag)
+	if time.Since(a.lastActive) < ag.IdleTimeout || spec.Holding(time.Now()) {
 		return
 	}
 	if st, err := a.suspend(a.ctx); err != nil {

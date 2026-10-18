@@ -129,3 +129,8 @@ func (s *Store) Turns(ctx context.Context, agentID string, limit int) ([]*Turn, 
 func (s *Store) Turn(ctx context.Context, id string) (*Turn, error) {
 	return scanTurn(s.db.QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE id = ?`, id))
 }
+
+// LastTurn is an agent's most recent turn in any chat.
+func (s *Store) LastTurn(ctx context.Context, agentID string) (*Turn, error) {
+	return scanTurn(s.db.QueryRowContext(ctx, `SELECT `+turnColumns+` FROM turns WHERE agent_id = ? ORDER BY started_at DESC LIMIT 1`, agentID))
+}

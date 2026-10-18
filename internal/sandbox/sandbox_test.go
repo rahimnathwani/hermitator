@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 func TestParsePS(t *testing.T) {
@@ -150,5 +151,31 @@ func TestLimitAll(t *testing.T) {
 	}
 	if _, err := LimitAll(t.TempDir(), 512<<20); err == nil {
 		t.Fatal("limited a machine with less memory than the reserve")
+	}
+}
+
+func TestHolding(t *testing.T) {
+	s := &Spec{Dir: t.TempDir()}
+	now := time.Now()
+	if s.Holding(now) {
+		t.Fatal("holding with no holds")
+	}
+	holds := filepath.Join(s.SharedDir(), "holds")
+	os.MkdirAll(holds, 0o755)
+	fresh := filepath.Join(holds, fmt.Sprintf("%d-1", now.Unix()))
+	os.WriteFile(fresh, nil, 0o644)
+	if !s.Holding(now) {
+		t.Fatal("a fresh hold does not hold")
+	}
+	// A hold whose job stopped refreshing it lapses, and so does one that
+	// has gone on for too long.
+	os.Chtimes(fresh, now.Add(-10*time.Minute), now.Add(-10*time.Minute))
+	ancient := filepath.Join(holds, fmt.Sprintf("%d-2", now.Add(-13*time.Hour).Unix()))
+	os.WriteFile(ancient, nil, 0o644)
+	if s.Holding(now) {
+		t.Fatal("stale holds still hold")
+	}
+	if entries, _ := os.ReadDir(holds); len(entries) != 0 {
+		t.Fatalf("stale holds were not cleared: %v", entries)
 	}
 }

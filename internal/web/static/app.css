@@ -602,3 +602,10 @@ dialog.modal[open] { animation: modal-in .16s ease-out; }
 .form-row > form { margin: 0; }
 .form-row > form.inline-form { flex: 1; }
 .grow { flex: 1; min-width: 0; }
+.tasks { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+.tasks li { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.task-main { min-width: 0; }
+.task-main strong { display: block; font-weight: 550; overflow-wrap: anywhere; }
+.task-main .sub { display: block; color: var(--muted); font-size: 12.5px; }
+.inline input[type="number"] { width: 96px; }
+.hint button.link { color: var(--accent); padding: 0; font-size: inherit; vertical-align: baseline; }

@@ -194,6 +194,10 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		reply(helpText)
 	case "retry":
 		m.retry(ctx, agentID, msg, reply)
+	case "tasks":
+		m.tasksCommand(ctx, ag, cmd.Arg, reply)
+	case "timezone":
+		m.timezoneCommand(ctx, ag, cmd.Arg, reply)
 	case "sh":
 		go m.shell(agentID, cmd.Arg, reply)
 	case "unlink":

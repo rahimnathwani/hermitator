@@ -2,7 +2,9 @@ package web
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,8 +33,18 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, v *viewer)
 		}
 		uses[key] = append(uses[key], a.Name)
 	}
+	loc := v.User.Location()
+	now := time.Now().In(loc)
+	spentDay, _ := s.Store.SpentSince(ctx, v.User.ID, time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc))
+	spentMonth, _ := s.Store.SpentSince(ctx, v.User.ID, time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, loc))
 	s.render(w, r, v, "settings.html", "Settings", "settings", map[string]any{
 		"Uses":       uses,
+		"Timezone":   v.User.Timezone,
+		"Now":        now.Format("Mon 15:04"),
+		"DailyCap":   v.User.DailyCap,
+		"MonthlyCap": v.User.MonthlyCap,
+		"SpentDay":   spentDay,
+		"SpentMonth": spentMonth,
 		"Numbers":    numbers,
 		"Claude":     times[store.SecretClaudeToken],
 		"DeepSeek":   times[store.SecretDeepSeekKey],
@@ -142,4 +154,33 @@ func (s *Server) deleteNumber(w http.ResponseWriter, r *http.Request, v *viewer)
 	}
 	s.audit(r, v, "number.delete", "+"+phone)
 	s.back(w, r, "/settings", "Removed +"+phone+".")
+}
+
+// saveLimits sets the time zone schedules use and the spending caps.
+func (s *Server) saveLimits(w http.ResponseWriter, r *http.Request, v *viewer) {
+	tz := formValue(r, "timezone")
+	if tz != "" {
+		loc, err := time.LoadLocation(tz)
+		if err != nil || tz == "Local" {
+			s.back(w, r, "/settings", tz+" is not a time zone name; use one like Europe/London.")
+			return
+		}
+		tz = loc.String()
+	}
+	caps := [2]float64{}
+	for i, field := range []string{"daily_cap", "monthly_cap"} {
+		if raw := formValue(r, field); raw != "" {
+			f, err := strconv.ParseFloat(strings.TrimPrefix(raw, "$"), 64)
+			if err != nil || f < 0 || f > 1e6 {
+				s.back(w, r, "/settings", "Spending limits are amounts in dollars, such as 5 or 2.50; leave one empty for no limit.")
+				return
+			}
+			caps[i] = f
+		}
+	}
+	ctx := r.Context()
+	s.Store.SetTimezone(ctx, v.User.ID, tz)
+	s.Store.SetCaps(ctx, v.User.ID, caps[0], caps[1])
+	s.audit(r, v, "settings.limits", fmt.Sprintf("tz=%s daily=%.2f monthly=%.2f", tz, caps[0], caps[1]))
+	s.back(w, r, "/settings", "Saved.")
 }

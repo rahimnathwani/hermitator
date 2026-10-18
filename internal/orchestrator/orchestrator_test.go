@@ -18,6 +18,7 @@ import (
 	"github.com/rahimnathwani/hermitator/internal/sandbox"
 	"github.com/rahimnathwani/hermitator/internal/secrets"
 	"github.com/rahimnathwani/hermitator/internal/store"
+	"github.com/rahimnathwani/hermitator/internal/turn"
 )
 
 var guestBinary string
@@ -49,7 +50,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || { echo "no token" >&2; exit 1; }
-text=$(printf '%s' "$line" | sed -n 's/.*"type":"text","text":"\([^"]*\)".*/\1/p')
+text=$(printf '%s' "$line" | sed -n 's/.*"type":"text","text":"\([^"]*\)".*/\1/p' | tr -d '\\')
 echo '{"type":"system","subtype":"init","session_id":"'"$sid"'","model":"fake"}'
 case "$text" in
   *"send a file"*)
@@ -58,6 +59,12 @@ case "$text" in
     echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"whatsapp-send report.txt"}}]}}'
     ;;
   *"sleep"*) sleep 30 ;;
+  *"schedule it"*)
+    hermitator-guest schedule --in 1h --name "CI check" check that CI is green >> "$HOME/schedule.out" 2>&1
+    ;;
+  *"in the background"*)
+    (sleep 1; whatsapp-send --text "background job done") >/dev/null 2>&1 &
+    ;;
   *"say nothing"*)
     printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"","session_id":"'"$sid"'","total_cost_usd":0.001}'
     exit 0 ;;
@@ -160,12 +167,13 @@ func setup(t *testing.T) *env {
 	rt := &sandbox.Local{}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	m := New(Config{
-		AgentsDir: filepath.Join(root, "agents"),
-		Images:    &sandbox.Images{Dir: images},
-		Tools:     tools,
-		Subnet:    netip.MustParsePrefix("10.88.0.0/16"),
-		Debounce:  50 * time.Millisecond,
-		PublicURL: "https://hermitator.example.com",
+		AgentsDir:    filepath.Join(root, "agents"),
+		Images:       &sandbox.Images{Dir: images},
+		Tools:        tools,
+		Subnet:       netip.MustParsePrefix("10.88.0.0/16"),
+		Debounce:     50 * time.Millisecond,
+		ReapInterval: 100 * time.Millisecond,
+		PublicURL:    "https://hermitator.example.com",
 	}, st, box, rt, log)
 	rec := &recorder{ch: make(chan sent, 100)}
 	m.SetMessenger(rec)
@@ -822,5 +830,119 @@ func TestShellCommand(t *testing.T) {
 		if strings.Contains(s.body, "uid=") {
 			t.Fatal("a stranger ran /sh")
 		}
+	}
+}
+
+func TestScheduledTasks(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+
+	// The agent schedules a task; hermitator tells the owner itself.
+	e.m.HandleMessage(ctx, e.msg(chat, "please schedule it", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "📅 Scheduled by bot: CI check") {
+		t.Fatalf("schedule notice = %q", got.body)
+	}
+	e.rec.wait(t, "text") // the agent's own reply
+	e.idle(t)
+	list, _ := e.st.Tasks(ctx, e.agent.ID)
+	if len(list) != 1 || list[0].ChatJID != chat || list[0].CreatedBy != store.TaskByAgent || time.Until(list[0].NextRun) < 50*time.Minute {
+		t.Fatalf("tasks = %+v", list)
+	}
+	task := list[0]
+
+	// /tasks lists it; when it comes due, the reply is headed with its name.
+	e.m.HandleMessage(ctx, e.msg(chat, "/tasks", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "1. CI check (once, next") {
+		t.Fatalf("/tasks = %q", got.body)
+	}
+	e.st.SetTaskPaused(ctx, task.ID, false, time.Now().Add(-time.Second))
+	e.m.runDueTasks(time.Now())
+	if got := e.rec.wait(t, "text"); !strings.HasPrefix(got.body, "⏰ *CI check*") {
+		t.Fatalf("task reply = %q", got.body)
+	}
+	e.idle(t)
+	if after, _ := e.st.Task(ctx, task.ID); after.Runs != 1 || !after.NextRun.IsZero() {
+		t.Fatalf("a one-off after running: runs %d, next %v", after.Runs, after.NextRun)
+	}
+
+	// The owner can set one up by asking, and pause and delete it by chat.
+	cron := &store.Task{AgentID: e.agent.ID, AccountID: e.acct.ID, ChatJID: chat, Name: "daily", Prompt: "p", Cron: "0 9 * * *", NextRun: time.Now().Add(time.Hour), CreatedBy: store.TaskByOwner}
+	e.st.CreateTask(ctx, cron)
+	e.m.HandleMessage(ctx, e.msg(chat, "/tasks pause 1", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "Paused: daily") {
+		t.Fatalf("/tasks pause = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/tasks delete 1", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "Deleted: daily") {
+		t.Fatalf("/tasks delete = %q", got.body)
+	}
+	if list, _ := e.st.Tasks(ctx, e.agent.ID); len(list) != 0 {
+		t.Fatalf("tasks left: %+v", list)
+	}
+}
+
+func TestScheduleValidation(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	chat := chatRef{m: e.m, msg: Message{AccountID: e.acct.ID, Chat: "self@s.whatsapp.net"}}
+	for _, req := range []turn.HostRequest{
+		{Op: "schedule", Cron: "* * * * *", Prompt: "too often"},
+		{Op: "schedule", Cron: "0 9 30 2 *", Prompt: "never"},
+		{Op: "schedule", In: "-1h", Prompt: "past"},
+		{Op: "schedule", In: "500d", Prompt: "bad duration"},
+		{Op: "schedule", In: "1h"},
+	} {
+		if _, err := e.m.newTask(ctx, e.agent, chat, req, store.TaskByAgent); err == nil {
+			t.Errorf("accepted %+v", req)
+		}
+	}
+	if _, err := e.m.newTask(ctx, e.agent, chatRef{m: e.m}, turn.HostRequest{In: "1h", Prompt: "p"}, store.TaskByAgent); err == nil {
+		t.Error("scheduled a task with no chat to run in")
+	}
+}
+
+func TestSpendingCaps(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	say := func(text string) { e.m.HandleMessage(ctx, e.msg(chat, text, true)) }
+
+	// Each fake turn costs a cent; 80% of 1.2 cents is crossed by the first.
+	e.st.SetCaps(ctx, e.user.ID, 0.012, 0)
+	say("first")
+	e.rec.wait(t, "text") // the reply
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "of today's $0.01 spending limit") {
+		t.Fatalf("80%% warning = %q", got.body)
+	}
+	e.idle(t)
+	say("second")
+	e.rec.wait(t, "text")
+	e.idle(t)
+	say("third")
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "spending limit is reached") {
+		t.Fatalf("over the cap = %q", got.body)
+	}
+	e.idle(t)
+	if turns, _ := e.st.Turns(ctx, e.agent.ID, 10); len(turns) != 2 {
+		t.Fatalf("%d turns ran; the cap should have stopped the third", len(turns))
+	}
+}
+
+func TestBackgroundMessages(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "run it in the background", true))
+	e.rec.wait(t, "text") // the turn's own reply
+	e.idle(t)
+	if got := e.rec.wait(t, "text"); got.body != "background job done" || got.chat != chat {
+		t.Fatalf("background message = %+v", got)
 	}
 }

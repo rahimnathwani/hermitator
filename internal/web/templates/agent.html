@@ -46,6 +46,32 @@
       {{end}}
       {{end}}
     </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Scheduled</h2></div>
+      {{with $d.Tasks}}
+      <ul class="tasks">
+        {{range .}}
+        <li>
+          <span class="task-main"><strong>{{.Name}}</strong><span class="sub">{{.When}} · {{if .Paused}}paused{{else}}next {{.Next}}{{end}} · set by {{if eq .CreatedBy "agent"}}{{$a.Name}}{{else}}you{{end}}</span></span>
+          <span class="row-actions">
+            <form method="post" action="/agents/{{$a.ID}}/tasks/{{.ID}}/{{if .Paused}}resume{{else}}pause{{end}}"><button class="small">{{if .Paused}}Resume{{else}}Pause{{end}}</button></form>
+            <form method="post" action="/agents/{{$a.ID}}/tasks/{{.ID}}/delete" data-confirm="Delete task" data-confirm-title="Delete “{{.Name}}”?">
+              <template data-confirm-body>
+                <p>It will not run again. {{$a.Name}} can set it up afresh if you ask.</p>
+                <p class="muted small">{{clip 300 .Prompt}}</p>
+              </template>
+              <button class="small icon-only danger" title="Delete" aria-label="Delete {{.Name}}">{{icon "trash"}}</button>
+            </form>
+          </span>
+        </li>
+        {{end}}
+      </ul>
+      {{else}}
+      <p class="muted small">Nothing yet. Ask {{$a.Name}} to do something later, such as “every weekday at 9, check CI and tell me”.</p>
+      {{end}}
+      <p class="hint">In the chat, <code>/tasks</code> lists, pauses and deletes them.</p>
+    </section>
   </div>
 </div>
 

@@ -22,18 +22,31 @@ type User struct {
 	Role         string
 	MaxAgents    int
 	Suspended    bool
-	CreatedAt    time.Time
+	// Timezone is an IANA name for the owner's schedules; empty is UTC.
+	Timezone string
+	// DailyCap and MonthlyCap limit API-equivalent spending; 0 is none.
+	DailyCap   float64
+	MonthlyCap float64
+	CreatedAt  time.Time
+}
+
+// Location is the user's time zone, falling back to UTC.
+func (u *User) Location() *time.Location {
+	if loc, err := time.LoadLocation(u.Timezone); err == nil && u.Timezone != "" {
+		return loc
+	}
+	return time.UTC
 }
 
 // IsAdmin reports whether the user administers the instance.
 func (u *User) IsAdmin() bool { return u.Role == RoleAdmin }
 
-const userColumns = `id, email, password_hash, role, max_agents, suspended, created_at`
+const userColumns = `id, email, password_hash, role, max_agents, suspended, timezone, daily_cap, monthly_cap, created_at`
 
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	var u User
 	var created string
-	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.MaxAgents, &u.Suspended, &created); err != nil {
+	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.MaxAgents, &u.Suspended, &u.Timezone, &u.DailyCap, &u.MonthlyCap, &created); err != nil {
 		return nil, one(err)
 	}
 	u.CreatedAt = parseTS(created)
@@ -53,8 +66,8 @@ func (s *Store) CreateUser(ctx context.Context, u *User) error {
 	if u.MaxAgents == 0 {
 		u.MaxAgents = 5
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO users (`+userColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		u.ID, u.Email, u.PasswordHash, u.Role, u.MaxAgents, u.Suspended, ts(u.CreatedAt))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO users (`+userColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		u.ID, u.Email, u.PasswordHash, u.Role, u.MaxAgents, u.Suspended, u.Timezone, u.DailyCap, u.MonthlyCap, ts(u.CreatedAt))
 	if isUnique(err) {
 		return ErrConflict
 	}
@@ -118,4 +131,22 @@ func (s *Store) SetMaxAgents(ctx context.Context, id string, n int) error {
 // DeleteUser removes a user and, by cascade, everything they own.
 func (s *Store) DeleteUser(ctx context.Context, id string) error {
 	return affected(s.db.ExecContext(ctx, `DELETE FROM users WHERE id = ?`, id))
+}
+
+// SetTimezone sets the user's time zone, an IANA name such as Europe/London.
+func (s *Store) SetTimezone(ctx context.Context, id, tz string) error {
+	return affected(s.db.ExecContext(ctx, `UPDATE users SET timezone = ? WHERE id = ?`, tz, id))
+}
+
+// SetCaps sets the user's daily and monthly spending caps; 0 removes one.
+func (s *Store) SetCaps(ctx context.Context, id string, daily, monthly float64) error {
+	return affected(s.db.ExecContext(ctx, `UPDATE users SET daily_cap = ?, monthly_cap = ? WHERE id = ?`, daily, monthly, id))
+}
+
+// SpentSince totals the cost of a user's turns that started since t.
+func (s *Store) SpentSince(ctx context.Context, userID string, t time.Time) (float64, error) {
+	var total float64
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(t.cost_usd), 0) FROM turns t JOIN agents a ON a.id = t.agent_id
+		WHERE a.user_id = ? AND t.started_at >= ?`, userID, ts(t)).Scan(&total)
+	return total, err
 }

@@ -97,6 +97,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.log.Warn("marked turns interrupted by restart", "count", len(cut))
 		go m.tellInterrupted(cut)
 	}
+	go m.scheduler()
 	agents, err := m.store.Agents(ctx, "")
 	if err != nil {
 		return err

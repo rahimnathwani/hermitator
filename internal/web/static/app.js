@@ -106,6 +106,24 @@ document.addEventListener("reset", (e) => {
   });
 });
 
+// Offer the browser's own time zone where one is asked for.
+function offerTimezone(root) {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  for (const b of root.querySelectorAll?.("[data-browser-tz]") ?? []) {
+    const input = b.closest("form")?.querySelector("[data-tz-input]");
+    if (!tz || !input || input.value === tz) continue;
+    b.textContent = `Use this browser's: ${tz}`;
+    b.hidden = false;
+    b.onclick = () => {
+      input.value = tz;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      b.hidden = true;
+    };
+  }
+}
+document.addEventListener("DOMContentLoaded", () => offerTimezone(document));
+document.addEventListener("htmx:load", (e) => offerTimezone(e.detail.elt));
+
 // Cmd/Ctrl+Enter sends from a textarea.
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && e.target.matches("textarea")) {

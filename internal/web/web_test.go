@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/auth"
 	"github.com/rahimnathwani/hermitator/internal/gateway"
@@ -513,5 +514,40 @@ func TestUpgradeAll(t *testing.T) {
 		if a, _ := f.store.Agent(ctx, id); a.Image != "universal-test.1" {
 			t.Fatalf("%s still on %s", a.Name, a.Image)
 		}
+	}
+}
+
+func TestLimitsAndTasks(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	alice := f.login(t, "alice@example.com")
+	bob := f.login(t, "bob@example.com")
+	aliceID := f.users["alice@example.com"].ID
+
+	alice.post("/settings/limits", url.Values{"timezone": {"Mars/Olympus"}, "daily_cap": {"5"}})
+	if u, _ := f.store.User(ctx, aliceID); u.Timezone != "" || u.DailyCap != 0 {
+		t.Fatal("saved an unknown time zone")
+	}
+	alice.post("/settings/limits", url.Values{"timezone": {"Europe/London"}, "daily_cap": {"2.50"}, "monthly_cap": {""}})
+	if u, _ := f.store.User(ctx, aliceID); u.Timezone != "Europe/London" || u.DailyCap != 2.5 || u.MonthlyCap != 0 {
+		t.Fatalf("limits = %q %v %v", u.Timezone, u.DailyCap, u.MonthlyCap)
+	}
+
+	id := alice.createAgent("bot")
+	task := &store.Task{AgentID: id, Name: "standup", Prompt: "p", Cron: "0 9 * * 1-5", NextRun: time.Now().Add(time.Hour), CreatedBy: store.TaskByAgent}
+	f.store.CreateTask(ctx, task)
+	if _, body := alice.get("/agents/" + id); !strings.Contains(body, "standup") || !strings.Contains(body, "cron 0 9 * * 1-5") {
+		t.Fatal("the overview does not list the task")
+	}
+	if code, _ := bob.post("/agents/"+id+"/tasks/"+task.ID+"/delete", nil); code != http.StatusNotFound {
+		t.Fatalf("bob deleted alice's task: %d", code)
+	}
+	alice.post("/agents/"+id+"/tasks/"+task.ID+"/pause", nil)
+	if got, _ := f.store.Task(ctx, task.ID); !got.Paused {
+		t.Fatal("not paused")
+	}
+	alice.post("/agents/"+id+"/tasks/"+task.ID+"/delete", nil)
+	if _, err := f.store.Task(ctx, task.ID); err == nil {
+		t.Fatal("not deleted")
 	}
 }

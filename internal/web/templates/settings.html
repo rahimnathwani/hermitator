@@ -116,6 +116,18 @@
 </section>
 
 <section class="card">
+  <div class="card-head"><div><h2>Time zone and spending</h2><p>Scheduled tasks run in your time zone, and agents' clocks show it.</p></div></div>
+  <form method="post" action="/settings/limits" class="narrow-form" data-track>
+    <label class="field"><span class="label">Time zone</span><input name="timezone" value="{{$d.Timezone}}" placeholder="UTC" autocomplete="off" spellcheck="false" data-tz-input>
+      <p class="hint">An IANA name such as Europe/London; it is {{$d.Now}} there. <button type="button" class="link" data-browser-tz hidden></button></p></label>
+    <label class="field"><span class="label">Daily limit</span><span class="inline">$ <input type="number" name="daily_cap" min="0" step="0.01" value="{{if $d.DailyCap}}{{printf "%.2f" $d.DailyCap}}{{end}}" placeholder="none"> spent today: {{printf "$%.2f" $d.SpentDay}}</span></label>
+    <label class="field"><span class="label">Monthly limit</span><span class="inline">$ <input type="number" name="monthly_cap" min="0" step="0.01" value="{{if $d.MonthlyCap}}{{printf "%.2f" $d.MonthlyCap}}{{end}}" placeholder="none"> spent this month: {{printf "$%.2f" $d.SpentMonth}}</span></label>
+    <p class="hint">In the API-equivalent dollars each turn is costed in. A subscription doesn't bill you this, but it measures your use; with API keys it is what you pay. Past a limit, no new turn starts, scheduled ones included, and you are warned at 80%.</p>
+    <div class="form-actions"><button data-save>Save</button><span class="unsaved">Unsaved</span></div>
+  </form>
+</section>
+
+<section class="card">
   <div class="card-head"><div><h2>Your WhatsApp numbers</h2><p>Messages from these numbers count as you: they can run commands like <code>/status</code> and reach your fallback agents. A number is added when you send a <code>/link</code> code from it.</p></div></div>
   {{with $d.Numbers}}
   <ul class="numbers">

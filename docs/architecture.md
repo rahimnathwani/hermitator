@@ -159,6 +159,35 @@ start.
    still running. When it ends, the reply is converted from Markdown to
    WhatsApp formatting and split into messages, and the reaction becomes ✅.
 
+Agents talk to the host through `/shared` only. Besides the outbox,
+guest commands such as `hermitator-guest schedule` drop requests into
+`/shared/requests`, which the host answers in a file beside each one; the
+host keeps `/shared/tasks.json` current for `hermitator-guest tasks`. All
+of it is read through `os.Root`, like the rest of `/shared`.
+
+Between turns, the reaper's tick also looks at awake agents: it delivers
+what background jobs queued (to the chat the agent last talked in, at most
+20 messages an hour), answers their requests, and leaves the agent awake
+while a `hermitator-guest hold` file in `/shared/holds` is fresh. A hold
+refreshes its file every 30 seconds and lapses after three minutes
+without, or after twelve hours.
+
+### Scheduled tasks
+
+The host keeps the timetable (`tasks` table; cron parsing in
+`internal/schedule`), so an agent with tasks still sleeps until one is
+due. A task is a prompt that reaches the agent as a message in the chat it
+was set up from, in its usual conversation; the reply is headed with the
+task's name. Agents create them with `hermitator-guest schedule`, and the
+owner is told about each one. Times are in the owner's time zone, which
+is also the agent's `TZ`. A task may run at most every five minutes, an
+agent may have 25, and a task missed while hermitator was down runs once
+when it is back. If its chat is no longer linked to the agent, it pauses.
+
+Before any turn starts, the owner's optional daily and monthly spending
+limits are checked against the API-equivalent cost of their turns; a turn
+that would start past one does not, and crossing 80% sends a warning.
+
 Each agent is served by one goroutine (its actor) that owns the queue, the
 running turn and the holds keeping it awake, so none of that needs locks.
 Turns themselves run on their own goroutine and report back to the actor.
