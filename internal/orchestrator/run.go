@@ -228,12 +228,42 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		}
 	}()
 
+	// A quiet turn may be a slow build, so this only ever warns, once.
+	var progress atomic.Pointer[stallState]
+	progress.Store(&stallState{at: time.Now()})
+	go func() {
+		tick := time.NewTicker(m.cfg.StallAfter / 10)
+		defer tick.Stop()
+		warned := false
+		for {
+			select {
+			case <-followCtx.Done():
+				return
+			case <-tick.C:
+				p := progress.Load()
+				if !warned && time.Since(p.at) >= m.cfg.StallAfter {
+					warned = true
+					last := ""
+					if p.doing != "" {
+						last = " (last step: " + chat.redact.apply(clip(p.doing, 120)) + ")"
+					}
+					chat.send(fmt.Sprintf("⏳ No sign of progress for %s%s. It may just be slow; /stop ends the turn.", humanize(time.Since(p.at)), last))
+				}
+			}
+		}
+	}()
+
 	var result *turn.Event
 	exit, err := client.Follow(followCtx, t.id, func(line []byte) {
 		var ev turn.Event
 		if json.Unmarshal(line, &ev) != nil {
 			return
 		}
+		doing := progress.Load().doing
+		if ev.Type == turn.EventTool {
+			doing = strings.TrimSpace(ev.Tool + " " + ev.Detail)
+		}
+		progress.Store(&stallState{at: time.Now(), doing: doing})
 		if ev.Model != "" {
 			rec.Model = ev.Model
 		}
@@ -789,4 +819,10 @@ func credentialsNote(c credentials) string {
 		fmt.Fprintf(&b, "\n- Your commits are authored as %s <%s>.", c.env["GIT_AUTHOR_NAME"], c.env["GIT_AUTHOR_EMAIL"])
 	}
 	return b.String()
+}
+
+// stallState is when a turn last showed progress, and what it was doing.
+type stallState struct {
+	at    time.Time
+	doing string
 }

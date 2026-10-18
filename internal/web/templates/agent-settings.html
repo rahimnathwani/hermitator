@@ -70,6 +70,7 @@
   <form method="post" action="/agents/{{$a.ID}}/delete" data-confirm="Delete agent" data-confirm-title="Delete {{$a.Name}}?"
         data-confirm-type="{{$a.Name}}" data-confirm-type-label="Type {{$a.Name}} to confirm." data-confirm-field="confirm">
     <template data-confirm-body>
+      <ul class="risk" data-load="/agents/{{$a.ID}}/risk"><li class="muted">Checking its git repositories for work that exists nowhere else…</li></ul>
       <ul>
         <li>Its sandbox and <strong>every file in it</strong> are deleted.</li>
         {{with $a.Routes}}<li>{{len .}} linked chat{{if gt (len .) 1}}s are{{else}} is{{end}} unlinked.</li>{{end}}

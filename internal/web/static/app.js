@@ -178,6 +178,14 @@ function ask(dialog, form, submitter) {
   $("[data-title]").textContent = form.dataset.confirmTitle || "Are you sure?";
   const body = form.querySelector("template[data-confirm-body]");
   $("[data-body]").replaceChildren(body ? body.content.cloneNode(true) : "");
+  // Parts of the explanation that take a moment to find out, such as
+  // unpushed commits, load once the dialog is open.
+  for (const el of $("[data-body]").querySelectorAll("[data-load]")) {
+    fetch(el.dataset.load, { headers: { "HX-Request": "true" } })
+      .then((r) => (r.ok ? r.text() : Promise.reject(new Error(r.statusText))))
+      .then((html) => (el.innerHTML = html))
+      .catch(() => (el.innerHTML = "<li>Could not check for unsaved work.</li>"));
+  }
   ok.textContent = form.dataset.confirm || "Confirm";
   $("[data-type]").hidden = !want;
   $("[data-type-label]").textContent = form.dataset.confirmTypeLabel || `Type ${want} to confirm.`;

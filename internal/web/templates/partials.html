@@ -62,6 +62,13 @@
 <p class="hint">Valid for {{until .LinkExpires}}, once. The chat you send it in becomes this agent's.</p>
 {{end}}
 
+{{define "risk"}}
+{{- if .Err}}<li>Could not check for unsaved work: {{.Err}}</li>
+{{- else if .Repos}}{{range .Repos}}<li><strong>{{.Path}}</strong> has {{if .Uncommitted}}{{.Uncommitted}} uncommitted file{{if ne .Uncommitted 1}}s{{end}}{{end}}{{if and .Uncommitted .Unpushed}} and {{end}}{{if .Unpushed}}{{.Unpushed}} commit{{if ne .Unpushed 1}}s{{end}} that no remote has{{end}}. Deleting loses {{if or (gt .Uncommitted 1) (gt .Unpushed 1) (and .Uncommitted .Unpushed)}}them{{else}}it{{end}}.</li>{{end}}
+{{- else}}<li>No uncommitted or unpushed work in its git repositories.</li>
+{{- end}}
+{{end}}
+
 {{define "seg"}}
 <div class="seg">
   {{- range .Options}}

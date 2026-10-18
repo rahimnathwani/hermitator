@@ -599,3 +599,21 @@ func TestGitHubAndSecrets(t *testing.T) {
 		t.Fatal("GitHub not disconnected")
 	}
 }
+
+func TestWorkAtRiskEndpoint(t *testing.T) {
+	f := setup(t)
+	alice := f.login(t, "alice@example.com")
+	bob := f.login(t, "bob@example.com")
+	id := alice.createAgent("bot")
+	// The web tests have no sandbox to look in, so this says it could not
+	// check; the orchestrator's tests cover the check itself.
+	if code, body := alice.get("/agents/" + id + "/risk"); code != http.StatusOK || !strings.HasPrefix(strings.TrimSpace(body), "<li>") {
+		t.Fatalf("risk = %d %q", code, body)
+	}
+	if code, _ := bob.get("/agents/" + id + "/risk"); code != http.StatusNotFound {
+		t.Fatalf("bob checked alice's agent: %d", code)
+	}
+	if _, body := alice.get("/agents/" + id + "/settings"); !strings.Contains(body, `data-load="/agents/`+id+`/risk"`) {
+		t.Fatal("the delete dialog does not check for unpushed work")
+	}
+}

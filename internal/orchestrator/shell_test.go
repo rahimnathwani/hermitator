@@ -20,3 +20,10 @@ func TestFormatShell(t *testing.T) {
 		t.Errorf("long output = %.40q…", got)
 	}
 }
+
+func TestParseRisk(t *testing.T) {
+	got := parseRisk("/workspace/shop\t3\t2\n/workspace/clean\t0\t0\ngarbage\n/workspace/new\t       1\t0\n")
+	if len(got) != 2 || got[0] != (RepoAtRisk{"/workspace/shop", 3, 2}) || got[1] != (RepoAtRisk{"/workspace/new", 1, 0}) {
+		t.Fatalf("parseRisk = %+v", got)
+	}
+}

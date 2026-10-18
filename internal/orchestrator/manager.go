@@ -36,6 +36,9 @@ type Config struct {
 	RetryNoticeDelay time.Duration
 	// ShellTimeout bounds a /sh command.
 	ShellTimeout time.Duration
+	// StallAfter is how long a turn may go without any sign of progress
+	// before the chat is told, once.
+	StallAfter time.Duration
 	// PublicURL is the web UI's address, used in replies.
 	PublicURL string
 }
@@ -74,6 +77,9 @@ func New(cfg Config, st *store.Store, box *secrets.Box, rt sandbox.Runtime, log 
 	}
 	if cfg.ShellTimeout == 0 {
 		cfg.ShellTimeout = 2 * time.Minute
+	}
+	if cfg.StallAfter == 0 {
+		cfg.StallAfter = 10 * time.Minute
 	}
 	return &Manager{cfg: cfg, store: st, box: box, rt: rt, log: log, actors: map[string]*actor{}, msgr: nopMessenger{}}
 }

@@ -62,6 +62,9 @@ func resetsIn(at time.Time, loc *time.Location) string {
 }
 
 func humanize(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Round(time.Second).Seconds()))
+	}
 	d = d.Round(time.Minute)
 	if h := int(d.Hours()); h > 0 {
 		return fmt.Sprintf("%dh%02dm", h, int(d.Minutes())%60)

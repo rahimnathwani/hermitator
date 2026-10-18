@@ -106,6 +106,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	tenant("GET /agents/{id}/card", s.agentCard)
 	tenant("GET /agents/{id}/chats", s.agentChatsPage)
 	tenant("POST /agents/{id}/use-image-harnesses", s.useImageHarnesses)
+	tenant("GET /agents/{id}/risk", s.workAtRisk)
 	tenant("POST /agents/{id}/tasks/{tid}/{action}", s.taskAction)
 	tenant("POST /settings/limits", s.saveLimits)
 	tenant("POST /settings/github", s.saveGitHub)

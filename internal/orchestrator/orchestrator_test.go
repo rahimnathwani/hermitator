@@ -63,6 +63,9 @@ case "$text" in
     echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"whatsapp-send report.txt"}}]}}'
     ;;
   *"sleep"*) sleep 30 ;;
+  *"go quiet"*)
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}'
+    sleep 4 ;;
   *"leak it"*)
     text="key=$STRIPE_KEY gh=$GH_TOKEN author=$GIT_AUTHOR_NAME helper=$GIT_CONFIG_KEY_0" ;;
   *"steer me"*)
@@ -1112,5 +1115,45 @@ func TestRedactor(t *testing.T) {
 	}
 	if got := secretStrings(`{"openai-codex":{"access":"eyJhbGciOiJSUzI1NiJ9.payload.sig","type":"oauth","expires":123}}`); len(got) != 1 {
 		t.Fatalf("secretStrings = %q", got)
+	}
+}
+
+func TestStallWarning(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.cfg.StallAfter = 1500 * time.Millisecond
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "go quiet", true))
+	got := e.rec.wait(t, "text")
+	if !strings.Contains(got.body, "No sign of progress") || !strings.Contains(got.body, "Bash npm test") {
+		t.Fatalf("stall warning = %q", got.body)
+	}
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "echo") {
+		t.Fatalf("after the warning, wanted the reply; got %q", got.body)
+	}
+}
+
+func TestWorkAtRisk(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	spec, _ := e.m.Spec(e.agent)
+	repo := filepath.Join(spec.Dir, "workspace", "shop")
+	os.MkdirAll(repo, 0o755)
+	git := func(args ...string) {
+		cmd := exec.Command("git", append([]string{"-C", repo, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v %s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	os.WriteFile(filepath.Join(repo, "a.txt"), []byte("a"), 0o644)
+	git("add", "a.txt")
+	git("commit", "-q", "-m", "one")
+	os.WriteFile(filepath.Join(repo, "b.txt"), []byte("b"), 0o644)
+	got, err := e.m.WorkAtRisk(ctx, e.agent.ID)
+	if err != nil || len(got) != 1 || got[0] != (RepoAtRisk{"/workspace/shop", 1, 1}) {
+		t.Fatalf("WorkAtRisk = %+v, %v", got, err)
 	}
 }

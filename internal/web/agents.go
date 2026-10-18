@@ -374,6 +374,22 @@ func (s *Server) taskAction(w http.ResponseWriter, r *http.Request, v *viewer) {
 	}
 }
 
+// workAtRisk lists, for the delete dialog, work in the agent's git
+// repositories that deleting it would lose.
+func (s *Server) workAtRisk(w http.ResponseWriter, r *http.Request, v *viewer) {
+	a, err := s.agentFor(r, v)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	repos, err := s.Agents.WorkAtRisk(r.Context(), a.ID)
+	data := map[string]any{"Repos": repos}
+	if err != nil {
+		data["Err"] = err.Error()
+	}
+	s.partial(w, "risk", data)
+}
+
 func (s *Server) wakeAgent(w http.ResponseWriter, r *http.Request, v *viewer) {
 	a, err := s.agentFor(r, v)
 	if err != nil {
