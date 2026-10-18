@@ -34,7 +34,7 @@ const systemPrompt = `You are running inside hermitator: an isolated Linux machi
 - To send the user a file (a screenshot, chart, PDF, archive...), run: whatsapp-send <path> [caption]
 - /workspace is your working directory. The whole filesystem persists between conversations, including anything you install with apt, npm, pip or uv. Run as root; there is no sudo prompt.
 - When nobody is talking to you the machine is suspended. Background processes you leave running (dev servers, databases) are frozen and continue when the next message arrives. Start them with their output redirected to a file, for example: nohup npm run dev > /tmp/dev.log 2>&1 &. The shell you start them from goes away at the end of your turn.
-- Chromium and Playwright are installed for screenshots and browser automation.`
+- For screenshots and browser automation there is Playwright for Python (from playwright.sync_api import sync_playwright) and for Node (require("playwright")), plus a chromium command for one-off captures. After taking a screenshot, look at it before sending it, so you know the page really loaded.`
 
 func (m *Manager) agentPrompt(spec *sandbox.Spec, last Message) string {
 	who := "The user talks to you over WhatsApp."
@@ -113,7 +113,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 
 	rec := &store.Turn{
 		ID: t.id, AgentID: agent.ID, AccountID: last.AccountID, ChatJID: last.Chat,
-		Harness: agent.Harness, Input: clip(prompt, 4000), Wake: wake, WakeMS: wakeMS,
+		Harness: agent.Harness, SessionID: agent.SessionID, Input: clip(prompt, 4000), Wake: wake, WakeMS: wakeMS,
 	}
 	if err := m.store.CreateTurn(ctx, rec); err != nil {
 		log.Error("record turn", "err", err)
@@ -213,6 +213,10 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		client.Remove(t.id)
 	}
 
+	if result != nil && result.Type == turn.EventResult {
+		m.accountSession(ctx, agent, result)
+	}
+
 	switch {
 	case died.Load():
 		return m.finish(ctx, chat, rec, nil, "⚠️ The sandbox stopped in the middle of the turn (out of memory?).", false)
@@ -230,10 +234,32 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		}
 		return m.finish(ctx, chat, rec, nil, "⚠️ The agent exited without replying: "+detail, true)
 	}
-	if result.SessionID != "" && result.SessionID != agent.SessionID {
-		m.store.SetAgentSession(ctx, agent.ID, result.SessionID)
-	}
 	return m.finish(ctx, chat, rec, result, "", true)
+}
+
+// accountSession records which session the turn continued and turns the
+// harness's cost figure into this turn's own cost.
+//
+// Claude Code reports a running total for the whole session, restored
+// when a session is resumed, so the turn's cost is the increase since the
+// last total. A total lower than the last one means Claude started over
+// and the figure stands on its own. pi reports per turn already.
+func (m *Manager) accountSession(ctx context.Context, ag *store.Agent, result *turn.Event) {
+	sid := result.SessionID
+	if sid == "" {
+		sid = ag.SessionID
+	}
+	if ag.Harness != store.HarnessClaude {
+		if sid != ag.SessionID {
+			m.store.SetAgentSession(ctx, ag.ID, sid)
+		}
+		return
+	}
+	total := result.CostUSD
+	if sid == ag.SessionID && total >= ag.SessionCost {
+		result.CostUSD = total - ag.SessionCost
+	}
+	m.store.SetAgentSessionCost(ctx, ag.ID, sid, total)
 }
 
 // finish records the outcome of a turn, then delivers it.
@@ -242,14 +268,14 @@ func (m *Manager) finish(ctx context.Context, chat chatRef, rec *store.Turn, res
 	switch {
 	case rec.Status == store.TurnAborted:
 		if result != nil {
-			rec.Output = result.Text
+			rec.Output, rec.CostUSD = result.Text, result.CostUSD
 		}
 		deliver = func() { chat.react("⏹") }
 	case failure != "":
 		rec.Status, rec.Output = store.TurnError, failure
 		deliver = func() { chat.send(failure); chat.react("❌") }
 	case result.Type == turn.EventError || result.IsError:
-		rec.Status, rec.Output = store.TurnError, result.Text
+		rec.Status, rec.Output, rec.CostUSD = store.TurnError, result.Text, result.CostUSD
 		deliver = func() { chat.sendAgent("⚠️ " + result.Text); chat.react("❌") }
 	default:
 		rec.Status, rec.Output, rec.CostUSD = store.TurnOK, result.Text, result.CostUSD

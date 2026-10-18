@@ -77,7 +77,7 @@ type Runtime interface {
 	// the guest init is left and checkpointing it otherwise. It returns
 	// the resulting state.
 	Suspend(ctx context.Context, s *Spec) (string, error)
-	// Stop kills a sandbox and discards any checkpoint.
+	// Stop kills a sandbox and discards any checkpoint. Files are kept.
 	Stop(ctx context.Context, s *Spec) error
 	// Destroy stops a sandbox and deletes everything it owns.
 	Destroy(ctx context.Context, s *Spec) error

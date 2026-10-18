@@ -39,7 +39,18 @@ func (n *Network) Setup(ctx context.Context) error {
 			return err
 		}
 	}
+	// Drop any other address, such as one left from a previous subnet.
 	gw := netip.PrefixFrom(n.Gateway(), n.Subnet.Bits()).String()
+	if out, err := command(ctx, "ip", "-4", "-o", "addr", "show", "dev", n.Bridge); err == nil {
+		for _, line := range strings.Split(string(out), "\n") {
+			f := strings.Fields(line)
+			for i := 0; i+1 < len(f); i++ {
+				if f[i] == "inet" && f[i+1] != gw {
+					command(ctx, "ip", "addr", "del", f[i+1], "dev", n.Bridge)
+				}
+			}
+		}
+	}
 	if _, err := command(ctx, "ip", "addr", "replace", gw, "dev", n.Bridge); err != nil {
 		return err
 	}
@@ -92,7 +103,9 @@ func (n *Network) Attach(ctx context.Context, id string, ip netip.Addr) error {
 	steps := [][]string{
 		{"ip", "link", "set", veth, "master", n.Bridge, "up"},
 		{"bridge", "link", "set", "dev", veth, "isolated", "on"},
-		{"ip", "-n", ns, "addr", "replace", netip.PrefixFrom(ip, n.Subnet.Bits()).String(), "dev", "eth0"},
+		// runsc takes over whatever addresses it finds, so leave only one.
+		{"ip", "-n", ns, "addr", "flush", "dev", "eth0"},
+		{"ip", "-n", ns, "addr", "add", netip.PrefixFrom(ip, n.Subnet.Bits()).String(), "dev", "eth0"},
 		{"ip", "-n", ns, "link", "set", "eth0", "up"},
 		{"ip", "-n", ns, "link", "set", "lo", "up"},
 		{"ip", "-n", ns, "route", "replace", "default", "via", n.Gateway().String()},

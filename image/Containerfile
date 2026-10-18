@@ -11,6 +11,8 @@ ARG NODE_MAJOR=22
 ARG CLAUDE_CODE_VERSION=2.1.302
 ARG PI_VERSION=1.3.0
 ARG PLAYWRIGHT_VERSION=1.64.1
+# Must use the same browser build as the Node package above.
+ARG PLAYWRIGHT_PYTHON_VERSION=1.64.0
 
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
@@ -56,6 +58,11 @@ RUN npx -y playwright@${PLAYWRIGHT_VERSION} install --with-deps chromium \
  && npm install -g --no-fund --no-audit playwright@${PLAYWRIGHT_VERSION} \
  && npm cache clean --force \
  && rm -rf /var/lib/apt/lists/*
+
+# Python Playwright, sharing the browsers installed above. The check fails
+# the build if it ever expects a different browser build.
+RUN uv pip install --system --break-system-packages --no-cache playwright==${PLAYWRIGHT_PYTHON_VERSION} \
+ && python3 -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); p.chromium.launch().close(); p.stop()"
 
 COPY rootfs/ /
 

@@ -102,6 +102,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	tenant("GET /agents/{id}/card", s.agentCard)
 	tenant("POST /agents/{id}/settings", s.updateAgent)
 	tenant("POST /agents/{id}/wake", s.wakeAgent)
+	tenant("POST /agents/{id}/upgrade-image", s.upgradeImage)
 	tenant("POST /agents/{id}/sleep", s.sleepAgent)
 	tenant("POST /agents/{id}/stop", s.stopTurn)
 	tenant("POST /agents/{id}/new-session", s.newSession)

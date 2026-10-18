@@ -99,6 +99,15 @@
       </form>
     </section>
 
+    {{with $d.NewerImage}}
+    <section class="card">
+      <h2>Newer image</h2>
+      <p>This agent runs <code>{{$a.Image}}</code>. <code>{{.}}</code> is newer, with updated tools.</p>
+      <p class="muted small">Upgrading stops the sandbox; it boots from the new image with the next message. Every file the agent made is kept. Anything running, or saved in a checkpoint, is not.</p>
+      <form method="post" action="/agents/{{$a.ID}}/upgrade-image"><button>Upgrade to {{.}}</button></form>
+    </section>
+    {{end}}
+
     <details class="card danger">
       <summary>Delete agent</summary>
       <p>Deletes the sandbox and every file in it. This cannot be undone.</p>

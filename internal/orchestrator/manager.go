@@ -89,6 +89,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	var dirs []string
 	for _, a := range agents {
+		m.renumber(ctx, a)
 		spec, err := m.Spec(a)
 		if err != nil {
 			m.log.Warn("agent has no usable spec", "agent", a.ID, "err", err)
@@ -113,6 +114,28 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	go m.reapLoop(ctx)
 	return nil
+}
+
+// renumber moves an agent whose address is outside the configured subnet,
+// as happens when HERMITATOR_SUBNET changes. A sandbox that is running or
+// checkpointed holds its old address in memory, so it is stopped first.
+func (m *Manager) renumber(ctx context.Context, a *store.Agent) {
+	if ip, err := netip.ParseAddr(a.IP); err == nil && m.cfg.Subnet.Contains(ip) {
+		return
+	}
+	if spec, err := m.Spec(a); err == nil {
+		if st, _ := m.rt.State(ctx, spec); st != sandbox.Stopped {
+			m.log.Warn("stopping agent to move it to the new subnet; running processes are lost", "agent", a.ID, "state", st)
+			m.rt.Stop(ctx, spec)
+		}
+	}
+	ip, err := m.store.ReassignAgentIP(ctx, a.ID, m.cfg.Subnet)
+	if err != nil {
+		m.log.Error("renumber agent", "agent", a.ID, "err", err)
+		return
+	}
+	m.log.Info("agent moved to the configured subnet", "agent", a.ID, "from", a.IP, "to", ip)
+	a.IP = ip
 }
 
 // cleanSpool removes finished jobs a previous process never collected.
@@ -352,6 +375,52 @@ func (nopMessenger) React(context.Context, string, string, string, string, strin
 func (nopMessenger) Typing(context.Context, string, string, bool) error { return nil }
 func (nopMessenger) MarkRead(context.Context, string, string, string, string) error {
 	return nil
+}
+
+// NewerImage returns the newest version of an agent's image family, or ""
+// if the agent already runs it.
+func (m *Manager) NewerImage(a *store.Agent) string {
+	latest, err := m.cfg.Images.Current(sandbox.Family(a.Image))
+	if err != nil || latest == a.Image {
+		return ""
+	}
+	return latest
+}
+
+// ErrUpToDate is returned when there is no newer image to move to.
+var ErrUpToDate = errors.New("the agent already runs the newest image")
+
+// UpgradeImage moves an agent to the newest version of its image. The
+// sandbox is stopped (a checkpoint cannot be restored over a different
+// image) and boots from the new one next time; every file the agent made
+// is kept, since it lives in the agent's own layer.
+func (m *Manager) UpgradeImage(ctx context.Context, agentID string) (string, error) {
+	var latest string
+	err := m.actor(agentID).call(func(a *actor) error {
+		if a.turn != nil || a.holds > 0 {
+			return ErrBusy
+		}
+		ag, err := m.store.Agent(ctx, agentID)
+		if err != nil {
+			return err
+		}
+		if latest = m.NewerImage(ag); latest == "" {
+			return ErrUpToDate
+		}
+		spec, err := m.Spec(ag)
+		if err != nil {
+			return err
+		}
+		if a.state == sandbox.Running {
+			m.scrubCredentials(ctx, spec)
+		}
+		if err := m.rt.Stop(ctx, spec); err != nil {
+			return err
+		}
+		a.setState(sandbox.Stopped)
+		return m.store.SetAgentImage(ctx, agentID, latest)
+	})
+	return latest, err
 }
 
 // UpdateAgent saves an agent's settings. Changing the harness starts a

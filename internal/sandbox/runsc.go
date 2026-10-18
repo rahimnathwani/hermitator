@@ -262,11 +262,17 @@ func (r *Runsc) kill(ctx context.Context, id string) {
 	r.run(ctx, "delete", "-force", id)
 }
 
-// Stop implements Runtime.
+// Stop implements Runtime. It also unmounts the root, so the next boot
+// mounts it afresh, possibly over a different image.
 func (r *Runsc) Stop(ctx context.Context, s *Spec) error {
 	defer r.lock(s.ID)()
 	r.kill(ctx, s.ID)
 	r.discardCheckpoint(s)
+	if mounted(s.merged()) {
+		if _, err := command(ctx, "umount", s.merged()); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

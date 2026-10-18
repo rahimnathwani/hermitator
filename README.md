@@ -134,7 +134,12 @@ That builds both binaries, copies them over SSH and runs
 release (checksum verified), writes `/etc/hermitator/hermitator.env` with a
 new master key, configures Caddy, builds the agent image (about 2.5 GB; the
 first build takes a few minutes) and starts the service. Run it again to
-upgrade. Running sandboxes keep running across upgrades. To also build
+upgrade. Running sandboxes keep running across upgrades.
+
+To refresh the tools inside agents (Claude Code, pi, browsers), rebuild the
+image with `deploy/build-image.sh` on the server. New agents get the newest
+image; existing ones offer an *Upgrade image* button, which keeps all their
+files. To also build
 whisper.cpp for voice notes, prefix the command with `WITH_WHISPER=1`.
 
 Or, without Go, on the server itself: download a release from
@@ -206,6 +211,11 @@ the agent either.
 Messages sent in quick succession, a photo and then its caption say, become
 one turn. Messages that arrive while the agent is working wait for the next
 turn.
+
+Each turn's cost appears on the agent's page. It is what the model would
+have charged at API prices: on a Claude or ChatGPT subscription you are not
+billed per token, but it is a fair measure of how much of your allowance a
+turn used.
 
 Anyone who is not in a chat you linked is ignored, so strangers who find the
 agent's number get nothing. An account can also have a **fallback agent**,

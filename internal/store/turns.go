@@ -24,6 +24,7 @@ type Turn struct {
 	AccountID  string
 	ChatJID    string
 	Harness    string
+	SessionID  string
 	Status     string
 	Input      string
 	Output     string
@@ -44,13 +45,13 @@ func (t *Turn) Duration() time.Duration {
 	return end.Sub(t.StartedAt)
 }
 
-const turnColumns = `id, agent_id, account_id, chat_jid, harness, status, input, output, tools, wake, wake_ms, cost_usd, started_at, finished_at`
+const turnColumns = `id, agent_id, account_id, chat_jid, harness, session_id, status, input, output, tools, wake, wake_ms, cost_usd, started_at, finished_at`
 
 func scanTurn(row interface{ Scan(...any) error }) (*Turn, error) {
 	var t Turn
 	var started string
 	var finished sql.NullString
-	if err := row.Scan(&t.ID, &t.AgentID, &t.AccountID, &t.ChatJID, &t.Harness, &t.Status, &t.Input, &t.Output,
+	if err := row.Scan(&t.ID, &t.AgentID, &t.AccountID, &t.ChatJID, &t.Harness, &t.SessionID, &t.Status, &t.Input, &t.Output,
 		&t.Tools, &t.Wake, &t.WakeMS, &t.CostUSD, &started, &finished); err != nil {
 		return nil, one(err)
 	}
@@ -65,8 +66,8 @@ func (s *Store) CreateTurn(ctx context.Context, t *Turn) error {
 	}
 	t.StartedAt = time.Now()
 	t.Status = TurnRunning
-	_, err := s.db.ExecContext(ctx, `INSERT INTO turns (`+turnColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.AgentID, t.AccountID, t.ChatJID, t.Harness, t.Status, t.Input, t.Output, t.Tools, t.Wake, t.WakeMS, t.CostUSD, ts(t.StartedAt), nil)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO turns (`+turnColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.AgentID, t.AccountID, t.ChatJID, t.Harness, t.SessionID, t.Status, t.Input, t.Output, t.Tools, t.Wake, t.WakeMS, t.CostUSD, ts(t.StartedAt), nil)
 	return err
 }
 

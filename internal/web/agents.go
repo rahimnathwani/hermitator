@@ -149,6 +149,7 @@ func (s *Server) agentPage(w http.ResponseWriter, r *http.Request, v *viewer) {
 		"Accounts":    accounts,
 		"Providers":   orchestrator.PiProviders,
 		"Memory":      []int{1024, 2048, 4096, 8192, 16384},
+		"NewerImage":  s.Agents.NewerImage(a),
 	})
 }
 
@@ -194,6 +195,26 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request, v *viewer) 
 	default:
 		s.audit(r, v, "agent.update", "agent="+a.ID)
 		s.back(w, r, "/agents/"+a.ID, "Saved.")
+	}
+}
+
+func (s *Server) upgradeImage(w http.ResponseWriter, r *http.Request, v *viewer) {
+	a, err := s.agentFor(r, v)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	latest, err := s.Agents.UpgradeImage(r.Context(), a.ID)
+	switch {
+	case errors.Is(err, orchestrator.ErrBusy):
+		s.back(w, r, "/agents/"+a.ID, "The agent is busy (a turn, a terminal or a login is using it).")
+	case errors.Is(err, orchestrator.ErrUpToDate):
+		s.back(w, r, "/agents/"+a.ID, "Already on the newest image.")
+	case err != nil:
+		s.back(w, r, "/agents/"+a.ID, "Could not upgrade: "+err.Error())
+	default:
+		s.audit(r, v, "agent.image", "agent="+a.ID+" image="+latest)
+		s.back(w, r, "/agents/"+a.ID, "Now on "+latest+". It boots from the new image with the next message.")
 	}
 }
 

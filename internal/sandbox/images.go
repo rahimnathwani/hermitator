@@ -63,3 +63,12 @@ func (im *Images) Resolve(name string) (Image, error) {
 	}
 	return img, nil
 }
+
+// Family returns the family a pinned version belongs to:
+// "universal-20261017.1" is a "universal".
+func Family(version string) string {
+	if i := strings.LastIndex(version, "-"); i > 0 {
+		return version[:i]
+	}
+	return version
+}

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -57,8 +58,10 @@ case "$text" in
     ;;
   *"sleep"*) sleep 30 ;;
 esac
+# Like Claude Code, report the session's running total: a cent per turn.
+total=$(wc -l < "$HOME/modes" | tr -d ' ')
 # printf, not echo: some shells' echo expands the \n escapes in the JSON.
-printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"**echo:** '"$text"'","session_id":"'"$sid"'","total_cost_usd":0.01}'
+printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"**echo:** '"$text"'","session_id":"'"$sid"'","total_cost_usd":0.0'"$total"'}'
 `
 
 type sent struct{ kind, chat, body string }
@@ -244,6 +247,12 @@ func TestTurnEndToEnd(t *testing.T) {
 	turns, _ := e.st.Turns(ctx, e.agent.ID, 10)
 	if len(turns) != 2 || turns[0].Status != store.TurnOK || turns[0].Tools != 1 {
 		t.Fatalf("turns = %+v", turns)
+	}
+	// Claude reported running totals of 0.01 and 0.02; each turn cost 0.01.
+	for _, tr := range turns {
+		if tr.CostUSD < 0.0099 || tr.CostUSD > 0.0101 {
+			t.Fatalf("turn cost = %v, want 0.01 per turn", tr.CostUSD)
+		}
 	}
 	ag, _ := e.st.Agent(ctx, e.agent.ID)
 	if ag.SessionID == "" || ag.State != sandbox.Running {
@@ -554,5 +563,66 @@ func TestMentionsName(t *testing.T) {
 		if got := mentionsName(text, "bot"); got != want {
 			t.Errorf("mentionsName(%q) = %v", text, got)
 		}
+	}
+}
+
+func TestUpgradeImage(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	e.link(t, "self@s.whatsapp.net")
+	e.m.HandleMessage(ctx, e.msg("self@s.whatsapp.net", "hello", true))
+	e.rec.wait(t, "text")
+	e.idle(t)
+
+	if _, err := e.m.UpgradeImage(ctx, e.agent.ID); !errors.Is(err, ErrUpToDate) {
+		t.Fatalf("upgrade with nothing newer: %v", err)
+	}
+	// A newer image appears.
+	images := e.m.cfg.Images.Dir
+	os.MkdirAll(filepath.Join(images, "universal-test.1", "rootfs"), 0o755)
+	os.Remove(filepath.Join(images, "universal"))
+	os.Symlink("universal-test.1", filepath.Join(images, "universal"))
+
+	ag, _ := e.st.Agent(ctx, e.agent.ID)
+	if got := e.m.NewerImage(ag); got != "universal-test.1" {
+		t.Fatalf("NewerImage = %q", got)
+	}
+	spec, _ := e.m.Spec(ag)
+	os.WriteFile(filepath.Join(spec.Dir, "home", "keep.txt"), []byte("mine"), 0o644)
+	got, err := e.m.UpgradeImage(ctx, e.agent.ID)
+	if err != nil || got != "universal-test.1" {
+		t.Fatalf("UpgradeImage = %q, %v", got, err)
+	}
+	ag, _ = e.st.Agent(ctx, e.agent.ID)
+	if ag.Image != "universal-test.1" || ag.State != sandbox.Stopped {
+		t.Fatalf("after upgrade: image %s, state %s", ag.Image, ag.State)
+	}
+	if b, err := os.ReadFile(filepath.Join(spec.Dir, "home", "keep.txt")); err != nil || string(b) != "mine" {
+		t.Fatal("the agent's files did not survive the upgrade")
+	}
+	// It still works afterwards.
+	e.m.HandleMessage(ctx, e.msg("self@s.whatsapp.net", "still there?", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "still there?") {
+		t.Fatalf("reply after upgrade = %q", got.body)
+	}
+}
+
+func TestAgentsMoveWhenTheSubnetChanges(t *testing.T) {
+	e := setup(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if e.agent.IP != "10.88.0.2" {
+		t.Fatalf("agent starts at %s", e.agent.IP)
+	}
+	cfg := e.m.cfg
+	cfg.Subnet = netip.MustParsePrefix("10.231.0.0/16")
+	m2 := New(cfg, e.st, e.m.box, &sandbox.Local{}, e.m.log)
+	if err := m2.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ag, _ := e.st.Agent(ctx, e.agent.ID)
+	if ag.IP != "10.231.0.2" {
+		t.Fatalf("after the subnet changed the agent is at %s", ag.IP)
 	}
 }

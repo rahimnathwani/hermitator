@@ -35,6 +35,10 @@ func env(key, fallback string) string {
 	return fallback
 }
 
+// DefaultSubnet is the agents' network unless HERMITATOR_SUBNET says
+// otherwise.
+const DefaultSubnet = "10.231.0.0/16"
+
 // DefaultEnvFile is where deploy/install.sh writes the configuration.
 const DefaultEnvFile = "/etc/hermitator/hermitator.env"
 
@@ -87,7 +91,9 @@ func Load() (*Config, error) {
 	c.DataDir = abs
 	c.PublicURL = strings.TrimRight(env("HERMITATOR_PUBLIC_URL", "http://"+c.Listen), "/")
 	c.Model = env("HERMITATOR_WHISPER_MODEL", filepath.Join(c.DataDir, "whisper", "ggml-small.bin"))
-	subnet, err := netip.ParsePrefix(env("HERMITATOR_SUBNET", "10.88.0.0/16"))
+	// Not 10.88.0.0/16, which is podman's default network, nor any other
+	// range container tools or VPNs commonly claim.
+	subnet, err := netip.ParsePrefix(env("HERMITATOR_SUBNET", DefaultSubnet))
 	if err != nil || !subnet.Addr().Is4() || subnet.Bits() > 28 {
 		return nil, fmt.Errorf("HERMITATOR_SUBNET must be an IPv4 prefix of /28 or larger")
 	}

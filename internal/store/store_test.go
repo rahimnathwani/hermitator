@@ -267,3 +267,23 @@ func TestHeldMessages(t *testing.T) {
 		t.Fatalf("held messages survived unlinking: %d", n)
 	}
 }
+
+func TestReassignAgentIP(t *testing.T) {
+	ctx := context.Background()
+	s := open(t)
+	u := mkUser(t, s, "a@example.com")
+	old := netip.MustParsePrefix("10.88.0.0/16")
+	a := &Agent{UserID: u.ID, Name: "a", Image: "u", Harness: HarnessClaude}
+	b := &Agent{UserID: u.ID, Name: "b", Image: "u", Harness: HarnessClaude}
+	s.CreateAgent(ctx, a, old)
+	s.CreateAgent(ctx, b, old)
+	next := netip.MustParsePrefix("10.231.0.0/16")
+	ipA, err := s.ReassignAgentIP(ctx, a.ID, next)
+	if err != nil || ipA != "10.231.0.2" {
+		t.Fatalf("a -> %s, %v", ipA, err)
+	}
+	ipB, _ := s.ReassignAgentIP(ctx, b.ID, next)
+	if ipB != "10.231.0.3" {
+		t.Fatalf("b -> %s", ipB)
+	}
+}

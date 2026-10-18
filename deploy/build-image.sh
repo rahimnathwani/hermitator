@@ -25,7 +25,9 @@ dest=$images/$name-$version
 tag=localhost/hermitator-$name:$version
 
 echo "building $tag from $context"
-podman build --pull=newer --tag "$tag" "$context"
+# Host networking keeps the build off podman's bridge, whose default
+# subnet is easy to clash with.
+podman build --pull=newer --network=host --tag "$tag" "$context"
 
 tmp=$dest.partial
 rm -rf "$tmp"

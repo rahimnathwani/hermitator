@@ -113,7 +113,7 @@ Unreferenced bundles are deleted at startup.
 ### Network
 
 Each agent has a network namespace with a veth pair into the `hermitator0`
-bridge, and an address from `10.88.0.0/16`. Bridge ports are isolated from
+bridge, and an address from `10.231.0.0/16`. Bridge ports are isolated from
 each other. An nftables table drops everything from the bridge to the host
 except replies, everything from the bridge to private, loopback, link-local
 and multicast ranges, and all new inbound connections to agents. Outbound

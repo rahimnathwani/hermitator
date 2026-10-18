@@ -26,15 +26,18 @@ const (
 
 // Agent is one sandbox, its workspace and its conversation.
 type Agent struct {
-	ID          string
-	UserID      string
-	Name        string
-	Image       string
-	Harness     string
-	Model       string
-	PiProvider  string
-	State       string
-	SessionID   string
+	ID         string
+	UserID     string
+	Name       string
+	Image      string
+	Harness    string
+	Model      string
+	PiProvider string
+	State      string
+	SessionID  string
+	// SessionCost is the running total Claude Code last reported for the
+	// session, so the next turn can record only its own share.
+	SessionCost float64
 	IdleTimeout time.Duration
 	MemoryMB    int
 	IP          string
@@ -42,7 +45,7 @@ type Agent struct {
 	CreatedAt   time.Time
 }
 
-const agentColumns = `id, user_id, name, image, harness, model, pi_provider, state, session_id, idle_timeout_sec, memory_mb, ip, last_active_at, created_at`
+const agentColumns = `id, user_id, name, image, harness, model, pi_provider, state, session_id, session_cost, idle_timeout_sec, memory_mb, ip, last_active_at, created_at`
 
 func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	var a Agent
@@ -50,7 +53,7 @@ func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	var last sql.NullString
 	var created string
 	if err := row.Scan(&a.ID, &a.UserID, &a.Name, &a.Image, &a.Harness, &a.Model, &a.PiProvider, &a.State,
-		&a.SessionID, &idle, &a.MemoryMB, &a.IP, &last, &created); err != nil {
+		&a.SessionID, &a.SessionCost, &idle, &a.MemoryMB, &a.IP, &last, &created); err != nil {
 		return nil, one(err)
 	}
 	a.IdleTimeout = time.Duration(idle) * time.Second
@@ -68,34 +71,13 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent, subnet netip.Prefix) 
 	}
 	defer tx.Rollback()
 
-	used := map[netip.Addr]bool{}
-	rows, err := tx.QueryContext(ctx, `SELECT ip FROM agents`)
+	ip, err := freeAddress(ctx, tx, subnet)
 	if err != nil {
 		return err
 	}
-	for rows.Next() {
-		var ip string
-		if err := rows.Scan(&ip); err != nil {
-			rows.Close()
-			return err
-		}
-		if addr, err := netip.ParseAddr(ip); err == nil {
-			used[addr] = true
-		}
-	}
-	rows.Close()
-
-	gateway := subnet.Masked().Addr().Next()
-	ip := gateway.Next()
-	for used[ip] {
-		ip = ip.Next()
-	}
-	if !subnet.Contains(ip) || !subnet.Contains(ip.Next()) {
-		return fmt.Errorf("no free addresses left in %s", subnet)
-	}
 
 	a.ID = ids.New()
-	a.IP = ip.String()
+	a.IP = ip
 	a.CreatedAt = time.Now()
 	if a.State == "" {
 		a.State = StateStopped
@@ -106,8 +88,8 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent, subnet netip.Prefix) 
 	if a.MemoryMB == 0 {
 		a.MemoryMB = 4096
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO agents (`+agentColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.UserID, a.Name, a.Image, a.Harness, a.Model, a.PiProvider, a.State, a.SessionID,
+	_, err = tx.ExecContext(ctx, `INSERT INTO agents (`+agentColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.UserID, a.Name, a.Image, a.Harness, a.Model, a.PiProvider, a.State, a.SessionID, a.SessionCost,
 		int(a.IdleTimeout/time.Second), a.MemoryMB, a.IP, nullTS(a.LastActive), ts(a.CreatedAt))
 	if isUnique(err) {
 		return ErrConflict
@@ -116,6 +98,54 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent, subnet netip.Prefix) 
 		return err
 	}
 	return tx.Commit()
+}
+
+// ReassignAgentIP gives an agent the lowest free address in subnet, for
+// when the agents' network has been changed.
+func (s *Store) ReassignAgentIP(ctx context.Context, id string, subnet netip.Prefix) (string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	ip, err := freeAddress(ctx, tx, subnet)
+	if err != nil {
+		return "", err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE agents SET ip = ? WHERE id = ?`, ip, id); err != nil {
+		return "", err
+	}
+	return ip, tx.Commit()
+}
+
+// freeAddress returns the lowest address in subnet no agent uses. The first
+// address is the host's end of the bridge.
+func freeAddress(ctx context.Context, tx *sql.Tx, subnet netip.Prefix) (string, error) {
+	used := map[netip.Addr]bool{}
+	rows, err := tx.QueryContext(ctx, `SELECT ip FROM agents`)
+	if err != nil {
+		return "", err
+	}
+	for rows.Next() {
+		var ip string
+		if err := rows.Scan(&ip); err != nil {
+			rows.Close()
+			return "", err
+		}
+		if addr, err := netip.ParseAddr(ip); err == nil {
+			used[addr] = true
+		}
+	}
+	rows.Close()
+	gateway := subnet.Masked().Addr().Next()
+	ip := gateway.Next()
+	for used[ip] {
+		ip = ip.Next()
+	}
+	if !subnet.Contains(ip) || !subnet.Contains(ip.Next()) {
+		return "", fmt.Errorf("no free addresses left in %s", subnet)
+	}
+	return ip.String(), nil
 }
 
 // Agent returns an agent by ID.
@@ -170,9 +200,20 @@ func (s *Store) SetAgentState(ctx context.Context, id, state string) error {
 	return affected(s.db.ExecContext(ctx, `UPDATE agents SET state = ? WHERE id = ?`, state, id))
 }
 
-// SetAgentSession records the harness session the agent continues.
+// SetAgentSession records the harness session the agent continues. A new
+// session starts with no running cost.
 func (s *Store) SetAgentSession(ctx context.Context, id, sessionID string) error {
-	return affected(s.db.ExecContext(ctx, `UPDATE agents SET session_id = ? WHERE id = ?`, sessionID, id))
+	return affected(s.db.ExecContext(ctx, `UPDATE agents SET session_id = ?, session_cost = 0 WHERE id = ?`, sessionID, id))
+}
+
+// SetAgentSessionCost records the session and its running cost together.
+func (s *Store) SetAgentSessionCost(ctx context.Context, id, sessionID string, cost float64) error {
+	return affected(s.db.ExecContext(ctx, `UPDATE agents SET session_id = ?, session_cost = ? WHERE id = ?`, sessionID, cost, id))
+}
+
+// SetAgentImage repins an agent to another image version.
+func (s *Store) SetAgentImage(ctx context.Context, id, image string) error {
+	return affected(s.db.ExecContext(ctx, `UPDATE agents SET image = ? WHERE id = ?`, image, id))
 }
 
 // TouchAgent records activity now.
