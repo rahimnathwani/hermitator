@@ -209,6 +209,10 @@ hermitator answers itself:
 | `/retry` | Run the last message again, after a failure or a restart |
 | `/sh COMMAND` | Run a shell command in the sandbox and get its output, without the model |
 | `/tasks`, `/tasks pause N`, `/tasks resume N`, `/tasks delete N` | Scheduled tasks |
+| `/plan` | The agent's own task list for what it is doing, without waking it |
+| `/usage` | Claude subscription use (5-hour and weekly, with pace) and spending |
+| `/sessions`, `/resume N` | Past conversations, and going back to one (`/new` keeps them) |
+| `/fork` | Branch the next message off this conversation (Claude Code) |
 | `/timezone Europe/London` | The time zone schedules use (also in Settings) |
 | `/new` | Start a fresh conversation; files are kept (alias `/clear`) |
 | `/model`, `/model opus`, `/model default` | Show or change the model |
@@ -247,8 +251,9 @@ you do what Sam suggested?"*. Commands from you always work, and never wake
 the agent either.
 
 Messages sent in quick succession, a photo and then its caption say, become
-one turn. Messages that arrive while the agent is working wait for the next
-turn.
+one turn. A message you send while a Claude Code agent is working ("actually,
+make it blue") reaches it in the middle of what it is doing, and gets 👀;
+with pi, it waits for the next turn.
 
 Each turn's cost appears under Recent turns on the agent's Overview. It is what the model would
 have charged at API prices: on a Claude or ChatGPT subscription you are not

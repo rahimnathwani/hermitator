@@ -207,3 +207,16 @@ func TestSummarize(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeUsageAndTodos(t *testing.T) {
+	fake(t, "HERMITATOR_CLAUDE_BIN", "claude-usage-todos.jsonl")
+	events := run(t, &turn.Request{Harness: turn.Claude, Prompt: "hi"})
+	usage := ofType(events, turn.EventUsage)
+	if len(usage) != 1 || len(usage[0].Windows) != 2 || usage[0].Windows[0].Name != "five_hour" || usage[0].Windows[1].Utilization != 0.64 {
+		t.Fatalf("usage = %+v", usage)
+	}
+	todos := ofType(events, turn.EventTodos)
+	if len(todos) != 1 || len(todos[0].Todos) != 3 || todos[0].Todos[1] != (turn.Todo{Content: "Run the tests", Status: "in_progress"}) {
+		t.Fatalf("todos = %+v", todos)
+	}
+}

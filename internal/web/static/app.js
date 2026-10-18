@@ -284,6 +284,10 @@ function mountLog(el) {
     show();
     add("turn", ev.input || "(attachment)");
   });
+  src.addEventListener("steer", (e) => {
+    const ev = data(e);
+    if (ev) add("turn", ev.input || "(attachment)");
+  });
   src.addEventListener("event", (e) => {
     const ev = data(e)?.event;
     if (!ev) return;

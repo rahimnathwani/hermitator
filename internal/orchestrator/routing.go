@@ -196,6 +196,16 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		m.retry(ctx, agentID, msg, reply)
 	case "tasks":
 		m.tasksCommand(ctx, ag, cmd.Arg, reply)
+	case "usage":
+		reply(m.usageText(ctx, ag))
+	case "plan":
+		reply(m.planText(ag))
+	case "sessions":
+		m.sessionsCommand(ctx, ag, reply)
+	case "resume":
+		m.resumeCommand(ctx, ag, cmd.Arg, reply)
+	case "fork":
+		m.forkCommand(ctx, ag, reply)
 	case "timezone":
 		m.timezoneCommand(ctx, ag, cmd.Arg, reply)
 	case "sh":
@@ -231,7 +241,7 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 			reply("*" + ag.Name + "* is busy. Send /stop first, or wait for it to finish.")
 			return
 		}
-		reply("🧹 The next message starts a fresh conversation. Files in the sandbox are untouched.")
+		reply("🧹 The next message starts a fresh conversation. Files in the sandbox are untouched, and /sessions can bring this one back.")
 	case "status":
 		reply(m.statusText(ctx, ag))
 	case "listen":

@@ -1,0 +1,4 @@
+{"type":"system","subtype":"init","session_id":"s1","model":"claude-opus-5-5"}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","unifiedWindows":{"seven_day":{"utilization":0.64,"resetsAt":1792389600},"five_hour":{"utilization":0.04,"resetsAt":1792380000}}},"session_id":"s1"}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"Fix the navbar","status":"completed","activeForm":"Fixing"},{"content":"Run the tests","status":"in_progress","activeForm":"Running"},{"content":"Send a screenshot","status":"pending","activeForm":"Sending"}]}}]}}
+{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"s1","total_cost_usd":0.02}

@@ -47,6 +47,8 @@ printf '%s\n' "$@" > "$HOME/last-args"
 sid=""
 while [ $# -gt 0 ]; do
   case "$1" in --session-id|--resume) sid="$2"; echo "$1" >> "$HOME/modes" ;; esac
+  # Like Claude Code, keep a transcript, so the next turn resumes it.
+  [ "$1" = "--session-id" ] && mkdir -p "$HOME/.claude/projects/w" && touch "$HOME/.claude/projects/w/$2.jsonl"
   shift
 done
 [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || { echo "no token" >&2; exit 1; }
@@ -59,6 +61,17 @@ case "$text" in
     echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"whatsapp-send report.txt"}}]}}'
     ;;
   *"sleep"*) sleep 30 ;;
+  *"steer me"*)
+    # Like Claude Code with stdin left open: take in what arrives while
+    # working, then answer once.
+    n=0
+    while read -t 2 -r more; do n=$((n + 1)); done
+    printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"steered '"$n"'","session_id":"'"$sid"'","total_cost_usd":0.01}'
+    exit 0 ;;
+  *"plan it"*)
+    printf '%s\n' '{"type":"rate_limit_event","rate_limit_info":{"unifiedWindows":{"five_hour":{"utilization":0.95,"resetsAt":'"$(( $(date +%s) + 3600 ))"'},"seven_day":{"utilization":0.40,"resetsAt":'"$(( $(date +%s) + 86400 ))"'}}}}'
+    printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"TodoWrite","input":{"todos":[{"content":"Fix the navbar","status":"completed"},{"content":"Run the tests","status":"in_progress"}]}}]}}'
+    ;;
   *"schedule it"*)
     hermitator-guest schedule --in 1h --name "CI check" check that CI is green >> "$HOME/schedule.out" 2>&1
     ;;
@@ -944,5 +957,117 @@ func TestBackgroundMessages(t *testing.T) {
 	e.idle(t)
 	if got := e.rec.wait(t, "text"); got.body != "background job done" || got.chat != chat {
 		t.Fatalf("background message = %+v", got)
+	}
+}
+
+func TestUsageAndPlan(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	say := func(text string) string {
+		e.m.HandleMessage(ctx, e.msg(chat, text, true))
+		return e.rec.wait(t, "text").body
+	}
+	if got := say("/plan"); !strings.Contains(got, "has not made a task list") {
+		t.Fatalf("/plan before any = %q", got)
+	}
+	if got := say("plan it"); !strings.Contains(got, "5-hour allowance is 95% used") {
+		t.Fatalf("90%% warning = %q", got)
+	}
+	e.rec.wait(t, "text") // the reply
+	e.idle(t)
+	if got := say("/usage"); !strings.Contains(got, "5-hour: 95% used") || !strings.Contains(got, "weekly: 40% used") || !strings.Contains(got, "Today: $0.01") {
+		t.Fatalf("/usage = %q", got)
+	}
+	if got := say("/plan"); !strings.Contains(got, "✅ Fix the navbar") || !strings.Contains(got, "▶️ Run the tests") {
+		t.Fatalf("/plan = %q", got)
+	}
+	// A second report over 90% does not warn again.
+	say("plan it")
+	e.idle(t)
+	e.rec.mu.Lock()
+	warnings := 0
+	for _, s := range e.rec.log {
+		if strings.Contains(s.body, "allowance is") {
+			warnings++
+		}
+	}
+	e.rec.mu.Unlock()
+	if warnings != 1 {
+		t.Fatalf("%d usage warnings, want 1", warnings)
+	}
+}
+
+func TestSessionsResumeFork(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	say := func(text string) string {
+		e.m.HandleMessage(ctx, e.msg(chat, text, true))
+		return e.rec.wait(t, "text").body
+	}
+	say("first topic")
+	e.idle(t)
+	ag, _ := e.st.Agent(ctx, e.agent.ID)
+	first := ag.SessionID
+	say("/new")
+	say("second topic")
+	e.idle(t)
+	if got := say("/sessions"); !strings.Contains(got, "1. (current) second topic") || !strings.Contains(got, "2. first topic") {
+		t.Fatalf("/sessions = %q", got)
+	}
+	if got := say("/resume 2"); !strings.Contains(got, "Back to: first topic") {
+		t.Fatalf("/resume = %q", got)
+	}
+	if ag, _ := e.st.Agent(ctx, e.agent.ID); ag.SessionID != first {
+		t.Fatalf("session after /resume = %s, want %s", ag.SessionID, first)
+	}
+	if got := say("/fork"); !strings.Contains(got, "branches off") {
+		t.Fatalf("/fork = %q", got)
+	}
+	say("a branch")
+	e.idle(t)
+	if a := e.lastArgs(t); !strings.Contains(a, "--resume\n"+first) || !strings.Contains(a, "--fork-session") {
+		t.Fatalf("forked turn args:\n%s", a)
+	}
+	say("after the branch")
+	e.idle(t)
+	if a := e.lastArgs(t); strings.Contains(a, "--fork-session") {
+		t.Fatal("forked again on the following turn")
+	}
+}
+
+func TestSteeringARunningTurn(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "steer me", true))
+	deadline := time.Now().Add(5 * time.Second)
+	for !e.m.Status(e.agent.ID).Busy && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(300 * time.Millisecond)
+	e.m.HandleMessage(ctx, e.msg(chat, "actually make it blue", true))
+	if got := e.rec.wait(t, "text"); got.body != "*echo:* steered 1" && !strings.Contains(got.body, "steered 1") {
+		t.Fatalf("reply = %q, want the steered message taken in", got.body)
+	}
+	e.idle(t)
+	if turns, _ := e.st.Turns(ctx, e.agent.ID, 5); len(turns) != 1 {
+		t.Fatalf("%d turns; the second message should have joined the first", len(turns))
+	}
+	e.rec.mu.Lock()
+	defer e.rec.mu.Unlock()
+	seen := false
+	for _, s := range e.rec.log {
+		seen = seen || (s.kind == "react" && s.body == "👀")
+	}
+	if !seen {
+		t.Fatal("the steered message was not acknowledged with 👀")
 	}
 }

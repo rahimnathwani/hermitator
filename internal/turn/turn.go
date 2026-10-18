@@ -51,7 +51,13 @@ type Request struct {
 	// Effort is Claude Code's --effort or pi's --thinking level.
 	Effort string `json:"effort,omitempty"`
 	// Provider selects pi's model provider; ignored for Claude.
-	Provider     string `json:"provider,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	// Fork continues SessionID in a new session, leaving the old one as
+	// it was. Claude Code only.
+	Fork bool `json:"fork,omitempty"`
+	// SteerID names the spool directory where messages sent during the
+	// turn arrive. Claude Code only; pi's messages wait for the next turn.
+	SteerID      string `json:"steer_id,omitempty"`
 	SystemPrompt string `json:"system_prompt,omitempty"`
 	// Env is added to the harness environment. Credentials travel here so
 	// they never touch a command line.
@@ -86,7 +92,19 @@ const (
 	EventFile    = "file"
 	EventResult  = "result"
 	EventError   = "error"
+	EventUsage   = "usage"
+	EventTodos   = "todos"
+	// EventReply is an answer before the last: one to a message that
+	// reached the harness while it was finishing its previous answer.
+	EventReply = "reply"
+	// EventSteered says the harness took in a message sent mid-turn.
+	EventSteered = "steered"
 )
+
+// Steer is a message for a running turn, from the spool's steer directory.
+type Steer struct {
+	Text string `json:"text"`
+}
 
 // Event is one line of guest output.
 type Event struct {
@@ -100,4 +118,22 @@ type Event struct {
 	Path      string  `json:"path,omitempty"`
 	Content   string  `json:"content,omitempty"`
 	IsError   bool    `json:"is_error,omitempty"`
+	// Windows are subscription usage windows, in "usage" events.
+	Windows []UsageWindow `json:"windows,omitempty"`
+	// Todos is the agent's task list, in "todos" events.
+	Todos []Todo `json:"todos,omitempty"`
+}
+
+// UsageWindow is how much of a subscription's allowance for a period is
+// used, as the provider reports it.
+type UsageWindow struct {
+	Name        string  `json:"name"` // five_hour, seven_day, ...
+	Utilization float64 `json:"utilization"`
+	ResetsAt    int64   `json:"resets_at"` // Unix seconds
+}
+
+// Todo is one item of the agent's own task list.
+type Todo struct {
+	Content string `json:"content"`
+	Status  string `json:"status"` // pending, in_progress, completed
 }

@@ -147,8 +147,15 @@ start.
    holds at most 200.
 4. The agent's actor collects triggering messages for 1.5 seconds, so a
    photo and the caption typed after it make one turn, then starts the turn
-   for that chat. Messages that arrive mid-turn, or from another chat, wait
-   for the next one.
+   for that chat. Messages from another chat wait for the next turn. A
+   plain message from the same chat that arrives while Claude Code is
+   working joins the running turn instead (it gets 👀): the host writes it
+   to the spool's `steer/<turn>` directory, and the guest, which keeps
+   Claude Code's stdin open until its first result, feeds it in as another
+   user message. If Claude Code still answers it after that result, the
+   earlier answer goes out on its own. Whatever reached the spool too late
+   to be fed in starts the next turn, so nothing is lost. pi agents queue
+   such messages for the next turn.
 5. The turn sends read receipts (on agent numbers only), reacts ⏳, shows
    "typing…", wakes the sandbox, saves attachments
    into `/shared/inbox` (transcribing voice notes on the host), and submits a

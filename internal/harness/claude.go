@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -23,7 +27,13 @@ type claudeEvent struct {
 	Result    string  `json:"result"`
 	IsError   bool    `json:"is_error"`
 	CostUSD   float64 `json:"total_cost_usd"`
-	Message   struct {
+	RateLimit struct {
+		Windows map[string]struct {
+			Utilization float64 `json:"utilization"`
+			ResetsAt    int64   `json:"resetsAt"`
+		} `json:"unifiedWindows"`
+	} `json:"rate_limit_info"`
+	Message struct {
 		Content []struct {
 			Type  string         `json:"type"`
 			Text  string         `json:"text"`
@@ -67,6 +77,9 @@ func runClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit
 	if req.SessionID != "" {
 		if claudeSessionExists(req.SessionID) {
 			args = append(args, "--resume", req.SessionID)
+			if req.Fork {
+				args = append(args, "--fork-session")
+			}
 		} else {
 			args = append(args, "--session-id", req.SessionID)
 		}
@@ -130,7 +143,16 @@ func runClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit
 		return fmt.Errorf("start claude: %w", err)
 	}
 	stdin.Write(append(msg, '\n'))
-	stdin.Close()
+	// With steering, stdin stays open for messages sent during the turn,
+	// until the first result; Claude Code folds them into its work.
+	stopSteering := func() {}
+	if req.SteerID != "" {
+		stopSteering = steer(filepath.Join(Getenv("HERMITATOR_SPOOL", turn.SpoolDir), "steer", req.SteerID), stdin, emit)
+	} else {
+		stdin.Close()
+	}
+	steered := sync.OnceFunc(func() { stopSteering(); stdin.Close() })
+	defer steered()
 
 	var result *turn.Event
 	sessionID := req.SessionID
@@ -156,11 +178,31 @@ func runClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit
 					}
 				case "tool_use":
 					emit(turn.Event{Type: turn.EventTool, Tool: c.Name, Detail: summarize(c.Name, c.Input)})
+					if c.Name == "TodoWrite" {
+						if todos := todosOf(c.Input); todos != nil {
+							emit(turn.Event{Type: turn.EventTodos, Todos: todos})
+						}
+					}
 				}
+			}
+		case "rate_limit_event":
+			var windows []turn.UsageWindow
+			for name, w := range ev.RateLimit.Windows {
+				windows = append(windows, turn.UsageWindow{Name: name, Utilization: w.Utilization, ResetsAt: w.ResetsAt})
+			}
+			if len(windows) > 0 {
+				sort.Slice(windows, func(i, j int) bool { return windows[i].Name < windows[j].Name })
+				emit(turn.Event{Type: turn.EventUsage, Windows: windows})
 			}
 		case "result":
 			if ev.SessionID != "" {
 				sessionID = ev.SessionID
+			}
+			// No more steering; anything already taken in still gets an
+			// answer, so an earlier result goes out on its own.
+			steered()
+			if result != nil && strings.TrimSpace(result.Text) != "" {
+				emit(turn.Event{Type: turn.EventReply, Text: result.Text})
 			}
 			text := ev.Result
 			if text == "" && ev.IsError {
@@ -186,4 +228,64 @@ func runClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit
 	}
 	emit(*result)
 	return nil
+}
+
+// todosOf reads TodoWrite's input: {"todos": [{"content", "status"}...]}.
+func todosOf(input map[string]any) []turn.Todo {
+	items, ok := input["todos"].([]any)
+	if !ok {
+		return nil
+	}
+	todos := []turn.Todo{}
+	for _, it := range items {
+		m, _ := it.(map[string]any)
+		content, _ := m["content"].(string)
+		status, _ := m["status"].(string)
+		if content != "" {
+			todos = append(todos, turn.Todo{Content: content, Status: status})
+		}
+	}
+	return todos
+}
+
+// steer feeds messages from dir into a running Claude Code as user
+// messages, in order, until the returned function stops it.
+func steer(dir string, stdin io.Writer, emit Emit) (stop func()) {
+	done, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		tick := time.NewTicker(250 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-tick.C:
+			}
+			names, _ := filepath.Glob(filepath.Join(dir, "*.json"))
+			sort.Strings(names)
+			for _, name := range names {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				data, err := os.ReadFile(name)
+				os.Remove(name)
+				var s turn.Steer
+				if err != nil || json.Unmarshal(data, &s) != nil || strings.TrimSpace(s.Text) == "" {
+					continue
+				}
+				line, _ := json.Marshal(map[string]any{
+					"type":    "user",
+					"message": map[string]any{"role": "user", "content": []claudeContent{{Type: "text", Text: s.Text}}},
+				})
+				if _, err := stdin.Write(append(line, '\n')); err != nil {
+					return
+				}
+				emit(turn.Event{Type: turn.EventSteered, Text: s.Text})
+			}
+		}
+	}()
+	return func() { close(done); <-stopped }
 }

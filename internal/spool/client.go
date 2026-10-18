@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 )
@@ -276,4 +277,60 @@ func (c Client) Run(ctx context.Context, job Job) ([]byte, Exit, error) {
 	}
 	c.Remove(job.ID)
 	return out.Bytes(), exit, nil
+}
+
+// SteerDir is where a running job finds messages sent to it after it
+// started, relative to the spool: steer/ID/SEQ.json.
+func SteerDir(spool, id string) string { return spool + "/steer/" + id }
+
+// Steer hands a running job one more message, numbered seq so the job
+// reads them in order.
+func (c Client) Steer(id string, seq int, data []byte) error {
+	if !validID(id) {
+		return fmt.Errorf("invalid job id %q", id)
+	}
+	return c.with(func(root *os.Root) error {
+		dir := "steer/" + id
+		if err := root.MkdirAll(dir, 0o700); err != nil {
+			return err
+		}
+		name := fmt.Sprintf("%06d", seq)
+		tmp := dir + "/." + name + ".tmp"
+		if err := root.WriteFile(tmp, data, 0o600); err != nil {
+			return err
+		}
+		return root.Rename(tmp, dir+"/"+name+".json")
+	})
+}
+
+// Unsteered returns, in order, the messages a job never read, and removes
+// them; they are for the next turn.
+func (c Client) Unsteered(id string) [][]byte {
+	if !validID(id) {
+		return nil
+	}
+	var out [][]byte
+	c.with(func(root *os.Root) error {
+		dir := "steer/" + id
+		f, err := root.Open(dir)
+		if err != nil {
+			return nil
+		}
+		names, _ := f.Readdirnames(-1)
+		f.Close()
+		sort.Strings(names)
+		for _, n := range names {
+			if strings.HasPrefix(n, ".") || !strings.HasSuffix(n, ".json") {
+				continue
+			}
+			if fi, err := root.Lstat(dir + "/" + n); err != nil || !fi.Mode().IsRegular() || fi.Size() > 1<<20 {
+				continue
+			}
+			if data, err := root.ReadFile(dir + "/" + n); err == nil {
+				out = append(out, data)
+			}
+		}
+		return root.RemoveAll(dir)
+	})
+	return out
 }

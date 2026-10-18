@@ -347,6 +347,7 @@ func (m *Manager) NewSession(ctx context.Context, agentID string) error {
 		if a.turn != nil {
 			return ErrBusy
 		}
+		a.todos, a.forkNext = nil, false
 		return m.store.SetAgentSession(ctx, agentID, "")
 	})
 }

@@ -121,6 +121,8 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		agent.SessionID = ids.UUID()
 		m.store.SetAgentSession(ctx, agent.ID, agent.SessionID)
 	}
+	var fork bool
+	a.call(func(a *actor) error { fork, a.forkNext = a.forkNext, false; return nil })
 
 	rec := &store.Turn{
 		ID: t.id, AgentID: agent.ID, AccountID: last.AccountID, ChatJID: last.Chat,
@@ -154,8 +156,10 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		Images:       images,
 		Model:        model,
 		Effort:       effort,
+		Fork:         fork,
 		Provider:     agent.PiProvider,
 		SystemPrompt: m.agentPrompt(spec, loc, last),
+		SteerID:      t.id,
 		Env:          env,
 		Files:        creds.files,
 	}
@@ -166,6 +170,13 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		return m.finish(ctx, chat, rec, nil, "⚠️ Could not hand the turn to the sandbox: "+err.Error(), false)
 	}
 	t.submitted(&client)
+	if agent.Harness == store.HarnessClaude {
+		a.do(func(a *actor) {
+			if a.turn == t {
+				t.steerTo = chatKey(last)
+			}
+		})
+	}
 	if len(held) > 0 {
 		// The agent has them now; they are read, and no longer held.
 		ids := make([]string, len(held))
@@ -231,6 +242,14 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		case turn.EventFile:
 			m.syncFile(ctx, agent.UserID, ev)
 			return // never publish credentials
+		case turn.EventUsage:
+			m.recordUsage(ctx, agent, ev.Windows, chat)
+			return
+		case turn.EventReply:
+			chat.sendAgent(ev.Text)
+		case turn.EventTodos:
+			todos := ev.Todos
+			a.do(func(a *actor) { a.todos, a.todosAt = todos, time.Now() })
 		case turn.EventResult, turn.EventError:
 			e := ev
 			result = &e
@@ -238,6 +257,17 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		m.hub.publish(agent.ID, UIEvent{Kind: "event", TurnID: t.id, Event: &ev})
 	})
 	stopFollow()
+	// Messages from now on queue for the next turn; ones that reached the
+	// spool but not the harness join them.
+	a.call(func(a *actor) error { t.steerTo = ""; return nil })
+	t.steering.Wait()
+	for _, data := range client.Unsteered(t.id) {
+		var s turn.Steer
+		if json.Unmarshal(data, &s) == nil && s.Text != "" {
+			again := Message{AccountID: last.AccountID, Chat: last.Chat, Sender: last.Sender, Owner: true, Time: time.Now(), Prompt: s.Text}
+			a.do(func(a *actor) { a.enqueue(again) })
+		}
+	}
 	close(outboxDone)
 	<-outboxStopped
 	filesSent.Add(int32(m.deliverOutbox(ctx, spec, chat)))
@@ -249,7 +279,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	}
 
 	if result != nil && result.Type == turn.EventResult {
-		m.accountSession(ctx, agent, result)
+		m.accountSession(ctx, agent, result, prompt)
 	}
 
 	switch {
@@ -284,11 +314,12 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 // when a session is resumed, so the turn's cost is the increase since the
 // last total. A total lower than the last one means Claude started over
 // and the figure stands on its own. pi reports per turn already.
-func (m *Manager) accountSession(ctx context.Context, ag *store.Agent, result *turn.Event) {
+func (m *Manager) accountSession(ctx context.Context, ag *store.Agent, result *turn.Event, prompt string) {
 	sid := result.SessionID
 	if sid == "" {
 		sid = ag.SessionID
 	}
+	m.store.SessionTurn(ctx, ag.ID, sid, ag.Harness, clip(prompt, 200))
 	if ag.Harness != store.HarnessClaude {
 		if sid != ag.SessionID {
 			m.store.SetAgentSession(ctx, ag.ID, sid)
@@ -300,6 +331,7 @@ func (m *Manager) accountSession(ctx context.Context, ag *store.Agent, result *t
 		result.CostUSD = total - ag.SessionCost
 	}
 	m.store.SetAgentSessionCost(ctx, ag.ID, sid, total)
+	m.store.SetSessionCost(ctx, ag.ID, sid, total)
 }
 
 // finish records the outcome of a turn, then delivers it.
@@ -704,4 +736,32 @@ func (m *Manager) retry(ctx context.Context, agentID string, msg Message, reply 
 	again.Prompt = "(The user asked to retry this message; the previous attempt " + why +
 		". Check what was already done before repeating any step.)\n\n" + last.Prompt
 	m.actor(agentID).do(func(a *actor) { a.enqueue(again) })
+}
+
+// steer passes a message to the running turn: the harness reads it from
+// the spool and takes it in as it works.
+func (m *Manager) steer(agentID string, t *activeTurn, seq int, msg Message) {
+	ctx := m.ctx
+	ag, err := m.store.Agent(ctx, agentID)
+	if err != nil {
+		return
+	}
+	spec, err := m.Spec(ag)
+	if err != nil {
+		return
+	}
+	chat := chatRef{m: m, msg: msg}
+	chat.markRead()
+	text, _ := m.buildPrompt(ctx, spec, []Message{msg})
+	if text == "" {
+		return
+	}
+	text = "[Sent while you were working on the above:]\n" + text
+	data, _ := json.Marshal(turn.Steer{Text: text})
+	if err := spec.Spool().Steer(t.id, seq, data); err != nil {
+		m.log.Warn("steer", "agent", agentID, "err", err)
+		return
+	}
+	chat.react("👀")
+	m.hub.publish(agentID, UIEvent{Kind: "steer", TurnID: t.id, Input: summarizeBatch([]Message{msg})})
 }

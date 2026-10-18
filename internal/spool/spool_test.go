@@ -146,3 +146,28 @@ func TestClientRefusesSymlinkEscapes(t *testing.T) {
 		t.Fatalf("Stderr read through a symlink: %q", got)
 	}
 }
+
+func TestSteerAndUnsteered(t *testing.T) {
+	dir := t.TempDir()
+	c := Client{Root: dir}
+	for i, text := range []string{"one", "two", "three"} {
+		if err := c.Steer("job1", i+1, []byte(text)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The guest took the first; the rest come back in order.
+	os.Remove(filepath.Join(dir, "steer", "job1", "000001.json"))
+	// A symlink planted by the agent is not followed.
+	os.WriteFile(filepath.Join(t.TempDir(), "secret"), []byte("host secret"), 0o600)
+	os.Symlink("/etc/passwd", filepath.Join(dir, "steer", "job1", "000009.json"))
+	got := c.Unsteered("job1")
+	if len(got) != 2 || string(got[0]) != "two" || string(got[1]) != "three" {
+		t.Fatalf("unsteered = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "steer", "job1")); !os.IsNotExist(err) {
+		t.Fatal("the steer directory was not cleared")
+	}
+	if err := c.Steer("../x", 1, nil); err == nil {
+		t.Fatal("accepted a job id that leaves the spool")
+	}
+}

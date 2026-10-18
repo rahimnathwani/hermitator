@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"github.com/rahimnathwani/hermitator/internal/turn"
 	"sync"
 	"time"
 
@@ -31,6 +32,12 @@ type actor struct {
 	// what the agent sends between turns.
 	outbox sync.Mutex
 	bgSent []time.Time
+
+	// todos is the agent's own task list from its latest turn, for /plan.
+	todos   []turn.Todo
+	todosAt time.Time
+	// forkNext makes the next turn branch off the current conversation.
+	forkNext bool
 }
 
 func (a *actor) loop(ctx context.Context) {
@@ -74,6 +81,17 @@ func (a *actor) call(f func(*actor) error) error {
 }
 
 func (a *actor) enqueue(msg Message) {
+	if t := a.turn; t != nil && t.steerTo != "" && t.steerTo == chatKey(msg) && msg.steerable() {
+		t.steerSeq++
+		t.steering.Add(1)
+		seq := t.steerSeq
+		go func() {
+			defer t.steering.Done()
+			a.m.steer(a.id, t, seq, msg)
+		}()
+		a.lastActive = time.Now()
+		return
+	}
 	a.pending = append(a.pending, msg)
 	a.lastActive = time.Now()
 	if a.debounce != nil {
@@ -185,6 +203,20 @@ type activeTurn struct {
 	mu      sync.Mutex
 	client  *spool.Client
 	aborted bool
+
+	// steerTo, set by the actor once a Claude turn is running, is the chat
+	// whose new messages go into the running turn rather than the queue.
+	steerTo  string
+	steerSeq int
+	steering sync.WaitGroup
+}
+
+func chatKey(m Message) string { return m.AccountID + "\x00" + m.Chat }
+
+// steerable is a plain message: one that changes nothing about how the
+// turn runs, so it can join a turn already under way.
+func (m Message) steerable() bool {
+	return m.Prompt == "" && m.Model == "" && m.Effort == "" && m.TaskName == ""
 }
 
 func (t *activeTurn) kill(m *Manager) {
