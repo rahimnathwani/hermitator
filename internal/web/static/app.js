@@ -47,6 +47,16 @@ document.addEventListener("htmx:afterRequest", (e) => {
   if (form.matches?.("form[data-reset]") && e.detail.successful) form.reset();
 });
 
+// The model field suggests models for whichever harness and provider are
+// selected.
+document.addEventListener("change", (e) => {
+  const form = e.target.closest?.("form[data-models]");
+  if (!form || !e.target.matches('input[name="harness"], select[name="provider"]')) return;
+  const harness = form.querySelector('input[name="harness"]:checked')?.value;
+  const provider = form.querySelector('select[name="provider"]')?.value || "openai-codex";
+  form.querySelector('input[name="model"]')?.setAttribute("list", harness === "pi" ? `models-pi-${provider}` : "models-claude");
+});
+
 // Cmd/Ctrl+Enter sends from a textarea.
 document.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && e.target.matches("textarea")) {

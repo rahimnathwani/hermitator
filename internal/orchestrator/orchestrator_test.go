@@ -42,6 +42,7 @@ func TestMain(m *testing.M) {
 // asked to, sends a file with whatsapp-send the way an agent would.
 const fakeClaude = `#!/bin/sh
 read -r line
+printf '%s\n' "$@" > "$HOME/last-args"
 sid=""
 while [ $# -gt 0 ]; do
   case "$1" in --session-id|--resume) sid="$2"; echo "$1" >> "$HOME/modes" ;; esac
@@ -624,5 +625,98 @@ func TestAgentsMoveWhenTheSubnetChanges(t *testing.T) {
 	ag, _ := e.st.Agent(ctx, e.agent.ID)
 	if ag.IP != "10.231.0.2" {
 		t.Fatalf("after the subnet changed the agent is at %s", ag.IP)
+	}
+}
+
+func (e *env) lastArgs(t *testing.T) string {
+	t.Helper()
+	spec, _ := e.m.Spec(e.agent)
+	b, _ := os.ReadFile(filepath.Join(spec.Dir, "home", "last-args"))
+	return string(b)
+}
+
+func TestModelAndEffort(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	say := func(text string) string {
+		e.m.HandleMessage(ctx, e.msg(chat, text, true))
+		return e.rec.wait(t, "text").body
+	}
+
+	if got := say("/model"); !strings.Contains(got, "default model") || !strings.Contains(got, "opus") {
+		t.Fatalf("/model = %q", got)
+	}
+	if got := say("/model Opus"); !strings.Contains(got, "uses opus") {
+		t.Fatalf("/model opus = %q", got)
+	}
+	if got := say("/effort extreme"); !strings.Contains(got, "does not take") {
+		t.Fatalf("/effort extreme = %q", got)
+	}
+	if got := say("/effort high"); !strings.Contains(got, "opus at high effort") {
+		t.Fatalf("/effort high = %q", got)
+	}
+	if got := say("/model claude-nonsense-9"); !strings.Contains(got, "claude-nonsense-9") || strings.Contains(got, "do not recognise") {
+		t.Fatalf("full model IDs should pass without a warning: %q", got)
+	}
+	if got := say("/model gpt-4"); !strings.Contains(got, "do not recognise") {
+		t.Fatalf("unknown model got no warning: %q", got)
+	}
+	say("/model opus")
+
+	say("hello")
+	e.idle(t)
+	if a := e.lastArgs(t); !strings.Contains(a, "--model\nopus") || !strings.Contains(a, "--effort\nhigh") {
+		t.Fatalf("turn args:\n%s", a)
+	}
+	turns, _ := e.st.Turns(ctx, e.agent.ID, 1)
+	if turns[0].Model != "fake" {
+		t.Fatalf("turn did not record the model the harness reported: %q", turns[0].Model)
+	}
+
+	// /once applies to one turn only.
+	if got := say("/once haiku max: quick one"); !strings.Contains(got, "quick one") {
+		t.Fatalf("/once reply = %q", got)
+	}
+	e.idle(t)
+	if a := e.lastArgs(t); !strings.Contains(a, "--model\nhaiku") || !strings.Contains(a, "--effort\nmax") {
+		t.Fatalf("/once args:\n%s", a)
+	}
+	say("back to normal")
+	e.idle(t)
+	if a := e.lastArgs(t); !strings.Contains(a, "--model\nopus") || !strings.Contains(a, "--effort\nhigh") {
+		t.Fatalf("args after /once:\n%s", a)
+	}
+
+	// Switching harness drops settings that mean nothing to pi.
+	say("/switch pi")
+	ag, _ := e.st.Agent(ctx, e.agent.ID)
+	if ag.Model != "" || ag.Effort != "high" {
+		t.Fatalf("after /switch pi: model %q effort %q", ag.Model, ag.Effort)
+	}
+}
+
+func TestParseOnce(t *testing.T) {
+	claude := &store.Agent{Harness: store.HarnessClaude}
+	cases := []struct{ in, model, effort, text string }{
+		{"opus max: review this design", "opus", "max", "review this design"},
+		{"high: think hard", "", "high", "think hard"},
+		{"Opus review this", "opus", "", "review this"},
+		{"max opus what now", "opus", "max", "what now"},
+		{"check this: the logs", "", "", "check this: the logs"},
+		{"just a question", "", "", "just a question"},
+		{"claude-opus-5-5 low: hi", "claude-opus-5-5", "low", "hi"},
+	}
+	for _, c := range cases {
+		m, e, text := parseOnce(claude, c.in)
+		if m != c.model || e != c.effort || text != c.text {
+			t.Errorf("parseOnce(%q) = %q, %q, %q; want %q, %q, %q", c.in, m, e, text, c.model, c.effort, c.text)
+		}
+	}
+	pi := &store.Agent{Harness: store.HarnessPi, PiProvider: ProviderDeepSeek}
+	if m, e, text := parseOnce(pi, "deepseek-flash minimal: hi"); m != "deepseek-flash" || e != "minimal" || text != "hi" {
+		t.Errorf("pi parseOnce = %q, %q, %q", m, e, text)
 	}
 }

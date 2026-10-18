@@ -40,6 +40,8 @@ type Request struct {
 	// against the shared directory.
 	Images []Image `json:"images,omitempty"`
 	Model  string  `json:"model,omitempty"`
+	// Effort is Claude Code's --effort or pi's --thinking level.
+	Effort string `json:"effort,omitempty"`
 	// Provider selects pi's model provider; ignored for Claude.
 	Provider     string `json:"provider,omitempty"`
 	SystemPrompt string `json:"system_prompt,omitempty"`

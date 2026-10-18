@@ -436,6 +436,7 @@ func (m *Manager) UpdateAgent(ctx context.Context, updated *store.Agent) error {
 		if switched && a.turn != nil {
 			return ErrBusy
 		}
+		fitHarness(current, updated)
 		if err := m.store.UpdateAgentSettings(ctx, updated); err != nil {
 			return err
 		}

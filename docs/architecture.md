@@ -188,6 +188,12 @@ Both get hermitator's addition to the system prompt, which tells them they
 are talking over WhatsApp, where files arrive, how to send one back and that
 background processes should log to a file.
 
+The agent's model and effort go on the command line of every turn
+(`--model` and `--effort` for Claude Code, `--model` and `--thinking` for
+pi), so changing them needs no restart and the session simply continues;
+`/once` overrides them for a single turn. Each turn records the model the
+harness reports it ran on.
+
 Session IDs are chosen by hermitator, so they are known before the first
 turn, and survive switching between WhatsApp and the web console. `/new`
 clears it; switching harness clears it too, since the transcripts are not

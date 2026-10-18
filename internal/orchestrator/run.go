@@ -120,12 +120,23 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	}
 	log.Info("turn started", "harness", agent.Harness, "wake", wake, "wake_ms", wakeMS, "messages", len(batch))
 
+	// /once overrides the agent's model and effort for this turn.
+	model, effort := agent.Model, agent.Effort
+	for _, msg := range batch {
+		if msg.Model != "" {
+			model = msg.Model
+		}
+		if msg.Effort != "" {
+			effort = msg.Effort
+		}
+	}
 	req := turn.Request{
 		Harness:      agent.Harness,
 		SessionID:    agent.SessionID,
 		Prompt:       prompt,
 		Images:       images,
-		Model:        agent.Model,
+		Model:        model,
+		Effort:       effort,
 		Provider:     agent.PiProvider,
 		SystemPrompt: m.agentPrompt(spec, last),
 		Env:          creds.env,
@@ -190,6 +201,9 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		var ev turn.Event
 		if json.Unmarshal(line, &ev) != nil {
 			return
+		}
+		if ev.Model != "" {
+			rec.Model = ev.Model
 		}
 		switch ev.Type {
 		case turn.EventTool:

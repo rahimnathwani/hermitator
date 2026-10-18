@@ -83,6 +83,8 @@ func TestClaude(t *testing.T) {
 		Prompt:       "What colour is this?",
 		Images:       []turn.Image{{Path: pngFile(t), MIME: "image/png"}},
 		SystemPrompt: "Be brief.",
+		Model:        "opus",
+		Effort:       "high",
 		Env:          map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "tok"},
 	})
 
@@ -102,7 +104,7 @@ func TestClaude(t *testing.T) {
 	}
 
 	a := args()
-	for _, want := range []string{"--input-format\nstream-json", "--dangerously-skip-permissions", "--session-id\n4a0d6c4e-8a5c-4bb8-9c55-a1d7e1f2c3b4", "--append-system-prompt\nBe brief."} {
+	for _, want := range []string{"--input-format\nstream-json", "--dangerously-skip-permissions", "--model\nopus", "--effort\nhigh", "--session-id\n4a0d6c4e-8a5c-4bb8-9c55-a1d7e1f2c3b4", "--append-system-prompt\nBe brief."} {
 		if !strings.Contains(a, want) {
 			t.Errorf("args missing %q:\n%s", want, a)
 		}
@@ -138,6 +140,7 @@ func TestPi(t *testing.T) {
 		Harness:   turn.Pi,
 		SessionID: "4a0d6c4e-8a5c-4bb8-9c55-a1d7e1f2c3b4",
 		Provider:  "openai-codex",
+		Effort:    "minimal",
 		Prompt:    "What colour is this?",
 		Images:    []turn.Image{{Path: pngFile(t), MIME: "image/png"}},
 	})
@@ -154,7 +157,7 @@ func TestPi(t *testing.T) {
 		t.Fatalf("tools = %+v", tools)
 	}
 	a := args()
-	for _, want := range []string{"--mode\nrpc", "--session-id\n4a0d6c4e", "--provider\nopenai-codex", "--model\n" + DefaultModels["openai-codex"]} {
+	for _, want := range []string{"--mode\nrpc", "--session-id\n4a0d6c4e", "--provider\nopenai-codex", "--model\n" + DefaultModels["openai-codex"], "--thinking\nminimal"} {
 		if !strings.Contains(a, want) {
 			t.Errorf("args missing %q:\n%s", want, a)
 		}

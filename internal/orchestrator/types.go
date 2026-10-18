@@ -38,6 +38,10 @@ type Message struct {
 	Text      string
 	Time      time.Time
 	Media     *Media
+	// Model and Effort override the agent's settings for this message's
+	// turn; /once sets them.
+	Model  string
+	Effort string
 }
 
 // Media is an attachment. It is only downloaded if the chat is routed.

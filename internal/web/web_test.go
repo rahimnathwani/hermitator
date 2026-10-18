@@ -356,3 +356,36 @@ func TestRouteTriggers(t *testing.T) {
 		t.Fatalf("triggers = %s/%s", r.OwnerTrigger, r.OthersTrigger)
 	}
 }
+
+func TestModelAndEffortSettings(t *testing.T) {
+	f := setup(t)
+	alice := f.login(t, "alice@example.com")
+	id := alice.createAgent("bot")
+	base := url.Values{"name": {"bot"}, "harness": {"claude"}, "idle_minutes": {"5"}, "memory_mb": {"4096"}}
+	set := func(extra url.Values) *store.Agent {
+		form := url.Values{}
+		for k, v := range base {
+			form[k] = v
+		}
+		for k, v := range extra {
+			form[k] = v
+		}
+		if code, _ := alice.post("/agents/"+id+"/settings", form); code != http.StatusSeeOther {
+			t.Fatalf("save: %d", code)
+		}
+		a, _ := f.store.Agent(context.Background(), id)
+		return a
+	}
+	if a := set(url.Values{"model": {"opus"}, "effort_claude": {"high"}, "effort_pi": {"minimal"}}); a.Model != "opus" || a.Effort != "high" {
+		t.Fatalf("saved %q/%q", a.Model, a.Effort)
+	}
+	if a := set(url.Values{"model": {"opus"}, "effort_claude": {"ludicrous"}}); a.Effort != "" {
+		t.Fatalf("invalid effort saved: %q", a.Effort)
+	}
+	_, body := alice.get("/agents/" + id)
+	for _, want := range []string{`list="models-claude"`, `<datalist id="models-pi-deepseek">`, `<option value="sonnet">`, "effort_pi"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("agent page lacks %s", want)
+		}
+	}
+}

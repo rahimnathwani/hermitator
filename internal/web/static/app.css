@@ -127,6 +127,7 @@ legend { font-weight: 500; margin-bottom: .2rem; }
 .stack button { margin-top: .4rem; }
 .pi-only { display: none; }
 form:has(input[name="harness"][value="pi"]:checked) .pi-only { display: block; }
+form:has(input[name="harness"][value="pi"]:checked) .claude-only { display: none; }
 
 button, .button {
   font: inherit; font-size: .92rem; font-weight: 550; cursor: pointer; display: inline-block;

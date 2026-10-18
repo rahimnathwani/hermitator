@@ -20,6 +20,9 @@ var commandAliases = map[string]string{
 	"reset":  "new",
 	"status": "status",
 	"listen": "listen",
+	"model":  "model",
+	"effort": "effort",
+	"once":   "once",
 	"switch": "switch",
 	"help":   "help",
 }
@@ -45,6 +48,9 @@ const helpText = `*hermitator commands*
 /sleep: suspend the sandbox now (alias /exit)
 /stop: abort the running turn
 /new: start a fresh conversation, keeping all files (alias /clear)
+/model [NAME]: show or change the model (/model default to reset)
+/effort [LEVEL]: show or change how hard it thinks
+/once [MODEL] [EFFORT]: MESSAGE: use them for one message only
 /switch claude|pi: change harness
 /listen: show or change which messages wake the agent here
 /unlink: disconnect this chat from the agent

@@ -10,7 +10,7 @@
     <a class="button" href="/agents/{{$a.ID}}/terminal">Terminal</a>
   </div>
 </div>
-<p class="meta">{{harness $a.Harness}}{{if $a.PiProvider}} · {{$a.PiProvider}}{{end}}{{if $a.Model}} · {{$a.Model}}{{end}} · image {{$a.Image}} · {{$a.IP}} · sleeps after {{minutes $a.IdleTimeout}} min idle</p>
+<p class="meta">{{harness $a.Harness}}{{if $a.PiProvider}} · {{$a.PiProvider}}{{end}}{{if $a.Model}} · {{$a.Model}}{{end}}{{if $a.Effort}} · {{$a.Effort}} effort{{end}} · image {{$a.Image}} · {{$a.IP}} · sleeps after {{minutes $a.IdleTimeout}} min idle</p>
 
 <div class="columns">
   <section class="card console">
@@ -75,7 +75,7 @@
 
     <section class="card">
       <h2>Settings</h2>
-      <form method="post" action="/agents/{{$a.ID}}/settings" class="settings">
+      <form method="post" action="/agents/{{$a.ID}}/settings" class="settings" data-models>
         <label>Name <input name="name" value="{{$a.Name}}" required maxlength="40"></label>
         <fieldset class="choice">
           <legend>Harness</legend>
@@ -87,14 +87,27 @@
             {{range $d.Providers}}<option value="{{.ID}}" {{if eq .ID $a.PiProvider}}selected{{end}}>{{.Name}}</option>{{end}}
           </select>
         </label>
-        <label>Model <input name="model" value="{{$a.Model}}" placeholder="default"></label>
+        <label>Model <input name="model" value="{{$a.Model}}" placeholder="default" list="{{$d.ModelList}}" autocomplete="off"></label>
+        {{range $id, $models := $d.ModelLists}}<datalist id="{{$id}}">{{range $models}}<option value="{{.}}">{{end}}</datalist>{{end}}
+        <label class="claude-only">Effort
+          <select name="effort_claude">
+            <option value="">default</option>
+            {{range $d.ClaudeEfforts}}<option {{if eq . $a.Effort}}selected{{end}}>{{.}}</option>{{end}}
+          </select>
+        </label>
+        <label class="pi-only">Thinking
+          <select name="effort_pi">
+            <option value="">default</option>
+            {{range $d.PiEfforts}}<option {{if eq . $a.Effort}}selected{{end}}>{{.}}</option>{{end}}
+          </select>
+        </label>
         <label>Sleep after <span class="inline"><input type="number" name="idle_minutes" min="1" max="1440" value="{{minutes $a.IdleTimeout}}"> minutes idle</span></label>
         <label>Memory limit
           <select name="memory_mb">
             {{range $d.Memory}}<option value="{{.}}" {{if eq . $a.MemoryMB}}selected{{end}}>{{.}} MB</option>{{end}}
           </select>
         </label>
-        <p class="muted">Switching harness starts a fresh conversation in the same workspace. A new memory limit applies from the next cold boot.</p>
+        <p class="muted">Model and effort apply from the next message; you can also change them in the chat with /model and /effort. Switching harness starts a fresh conversation in the same workspace. A new memory limit applies from the next cold boot.</p>
         <button>Save</button>
       </form>
     </section>
@@ -128,7 +141,7 @@
     {{range $d.Turns}}
       <tr>
         <td title="{{.StartedAt}}">{{ago .StartedAt}}</td>
-        <td><span class="status status-{{.Status}}">{{.Status}}</span></td>
+        <td><span class="status status-{{.Status}}">{{.Status}}</span>{{with .Model}}<br><span class="muted small">{{.}}</span>{{end}}</td>
         <td class="text">{{clip 160 .Input}}</td>
         <td class="text">{{clip 240 .Output}}</td>
         <td>{{.Tools}}</td>

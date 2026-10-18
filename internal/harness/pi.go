@@ -67,6 +67,9 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 	if model != "" {
 		args = append(args, "--model", model)
 	}
+	if req.Effort != "" {
+		args = append(args, "--thinking", req.Effort)
+	}
 	if req.SystemPrompt != "" {
 		args = append(args, "--append-system-prompt", req.SystemPrompt)
 	}

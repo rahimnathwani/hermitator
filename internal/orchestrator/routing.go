@@ -228,6 +228,20 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		reply(m.statusText(ctx, ag))
 	case "listen":
 		m.listen(ctx, route, ag, cmd.Arg, reply)
+	case "model":
+		m.modelCommand(ctx, ag, cmd.Arg, reply)
+	case "effort":
+		m.effortCommand(ctx, ag, cmd.Arg, reply)
+	case "once":
+		model, effort, text := parseOnce(ag, cmd.Arg)
+		if text == "" {
+			reply("Usage: /once [MODEL] [EFFORT]: MESSAGE, for example /once opus max: review this design")
+			return
+		}
+		once := msg
+		once.Text, once.Model, once.Effort = text, model, effort
+		// Asking explicitly wakes the agent whatever the chat's settings.
+		m.actor(agentID).do(func(a *actor) { a.enqueue(once) })
 	case "switch":
 		target := strings.ToLower(cmd.Arg)
 		if target != store.HarnessClaude && target != store.HarnessPi {
@@ -242,7 +256,9 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 			if a.turn != nil {
 				return ErrBusy
 			}
+			prev := *ag
 			ag.Harness = target
+			fitHarness(&prev, ag)
 			if err := m.store.UpdateAgentSettings(ctx, ag); err != nil {
 				return err
 			}
@@ -268,6 +284,7 @@ func (m *Manager) statusText(ctx context.Context, ag *store.Agent) string {
 	if ag.Harness == store.HarnessPi {
 		fmt.Fprintf(&b, " (%s)", providerOrDefault(ag.PiProvider))
 	}
+	fmt.Fprintf(&b, "\nModel: %s", describeModel(ag))
 	fmt.Fprintf(&b, "\nState: %s", describeState(state, st.Busy))
 	if st.Queued > 0 {
 		fmt.Fprintf(&b, ", %d message(s) queued", st.Queued)
@@ -283,6 +300,9 @@ func (m *Manager) statusText(ctx context.Context, ag *store.Agent) string {
 	if turns, err := m.store.Turns(ctx, ag.ID, 1); err == nil && len(turns) == 1 {
 		t := turns[0]
 		fmt.Fprintf(&b, "\nLast turn: %s, %d tool calls, %s", t.Status, t.Tools, t.Duration().Round(time.Second))
+		if t.Model != "" {
+			fmt.Fprintf(&b, " on %s", t.Model)
+		}
 	}
 	return b.String()
 }

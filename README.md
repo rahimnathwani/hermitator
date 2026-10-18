@@ -182,10 +182,19 @@ hermitator answers itself:
 | `/sleep` | Suspend it now (alias `/exit`) |
 | `/stop` | Abort the current turn |
 | `/new` | Start a fresh conversation; files are kept (alias `/clear`) |
+| `/model`, `/model opus`, `/model default` | Show or change the model |
+| `/effort`, `/effort high`, `/effort default` | Show or change how hard it thinks |
+| `/once opus max: …` | Use another model or effort for this one message |
 | `/switch claude` or `/switch pi` | Change harness, same workspace |
 | `/listen` | Show or change which messages wake the agent in this chat |
 | `/link CODE`, `/unlink` | Bind this chat to an agent, or unbind it |
 | `/help` | The list |
+
+Model and effort changes apply from the next message, and the conversation
+carries on. Claude Code takes `fable`, `opus`, `sonnet`, `haiku` or a full
+model ID, with effort from `low` to `max`; pi takes its provider's models,
+with thinking from `off` to `max`. The agent's page has the same settings,
+and shows which model each turn actually ran on.
 
 Other slash commands, such as Claude Code's `/compact`, pass through to the
 agent. Only you can use commands: messages from your own numbers (listed in
