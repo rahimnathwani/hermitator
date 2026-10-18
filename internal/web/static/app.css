@@ -207,6 +207,28 @@ th, td { padding: .5rem .5rem; border-bottom: 1px solid var(--line); vertical-al
 tr:last-child td { border-bottom: 0; }
 td.text { max-width: 26rem; white-space: pre-wrap; word-break: break-word; }
 tr.suspended td { opacity: .6; }
+.turns .model { display: block; color: var(--muted); font-size: .8rem; margin-top: .15rem; }
+
+/* On narrow screens each turn becomes a card: result and time on top,
+   then the message, the reply, and a line of figures. */
+@media (max-width: 760px) {
+  .card:has(> table.turns) { background: none; border: 0; padding: 0; overflow: visible; }
+  table.turns, table.turns tbody { display: block; }
+  table.turns thead { display: none; }
+  table.turns tr {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .35rem 1rem; margin-bottom: .6rem;
+    padding: .75rem .9rem; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  }
+  table.turns td { display: block; padding: 0; border: 0; }
+  table.turns td:empty { display: none; }
+  table.turns .result { display: flex; align-items: center; gap: .5rem; min-width: 0; }
+  table.turns .model { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.turns .when { order: 1; margin-left: auto; color: var(--muted); font-size: .8rem; }
+  table.turns td.text { order: 2; flex-basis: 100%; max-width: none; }
+  table.turns .input { font-weight: 600; }
+  table.turns .stat { order: 3; font-size: .8rem; }
+  table.turns .stat::before { content: attr(data-label) " "; color: var(--muted); }
+}
 .card:has(> table) { overflow-x: auto; }
 .row-actions { display: flex; gap: .4rem; align-items: flex-start; }
 .row-actions form { margin: 0; }
