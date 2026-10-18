@@ -33,6 +33,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, v *viewer)
 		}
 		uses[key] = append(uses[key], a.Name)
 	}
+	secretHosts, _ := s.Store.SecretHosts(ctx, v.User.ID)
 	loc := v.User.Location()
 	now := time.Now().In(loc)
 	spentDay, _ := s.Store.SpentSince(ctx, v.User.ID, time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc))
@@ -43,7 +44,9 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, v *viewer)
 		"GitHubLogin": v.User.GitHubLogin,
 		"GitName":     v.User.GitName,
 		"GitEmail":    v.User.GitEmail,
-		"Secrets":     envSecrets(times),
+		"Secrets":     envSecrets(times, secretHosts),
+		"Egress":      v.User.Egress,
+		"EgressHere":  s.Agents.Egress(),
 		"Timezone":    v.User.Timezone,
 		"Now":         now.Format("Mon 15:04"),
 		"DailyCap":    v.User.DailyCap,
@@ -83,6 +86,7 @@ func (s *Server) saveSecret(w http.ResponseWriter, r *http.Request, v *viewer) {
 		s.back(w, r, "/settings", "Could not save: "+err.Error())
 		return
 	}
+	s.Agents.ForgetSecrets(v.User.ID)
 	if value == "" {
 		s.audit(r, v, "secret.delete", name)
 		s.back(w, r, "/settings", "Removed.")

@@ -32,7 +32,9 @@ type User struct {
 	GitEmail string
 	// GitHubLogin is the account the user's GitHub token signs in as.
 	GitHubLogin string
-	CreatedAt   time.Time
+	// Egress keeps the user's credentials out of their sandboxes.
+	Egress    bool
+	CreatedAt time.Time
 }
 
 // Location is the user's time zone, falling back to UTC.
@@ -46,12 +48,12 @@ func (u *User) Location() *time.Location {
 // IsAdmin reports whether the user administers the instance.
 func (u *User) IsAdmin() bool { return u.Role == RoleAdmin }
 
-const userColumns = `id, email, password_hash, role, max_agents, suspended, timezone, daily_cap, monthly_cap, git_name, git_email, github_login, created_at`
+const userColumns = `id, email, password_hash, role, max_agents, suspended, timezone, daily_cap, monthly_cap, git_name, git_email, github_login, egress, created_at`
 
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	var u User
 	var created string
-	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.MaxAgents, &u.Suspended, &u.Timezone, &u.DailyCap, &u.MonthlyCap, &u.GitName, &u.GitEmail, &u.GitHubLogin, &created); err != nil {
+	if err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.Role, &u.MaxAgents, &u.Suspended, &u.Timezone, &u.DailyCap, &u.MonthlyCap, &u.GitName, &u.GitEmail, &u.GitHubLogin, &u.Egress, &created); err != nil {
 		return nil, one(err)
 	}
 	u.CreatedAt = parseTS(created)
@@ -71,8 +73,8 @@ func (s *Store) CreateUser(ctx context.Context, u *User) error {
 	if u.MaxAgents == 0 {
 		u.MaxAgents = 5
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO users (`+userColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		u.ID, u.Email, u.PasswordHash, u.Role, u.MaxAgents, u.Suspended, u.Timezone, u.DailyCap, u.MonthlyCap, u.GitName, u.GitEmail, u.GitHubLogin, ts(u.CreatedAt))
+	_, err := s.db.ExecContext(ctx, `INSERT INTO users (`+userColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		u.ID, u.Email, u.PasswordHash, u.Role, u.MaxAgents, u.Suspended, u.Timezone, u.DailyCap, u.MonthlyCap, u.GitName, u.GitEmail, u.GitHubLogin, u.Egress, ts(u.CreatedAt))
 	if isUnique(err) {
 		return ErrConflict
 	}
@@ -164,4 +166,39 @@ func (s *Store) SetGitIdentity(ctx context.Context, id, name, email string) erro
 // SetGitHubLogin records which account the user's GitHub token is for.
 func (s *Store) SetGitHubLogin(ctx context.Context, id, login string) error {
 	return affected(s.db.ExecContext(ctx, `UPDATE users SET github_login = ? WHERE id = ?`, login, id))
+}
+
+// SetEgress turns the egress proxy on or off for a user.
+func (s *Store) SetEgress(ctx context.Context, id string, on bool) error {
+	return affected(s.db.ExecContext(ctx, `UPDATE users SET egress = ? WHERE id = ?`, on, id))
+}
+
+// SetSecretHosts sets where one of a user's own secrets may go; none
+// removes the restriction.
+func (s *Store) SetSecretHosts(ctx context.Context, userID, name string, hosts []string) error {
+	if len(hosts) == 0 {
+		_, err := s.db.ExecContext(ctx, `DELETE FROM secret_hosts WHERE user_id = ? AND name = ?`, userID, name)
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `INSERT INTO secret_hosts (user_id, name, hosts) VALUES (?, ?, ?)
+		ON CONFLICT (user_id, name) DO UPDATE SET hosts = excluded.hosts`, userID, name, strings.Join(hosts, " "))
+	return err
+}
+
+// SecretHosts lists where each of a user's own secrets may go.
+func (s *Store) SecretHosts(ctx context.Context, userID string) (map[string][]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT name, hosts FROM secret_hosts WHERE user_id = ?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]string{}
+	for rows.Next() {
+		var name, hosts string
+		if err := rows.Scan(&name, &hosts); err != nil {
+			return nil, err
+		}
+		out[name] = strings.Fields(hosts)
+	}
+	return out, rows.Err()
 }

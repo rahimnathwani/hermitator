@@ -232,3 +232,8 @@ func (s *Store) TouchAgent(ctx context.Context, id string) error {
 func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 	return affected(s.db.ExecContext(ctx, `DELETE FROM agents WHERE id = ?`, id))
 }
+
+// AgentByIP returns the agent at a bridge address.
+func (s *Store) AgentByIP(ctx context.Context, ip string) (*Agent, error) {
+	return scanAgent(s.db.QueryRowContext(ctx, `SELECT `+agentColumns+` FROM agents WHERE ip = ?`, ip))
+}

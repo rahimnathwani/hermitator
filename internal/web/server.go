@@ -113,6 +113,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	tenant("POST /settings/identity", s.saveIdentity)
 	tenant("POST /settings/env", s.saveEnvSecret)
 	tenant("POST /settings/env/delete", s.deleteEnvSecret)
+	tenant("POST /settings/egress", s.saveEgress)
 	tenant("GET /agents/{id}/settings", s.agentSettingsPage)
 	tenant("POST /agents/{id}/settings", s.updateAgent)
 	tenant("POST /agents/{id}/wake", s.wakeAgent)

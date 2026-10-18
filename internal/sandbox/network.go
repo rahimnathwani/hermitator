@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -17,6 +18,21 @@ import (
 type Network struct {
 	Bridge string
 	Subnet netip.Prefix
+	// EgressPort is where the egress proxy listens on the gateway. HTTPS
+	// from agents in the egress set is redirected there; 0 turns it off.
+	EgressPort int
+}
+
+// privateRanges are addresses agents may not reach: the host, private
+// networks, link-local (cloud metadata) and multicast.
+const privateRanges = "{ 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/3 }"
+
+// Peer is an agent's place on the bridge: its veth and its address.
+type Peer struct {
+	ID string
+	IP netip.Addr
+	// Egress routes the agent's HTTPS through the egress proxy.
+	Egress bool
 }
 
 // Gateway is the host's address on the bridge.
@@ -29,8 +45,10 @@ func nsName(id string) string   { return "hm-" + id }
 func vethName(id string) string { return "hv" + id }
 
 // Setup creates the bridge and firewall rules. It is idempotent and runs
-// at every start, so rules edited by hand are put back.
-func (n *Network) Setup(ctx context.Context) error {
+// at every start, so rules edited by hand are put back. peers are every
+// agent there is, running or not: the anti-spoofing rule drops traffic
+// from a port whose address it does not know.
+func (n *Network) Setup(ctx context.Context, peers ...Peer) error {
 	if err := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0o644); err != nil {
 		return fmt.Errorf("enable ip forwarding: %w", err)
 	}
@@ -57,29 +75,91 @@ func (n *Network) Setup(ctx context.Context) error {
 	if _, err := command(ctx, "ip", "link", "set", n.Bridge, "up"); err != nil {
 		return err
 	}
-	return commandInput(ctx, n.ruleset(), "nft", "-f", "-")
+	// The sets are filled in the same transaction that creates them, so
+	// a running agent's traffic is never dropped while they are empty.
+	return commandInput(ctx, n.ruleset(peers), "nft", "-f", "-")
 }
 
-func (n *Network) ruleset() string {
-	r := strings.NewReplacer("BRIDGE", n.Bridge, "SUBNET", n.Subnet.Masked().String())
+// allow lets an agent's port send from its own address, and only that.
+func (n *Network) allow(ctx context.Context, id string, ip netip.Addr) error {
+	_, err := command(ctx, "nft", "add", "element", "bridge", "hermitator", "ports", "{", vethName(id), ".", ip.String(), "}")
+	return err
+}
+
+// SetEgress routes an agent's HTTPS through the egress proxy, or stops.
+func (n *Network) SetEgress(ctx context.Context, ip netip.Addr, on bool) error {
+	if n.EgressPort == 0 {
+		return nil
+	}
+	verb := "add"
+	if !on {
+		verb = "delete"
+	}
+	_, err := command(ctx, "nft", verb, "element", "inet", "hermitator", "egress", "{", ip.String(), "}")
+	if !on && err != nil {
+		return nil // was not in the set
+	}
+	return err
+}
+
+func (n *Network) ruleset(peers []Peer) string {
+	var ports, egressIPs []string
+	for _, p := range peers {
+		ports = append(ports, `"`+vethName(p.ID)+`" . `+p.IP.String())
+		if p.Egress && n.EgressPort != 0 {
+			egressIPs = append(egressIPs, p.IP.String())
+		}
+	}
+	elements := func(list []string) string {
+		if len(list) == 0 {
+			return ""
+		}
+		return " elements = { " + strings.Join(list, ", ") + " };"
+	}
+	r := strings.NewReplacer("EGRESS_ELEMENTS", elements(egressIPs), "PORT_ELEMENTS", elements(ports),
+		"BRIDGE", n.Bridge, "SUBNET", n.Subnet.Masked().String(), "GATEWAY", n.Gateway().String(),
+		"EGRESS", strconv.Itoa(n.EgressPort), "PRIVATE", privateRanges)
+	egress := ""
+	if n.EgressPort != 0 {
+		egress = `
+	chain prerouting {
+		type nat hook prerouting priority dstnat;
+		iifname "BRIDGE" ip saddr @egress ip daddr != PRIVATE tcp dport 443 dnat ip to GATEWAY:EGRESS
+	}`
+	}
 	return r.Replace(`
 table inet hermitator
 delete table inet hermitator
 table inet hermitator {
+	set egress { type ipv4_addr;EGRESS_ELEMENTS }
 	chain input {
 		type filter hook input priority 0; policy accept;
 		iifname "BRIDGE" ct state established,related accept
+		iifname "BRIDGE" ip saddr @egress ip daddr GATEWAY tcp dport EGRESS accept
 		iifname "BRIDGE" drop
 	}
 	chain forward {
 		type filter hook forward priority 0; policy accept;
-		iifname "BRIDGE" ip daddr { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/3 } drop
+		iifname "BRIDGE" ip daddr PRIVATE drop
 		oifname "BRIDGE" ct state established,related accept
 		oifname "BRIDGE" drop
-	}
+	}` + egress + `
 	chain postrouting {
 		type nat hook postrouting priority 100;
 		ip saddr SUBNET oifname != "BRIDGE" masquerade
+	}
+}
+
+# An agent can only send from its own address: the egress proxy, and
+# anything else on the host, tells agents apart by it.
+table bridge hermitator
+delete table bridge hermitator
+table bridge hermitator {
+	set ports { type ifname . ipv4_addr;PORT_ELEMENTS }
+	chain prerouting {
+		type filter hook prerouting priority -300; policy accept;
+		iifname "hv*" iifname . ip saddr != @ports drop
+		iifname "hv*" ether type ip6 drop
 	}
 }
 `)
@@ -115,7 +195,7 @@ func (n *Network) Attach(ctx context.Context, id string, ip netip.Addr) error {
 			return err
 		}
 	}
-	return nil
+	return n.allow(ctx, id, ip)
 }
 
 // Detach removes an agent's namespace and veth.

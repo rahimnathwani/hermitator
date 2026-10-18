@@ -1186,3 +1186,62 @@ func TestAgentAsksWithAPoll(t *testing.T) {
 		}
 	}
 }
+
+func TestPlaceholdersInsteadOfCredentials(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.cfg.EgressKey = []byte("egress test key")
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	e.m.PutSecret(ctx, e.user.ID, store.SecretEnvPrefix+"STRIPE_KEY", "sk_live_abcdefgh12345")
+	e.st.SetSecretHosts(ctx, e.user.ID, "STRIPE_KEY", []string{"api.stripe.com"})
+	e.m.PutSecret(ctx, e.user.ID, store.SecretGitHubToken, "github_pat_0123456789abcdef")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+
+	// Off: real values, as before (and redacted from the reply).
+	e.m.HandleMessage(ctx, e.msg(chat, "leak it", true))
+	if got := e.rec.wait(t, "text").body; strings.Contains(got, "hermitator-") {
+		t.Fatalf("placeholders with the proxy off: %q", got)
+	}
+	e.idle(t)
+
+	// On, but this sandbox booted before it trusted the proxy: still real.
+	if _, err := e.m.SetEgress(ctx, e.user.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "leak it", true))
+	if got := e.rec.wait(t, "text").body; strings.Contains(got, "hermitator-") {
+		t.Fatalf("placeholders in a sandbox that does not trust the proxy: %q", got)
+	}
+	e.idle(t)
+
+	// Once it trusts the proxy, the agent holds placeholders only.
+	spec, _ := e.m.Spec(e.agent)
+	os.WriteFile(filepath.Join(spec.Dir, "config.json"), []byte(`{"process":{"env":["NODE_EXTRA_CA_CERTS=/opt/hermitator/lib/egress-ca.crt"]}}`), 0o644)
+	e.m.HandleMessage(ctx, e.msg(chat, "leak it", true))
+	got := e.rec.wait(t, "text").body
+	if !strings.Contains(got, "key=hermitator-") || !strings.Contains(got, "gh=gho_hermitator-") {
+		t.Fatalf("reply = %q, want placeholders", got)
+	}
+	e.idle(t)
+
+	// The proxy maps them back, each to its own hosts.
+	ag, _ := e.st.Agent(ctx, e.agent.ID)
+	secrets, ok := e.m.EgressSecrets(ctx, netip.MustParseAddr(ag.IP))
+	if !ok {
+		t.Fatal("the proxy does not know the agent")
+	}
+	want := map[string]string{"STRIPE_KEY": "sk_live_abcdefgh12345", store.SecretGitHubToken: "github_pat_0123456789abcdef", store.SecretClaudeToken: "tok"}
+	for _, s := range secrets {
+		if want[s.Name] != s.Value || !strings.Contains(got, s.Placeholder) && s.Name != store.SecretClaudeToken {
+			t.Errorf("secret %s: value %q, placeholder %q in reply: %v", s.Name, s.Value, s.Placeholder, strings.Contains(got, s.Placeholder))
+		}
+		delete(want, s.Name)
+	}
+	if len(want) != 0 {
+		t.Fatalf("the proxy lacks %v", want)
+	}
+	if _, ok := e.m.EgressSecrets(ctx, netip.MustParseAddr("10.88.9.9")); ok {
+		t.Fatal("the proxy served an address that is no agent's")
+	}
+}

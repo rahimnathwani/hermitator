@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rahimnathwani/hermitator/internal/orchestrator"
 	"github.com/rahimnathwani/hermitator/internal/store"
 )
 
@@ -51,6 +52,7 @@ func (s *Server) saveGitHub(w http.ResponseWriter, r *http.Request, v *viewer) {
 	if r.FormValue("remove") != "" {
 		s.Agents.PutSecret(ctx, v.User.ID, store.SecretGitHubToken, "")
 		s.Store.SetGitHubLogin(ctx, v.User.ID, "")
+		s.Agents.ForgetSecrets(v.User.ID)
 		s.audit(r, v, "secret.delete", store.SecretGitHubToken)
 		s.back(w, r, "/settings", "GitHub disconnected. Agents can no longer push or use gh as you.")
 		return
@@ -74,6 +76,7 @@ func (s *Server) saveGitHub(w http.ResponseWriter, r *http.Request, v *viewer) {
 		return
 	}
 	s.Store.SetGitHubLogin(ctx, v.User.ID, u.Login)
+	s.Agents.ForgetSecrets(v.User.ID)
 	msg := "Connected to GitHub as @" + u.Login + "."
 	if v.User.GitName == "" || v.User.GitEmail == "" {
 		name, email := u.Name, u.Email
@@ -130,10 +133,20 @@ func (s *Server) saveEnvSecret(w http.ResponseWriter, r *http.Request, v *viewer
 		s.back(w, r, "/settings", "Paste the secret's value (at most 8 KB).")
 		return
 	}
+	var hosts []string
+	for _, h := range strings.FieldsFunc(strings.ToLower(formValue(r, "hosts")), func(r rune) bool { return r == ',' || r == ' ' }) {
+		if !orchestrator.ValidHost(h) {
+			s.back(w, r, "/settings", h+" is not a host name; give names like api.stripe.com, separated by spaces.")
+			return
+		}
+		hosts = append(hosts, h)
+	}
 	if err := s.Agents.PutSecret(r.Context(), v.User.ID, store.SecretEnvPrefix+name, value); err != nil {
 		s.back(w, r, "/settings", "Could not save: "+err.Error())
 		return
 	}
+	s.Store.SetSecretHosts(r.Context(), v.User.ID, name, hosts)
+	s.Agents.ForgetSecrets(v.User.ID)
 	s.audit(r, v, "secret.put", store.SecretEnvPrefix+name)
 	s.back(w, r, "/settings", "Saved "+name+". Agents have it from their next message.")
 }
@@ -145,6 +158,8 @@ func (s *Server) deleteEnvSecret(w http.ResponseWriter, r *http.Request, v *view
 		return
 	}
 	s.Agents.PutSecret(r.Context(), v.User.ID, store.SecretEnvPrefix+name, "")
+	s.Store.SetSecretHosts(r.Context(), v.User.ID, name, nil)
+	s.Agents.ForgetSecrets(v.User.ID)
 	s.audit(r, v, "secret.delete", store.SecretEnvPrefix+name)
 	s.back(w, r, "/settings", "Removed "+name+".")
 }
@@ -153,15 +168,39 @@ func (s *Server) deleteEnvSecret(w http.ResponseWriter, r *http.Request, v *view
 type envSecret struct {
 	Name  string
 	Saved time.Time
+	Hosts []string
 }
 
-func envSecrets(times map[string]time.Time) []envSecret {
+func envSecrets(times map[string]time.Time, hosts map[string][]string) []envSecret {
 	var out []envSecret
 	for name, at := range times {
 		if key, ok := strings.CutPrefix(name, store.SecretEnvPrefix); ok {
-			out = append(out, envSecret{key, at})
+			out = append(out, envSecret{key, at, hosts[key]})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// saveEgress turns the egress proxy on or off for the user's agents.
+func (s *Server) saveEgress(w http.ResponseWriter, r *http.Request, v *viewer) {
+	on := formValue(r, "egress") == "on"
+	waiting, err := s.Agents.SetEgress(r.Context(), v.User.ID, on)
+	switch {
+	case errors.Is(err, orchestrator.ErrNoEgress):
+		s.back(w, r, "/settings", "This server runs agents without gVisor, so there is no egress proxy to turn on.")
+		return
+	case err != nil:
+		s.back(w, r, "/settings", "Could not save: "+err.Error())
+		return
+	}
+	s.audit(r, v, "settings.egress", fmt.Sprint(on))
+	msg := "Credentials go into your agents' sandboxes as before."
+	if on {
+		msg = "Your agents now hold placeholders instead of credentials, from their next message."
+		if waiting > 0 {
+			msg += fmt.Sprintf(" %d of them are busy and keep real credentials until they next boot afresh.", waiting)
+		}
+	}
+	s.back(w, r, "/settings", msg)
 }

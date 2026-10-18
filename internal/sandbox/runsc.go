@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -334,8 +335,10 @@ func parsePS(out []byte) []Process {
 func (r *Runsc) Shell(ctx context.Context, s *Spec, env []string) (*exec.Cmd, error) {
 	proc := specs.Process{
 		Args: []string{"/bin/bash", "-l"},
-		Env:  append(guestEnv(s.Image), env...),
-		Cwd:  turn.Workspace,
+		// The bundle the running sandbox mounts, which a restore may
+		// have kept from before the current one.
+		Env: append(guestEnv(s.Image, bundleTools(s.Dir)), env...),
+		Cwd: turn.Workspace,
 		Capabilities: &specs.LinuxCapabilities{
 			Bounding:  capabilities,
 			Effective: capabilities,
@@ -438,3 +441,8 @@ var _ Runtime = (*Runsc)(nil)
 
 // ErrNotRunning is returned for operations that need a running sandbox.
 var ErrNotRunning = errors.New("sandbox is not running")
+
+// SetEgress sends an agent's HTTPS through the egress proxy, or stops.
+func (r *Runsc) SetEgress(ctx context.Context, ip netip.Addr, on bool) error {
+	return r.Network.SetEgress(ctx, ip, on)
+}

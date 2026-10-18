@@ -2,14 +2,21 @@ package main
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"github.com/rahimnathwani/hermitator/internal/egress"
+	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"testing/fstest"
 	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/config"
@@ -65,18 +72,34 @@ func serve() error {
 	}
 	defer st.Close()
 
-	tools, err := sandbox.InstallTools(cfg.ToolsDir(), cfg.Guest, guestfiles.FS)
+	// The egress CA goes into the tools bundle, so sandboxes booted from
+	// now on trust the egress proxy. It is created once and kept.
+	ca, err := egress.LoadCA(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("egress CA: %w", err)
+	}
+	toolFiles, err := withTrust(guestfiles.FS, ca.PEM)
+	if err != nil {
+		return err
+	}
+	tools, err := sandbox.InstallTools(cfg.ToolsDir(), cfg.Guest, toolFiles)
 	if err != nil {
 		return fmt.Errorf("install guest tools from %s: %w", cfg.Guest, err)
 	}
+	var egressKey []byte
 
 	var rt sandbox.Runtime
 	switch cfg.Runtime {
 	case "runsc":
-		network := &sandbox.Network{Bridge: cfg.Bridge, Subnet: cfg.Subnet}
-		if err := network.Setup(ctx); err != nil {
+		network := &sandbox.Network{Bridge: cfg.Bridge, Subnet: cfg.Subnet, EgressPort: egressPort}
+		peers, err := knownPeers(ctx, st)
+		if err != nil {
+			return err
+		}
+		if err := network.Setup(ctx, peers...); err != nil {
 			return fmt.Errorf("network: %w", err)
 		}
+		egressKey = derive(key, "egress placeholders")
 		if total, err := sandbox.MemTotal(); err != nil {
 			log.Warn("agents' shared limits not set", "err", err)
 		} else if limit, err := sandbox.LimitAll("/sys/fs/cgroup", total); err != nil {
@@ -109,7 +132,18 @@ func serve() error {
 		Tools:     tools,
 		Subnet:    cfg.Subnet,
 		PublicURL: cfg.PublicURL,
+		EgressKey: egressKey,
 	}, st, box, rt, log)
+	if egressKey != nil {
+		gateway := netip.PrefixFrom(cfg.Subnet.Masked().Addr().Next(), 0).Addr()
+		l, err := net.Listen("tcp", netip.AddrPortFrom(gateway, egressPort).String())
+		if err != nil {
+			return fmt.Errorf("egress proxy: %w", err)
+		}
+		defer l.Close()
+		proxy := &egress.Proxy{CA: ca, Resolve: mgr.EgressSecrets, Log: log}
+		go proxy.ServeTransparent(ctx, l)
+	}
 	whisper := &media.Whisper{Binary: cfg.Whisper, Model: cfg.Model}
 	if whisper.Available() {
 		mgr.SetTranscriber(whisper)
@@ -181,4 +215,65 @@ func ensureLocalImage(dir string) {
 	}
 	os.MkdirAll(filepath.Join(dir, "universal-local", "rootfs", "bin"), 0o755)
 	os.Symlink("universal-local", filepath.Join(dir, "universal"))
+}
+
+// egressPort is where the egress proxy listens on the bridge's gateway.
+const egressPort = 3129
+
+// knownPeers lists every agent's address, for the network's rules, and
+// whether its owner routes it through the egress proxy.
+func knownPeers(ctx context.Context, st *store.Store) ([]sandbox.Peer, error) {
+	agents, err := st.Agents(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	egressOn := map[string]bool{}
+	var peers []sandbox.Peer
+	for _, a := range agents {
+		ip, err := netip.ParseAddr(a.IP)
+		if err != nil {
+			continue
+		}
+		on, seen := egressOn[a.UserID]
+		if !seen {
+			if u, err := st.User(ctx, a.UserID); err == nil {
+				on = u.Egress
+			}
+			egressOn[a.UserID] = on
+		}
+		peers = append(peers, sandbox.Peer{ID: a.ID, IP: ip, Egress: on})
+	}
+	return peers, nil
+}
+
+// withTrust adds the egress CA, and a bundle of the host's roots plus the
+// CA, to the files the tools bundle carries.
+func withTrust(files fs.FS, caPEM []byte) (fs.FS, error) {
+	out := fstest.MapFS{}
+	err := fs.WalkDir(files, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := fs.ReadFile(files, path)
+		out[path] = &fstest.MapFile{Data: b, Mode: 0o644}
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	out[sandbox.EgressCAFile] = &fstest.MapFile{Data: caPEM, Mode: 0o644}
+	for _, roots := range []string{"/etc/ssl/certs/ca-certificates.crt", "/etc/ssl/cert.pem", "/etc/pki/tls/certs/ca-bundle.crt"} {
+		if b, err := os.ReadFile(roots); err == nil {
+			out[sandbox.CABundleFile] = &fstest.MapFile{Data: append(append(b, '\n'), caPEM...), Mode: 0o644}
+			break
+		}
+	}
+	return out, nil
+}
+
+// derive makes a key for one purpose from the master key.
+func derive(key []byte, purpose string) []byte {
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte(purpose))
+	return mac.Sum(nil)
 }

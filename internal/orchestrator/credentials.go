@@ -67,6 +67,8 @@ type credentials struct {
 	github string
 	// redact holds every secret value, kept out of what is sent or shown.
 	redact []string
+	// placeholders says the sandbox holds placeholders, not credentials.
+	placeholders bool
 }
 
 // credentials gathers what an agent's harness needs to talk to its model,
@@ -265,16 +267,17 @@ func (m *Manager) Terminal(ctx context.Context, agentID string) (cmd *exec.Cmd, 
 	if err != nil {
 		return nil, nil, err
 	}
-	env := []string{"IS_SANDBOX=1", "TERM=xterm-256color", "COLORTERM=truecolor"}
-	for name, envVar := range map[string]string{
-		store.SecretClaudeToken:   "CLAUDE_CODE_OAUTH_TOKEN",
-		store.SecretDeepSeekKey:   "DEEPSEEK_API_KEY",
-		store.SecretOpenRouterKey: "OPENROUTER_API_KEY",
-	} {
-		if v := m.Secret(ctx, ag.UserID, name); v != "" {
-			env = append(env, envVar+"="+v)
-		}
+	// The same credentials a turn gets, placeholders included.
+	creds, problem := m.credentials(ctx, ag)
+	if problem != "" {
+		m.extraCredentials(ctx, ag, &creds)
 	}
+	m.usePlaceholders(ctx, ag, spec, &creds)
+	env := []string{"IS_SANDBOX=1", "TERM=xterm-256color", "COLORTERM=truecolor", "TZ=" + m.location(ctx, ag).String()}
+	for k, v := range creds.env {
+		env = append(env, k+"="+v)
+	}
+	sort.Strings(env)
 	if auth := m.Secret(ctx, ag.UserID, store.SecretPiAuth); auth != "" {
 		wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		spec.Spool().Run(wctx, spool.Job{ID: "creds-" + ids.New(), Stdin: []byte(auth),

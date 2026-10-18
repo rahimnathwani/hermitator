@@ -259,6 +259,34 @@ sandbox before it is suspended, so it is not left in the upper layer or a
 checkpoint image. Environment variables live only in the turn's processes,
 though background processes started during a turn inherit them.
 
+### Keeping credentials out (the egress proxy)
+
+A user can turn on **Keep them out of the sandbox** in Settings. Their
+agents then hold placeholders, derived from the master key per user and
+credential so they stay the same across turns, restarts and checkpoints,
+and shaped like the real thing (`sk-ant-oat01-hermitator-…`). nftables
+redirects those agents' HTTPS to public addresses to the egress proxy on
+the gateway (`internal/egress`). The proxy reads the server name from the
+TLS ClientHello. For a host that one of the user's credentials is for
+(`api.anthropic.com` for the Claude token, GitHub's hosts for the GitHub
+token, the hosts a user gives their own secret), it decrypts with a
+certificate from hermitator's own CA, swaps placeholders for real values
+in headers, Basic credentials and the query, and sends the request on;
+a placeholder bound for another host is refused with a 403. Every other
+connection is passed through without being decrypted.
+
+The proxy tells agents apart by source address, so a bridge-family rule
+pins each agent's veth to its own address: an agent cannot claim
+another's and get its credentials swapped in. It also refuses private
+destinations, since redirected traffic skips the forward chain.
+
+Sandboxes trust the CA through `NODE_EXTRA_CA_CERTS` and a CA bundle
+(`SSL_CERT_FILE` and friends) in the tools bundle. A sandbox only holds
+placeholders if the configuration it runs with, the one a restore reuses,
+trusts the CA; turning the proxy on stops idle agents so they boot
+afresh, and busy ones keep real credentials until they do. pi's ChatGPT
+login (an OAuth file pi refreshes itself) is not covered yet.
+
 Every credential value of eight characters or more, and the long strings in
 pi's credential file, is replaced with `[secret removed]` in what the agent
 sends to WhatsApp (replies, messages, captions), in the stored turn, and in

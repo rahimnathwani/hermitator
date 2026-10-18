@@ -39,6 +39,9 @@ type Config struct {
 	// StallAfter is how long a turn may go without any sign of progress
 	// before the chat is told, once.
 	StallAfter time.Duration
+	// EgressKey derives credential placeholders; set when the egress
+	// proxy runs on this host.
+	EgressKey []byte
 	// PublicURL is the web UI's address, used in replies.
 	PublicURL string
 }
@@ -52,8 +55,9 @@ type Manager struct {
 	log   *slog.Logger
 	hub   hub
 
-	msgr Messenger
-	stt  Transcriber
+	msgr   Messenger
+	egress egressCache
+	stt    Transcriber
 
 	ctx    context.Context
 	mu     sync.Mutex
@@ -157,6 +161,9 @@ func (m *Manager) renumber(ctx context.Context, a *store.Agent) {
 	}
 	m.log.Info("agent moved to the configured subnet", "agent", a.ID, "from", a.IP, "to", ip)
 	a.IP = ip
+	if u, err := m.store.User(ctx, a.UserID); err == nil && u.Egress {
+		m.routeEgress(ctx, a, true)
+	}
 }
 
 // cleanSpool removes finished jobs a previous process never collected.
@@ -237,6 +244,9 @@ func (m *Manager) Spec(a *store.Agent) (*sandbox.Spec, error) {
 	}, nil
 }
 
+// ErrNoEgress is returned when the egress proxy does not run here.
+var ErrNoEgress = errors.New("the egress proxy is not running on this host")
+
 // ErrQuota is returned when a user already has as many agents as allowed.
 var ErrQuota = errors.New("agent limit reached")
 
@@ -256,7 +266,13 @@ func (m *Manager) CreateAgent(ctx context.Context, owner *store.User, a *store.A
 	}
 	a.UserID = owner.ID
 	a.Image = img
-	return m.store.CreateAgent(ctx, a, m.cfg.Subnet)
+	if err := m.store.CreateAgent(ctx, a, m.cfg.Subnet); err != nil {
+		return err
+	}
+	if owner.Egress {
+		m.routeEgress(ctx, a, true)
+	}
+	return nil
 }
 
 // DeleteAgent tears down an agent's sandbox and all of its files.

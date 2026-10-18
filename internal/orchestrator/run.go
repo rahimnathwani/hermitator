@@ -102,6 +102,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		log.Error("spec", "err", err)
 		return fail("⚠️ This agent's sandbox is misconfigured: " + err.Error())
 	}
+	m.usePlaceholders(ctx, agent, spec, &creds)
 	woke := time.Now()
 	wake, err := m.rt.Wake(ctx, spec)
 	if err != nil {

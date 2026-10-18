@@ -179,3 +179,23 @@ func TestHolding(t *testing.T) {
 		t.Fatalf("stale holds were not cleared: %v", entries)
 	}
 }
+
+func TestRuleset(t *testing.T) {
+	n := &Network{Bridge: "hermitator0", Subnet: netip.MustParsePrefix("10.231.0.0/16"), EgressPort: 3129}
+	rs := n.ruleset([]Peer{{ID: "a1", IP: netip.MustParseAddr("10.231.0.2")}, {ID: "b2", IP: netip.MustParseAddr("10.231.0.3"), Egress: true}})
+	for _, want := range []string{
+		`elements = { "hva1" . 10.231.0.2, "hvb2" . 10.231.0.3 }`,
+		`set egress { type ipv4_addr; elements = { 10.231.0.3 }; }`,
+		`ip saddr @egress ip daddr != { 0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/3 } tcp dport 443 dnat ip to 10.231.0.1:3129`,
+		`ip saddr @egress ip daddr 10.231.0.1 tcp dport 3129 accept`,
+		`iifname "hv*" iifname . ip saddr != @ports drop`,
+	} {
+		if !strings.Contains(rs, want) {
+			t.Errorf("ruleset lacks %s\n%s", want, rs)
+		}
+	}
+	// With the proxy off there is no redirect at all.
+	if off := (&Network{Bridge: "hermitator0", Subnet: n.Subnet}).ruleset(nil); strings.Contains(off, "dnat") {
+		t.Error("redirects with the proxy off")
+	}
+}

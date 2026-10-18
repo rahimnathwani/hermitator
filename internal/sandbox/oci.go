@@ -20,9 +20,56 @@ var capabilities = []string{
 	"CAP_SETPCAP", "CAP_SETUID", "CAP_SYS_CHROOT", "CAP_SYS_PTRACE",
 }
 
+// Trust files in the tools bundle, and where sandboxes see them.
+const (
+	EgressCAFile = "egress-ca.crt"
+	CABundleFile = "ca-bundle.crt"
+	guestLib     = turn.ToolsDir + "/lib/"
+)
+
+// trustEnv points every TLS stack in the sandbox at the egress CA, when
+// the tools bundle it mounts has one: Node's extra CA, and a full bundle
+// (the system roots plus the CA) for OpenSSL, Go, curl, git and Python.
+func trustEnv(tools string) []string {
+	if tools == "" {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(tools, "lib", EgressCAFile)); err != nil {
+		return nil
+	}
+	env := []string{"NODE_EXTRA_CA_CERTS=" + guestLib + EgressCAFile}
+	if _, err := os.Stat(filepath.Join(tools, "lib", CABundleFile)); err == nil {
+		for _, k := range []string{"SSL_CERT_FILE", "CURL_CA_BUNDLE", "GIT_SSL_CAINFO", "REQUESTS_CA_BUNDLE"} {
+			env = append(env, k+"="+guestLib+CABundleFile)
+		}
+	}
+	return env
+}
+
+// TrustsEgress reports whether the sandbox's current configuration, the
+// one a restore reuses, trusts the egress CA. Only then may its turns
+// hold placeholders instead of credentials.
+func (s *Spec) TrustsEgress() bool {
+	b, err := os.ReadFile(filepath.Join(s.Dir, "config.json"))
+	if err != nil {
+		return false
+	}
+	var spec specs.Spec
+	if json.Unmarshal(b, &spec) != nil || spec.Process == nil {
+		return false
+	}
+	for _, kv := range spec.Process.Env {
+		if strings.HasPrefix(kv, "NODE_EXTRA_CA_CERTS=") {
+			return true
+		}
+	}
+	return false
+}
+
 // guestEnv is the environment of PID 1 and so of every job: hermitator's
-// fixed variables, then whatever the image declared.
-func guestEnv(img Image) []string {
+// fixed variables, trust for the egress CA if tools has it, then whatever
+// the image declared.
+func guestEnv(img Image, tools string) []string {
 	env := []string{
 		"PATH=/opt/hermitator/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		"HOME=/root",
@@ -34,6 +81,7 @@ func guestEnv(img Image) []string {
 		"HERMITATOR_SHARED=" + turn.SharedDir,
 		"HERMITATOR_WORKSPACE=" + turn.Workspace,
 	}
+	env = append(env, trustEnv(tools)...)
 	seen := map[string]bool{}
 	for _, kv := range env {
 		k, _, _ := strings.Cut(kv, "=")
@@ -57,7 +105,7 @@ func ociSpec(s *Spec, netnsPath string) *specs.Spec {
 		Process: &specs.Process{
 			User: specs.User{UID: 0, GID: 0},
 			Args: []string{turn.ToolsDir + "/bin/hermitator-guest", "init"},
-			Env:  guestEnv(s.Image),
+			Env:  guestEnv(s.Image, s.Tools),
 			Cwd:  "/",
 			Capabilities: &specs.LinuxCapabilities{
 				Bounding:  capabilities,
