@@ -572,3 +572,32 @@ tr.suspended td { color: var(--muted); }
   .turns td.input { font-weight: 600; }
   .turns td.stat { order: 3; }
 }
+
+/* Confirmation dialog: destructive actions say what they will do, to
+   which thing, and how to undo it, before they do it. */
+dialog.modal { padding: 0; border: 0; background: none; width: 480px; max-width: calc(100vw - 32px); color: var(--text); overflow: visible; }
+dialog.modal::backdrop { background: rgb(10 14 22 / 45%); }
+dialog.modal[open] { animation: modal-in .16s ease-out; }
+@keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(.98); } }
+.modal-box {
+  margin: 0; display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 0 16px; padding: 24px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+}
+.modal-icon { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--danger-soft); color: var(--danger); }
+.modal-icon .icon { width: 20px; height: 20px; }
+.modal-content { min-width: 0; }
+.modal-content h2 { font-size: 16px; line-height: 24px; margin: 8px 0 10px; overflow-wrap: anywhere; }
+.modal-body { color: var(--text-2); font-size: 14px; }
+.modal-body p { margin: 0 0 10px; }
+.modal-body ul { margin: 0 0 10px; padding-left: 18px; display: grid; gap: 6px; }
+.modal-body > :last-child { margin-bottom: 0; }
+.modal-content .field { margin: 16px 0 0; }
+.modal-actions { grid-column: 1 / -1; display: flex; flex-direction: row-reverse; gap: 8px; margin-top: 24px; }
+@media (max-width: 480px) {
+  .modal-box { grid-template-columns: minmax(0, 1fr); padding: 20px; }
+  .modal-icon { margin-bottom: 4px; }
+  .modal-actions button { flex: 1; }
+}
+.form-row { display: flex; gap: 8px; align-items: center; }
+.form-row > form { margin: 0; }
+.form-row > form.inline-form { flex: 1; }

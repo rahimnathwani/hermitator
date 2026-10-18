@@ -22,9 +22,16 @@
     <li class="route">
       <div class="route-head">
         <span><strong>{{if .ChatName}}{{.ChatName}}{{else}}{{.ChatJID}}{{end}}</strong><span class="muted small">via {{.Account}}{{if .Held}} · {{.Held}} waiting{{end}}</span></span>
-        <form method="post" action="/agents/{{$a.ID}}/routes/delete">
+        <form method="post" action="/agents/{{$a.ID}}/routes/delete" data-confirm="Unlink chat" data-confirm-title="Unlink {{if .ChatName}}{{.ChatName}}{{else}}this chat{{end}}?">
           <input type="hidden" name="account" value="{{.AccountID}}"><input type="hidden" name="chat" value="{{.ChatJID}}">
-          <button class="small">{{icon "link"}}Unlink</button>
+          <template data-confirm-body>
+            <p>{{$a.Name}} stops reading and answering in this chat.</p>
+            <ul>
+              {{if .Held}}<li>The {{.Held}} message{{if gt .Held 1}}s{{end}} waiting for it {{if gt .Held 1}}are{{else}}is{{end}} discarded.</li>{{end}}
+              <li>To link it again, send a new <code>/link</code> code there. Its wake settings go back to the defaults.</li>
+            </ul>
+          </template>
+          <button class="small">{{icon "link"}}Unlink…</button>
         </form>
       </div>
       <form method="post" action="/agents/{{$a.ID}}/routes/triggers" class="triggers" data-track>

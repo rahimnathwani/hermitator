@@ -31,7 +31,13 @@
       <form method="post" action="/agents/{{$a.ID}}/sleep"><button title="Checkpoint or stop the sandbox now">{{icon "sleep"}}Sleep</button></form>
     </div>
     <form method="post" action="/agents/{{$a.ID}}/stop" data-busy-only{{if not $a.Busy}} hidden{{end}}><button class="danger" title="Stop the turn in progress">{{icon "stop"}}Stop turn</button></form>
-    <form method="post" action="/agents/{{$a.ID}}/new-session"><button title="The next message starts a fresh conversation">{{icon "restart"}}New conversation</button></form>
+    <form method="post" action="/agents/{{$a.ID}}/new-session" data-confirm="Start fresh" data-confirm-title="Start a fresh conversation with {{$a.Name}}?">
+      <template data-confirm-body>
+        <p>{{$a.Name}} forgets this conversation, and the next message starts a new one. Files in its workspace stay.</p>
+        <p>The old conversation cannot be picked up again from here.</p>
+      </template>
+      <button title="The next message starts a fresh conversation">{{icon "restart"}}New conversation…</button>
+    </form>
   </div>
 </div>
 <nav class="tabs" aria-label="Agent">

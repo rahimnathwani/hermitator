@@ -31,6 +31,9 @@ verifies one.
 
 ## Style
 
-Go with the standard library first; a dependency needs a reason. Comments
+Go with the standard library first; a dependency needs a reason. In the
+panel, anything that deletes, disconnects or discards asks first: give its
+form `data-confirm` and a `<template data-confirm-body>` that says what
+will happen to what, and how to undo it (`confirm_test.go` checks). Comments
 explain why, not what. Commit messages say what changed and why, in plain
 sentences, and tests that would have caught a bug ship with its fix.

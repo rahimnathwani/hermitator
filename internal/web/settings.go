@@ -22,7 +22,17 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, v *viewer)
 	times, _ := s.Store.SecretTimes(ctx, v.User.ID)
 	agents, _ := s.Store.Agents(ctx, v.User.ID)
 	numbers, _ := s.Store.OwnerNumbers(ctx, v.User.ID)
+	// Which agents each credential serves, so removing one can name them.
+	uses := map[string][]string{}
+	for _, a := range agents {
+		key := a.Harness
+		if a.Harness == store.HarnessPi {
+			key = providerOrCodex(a.PiProvider)
+		}
+		uses[key] = append(uses[key], a.Name)
+	}
 	s.render(w, r, v, "settings.html", "Settings", "settings", map[string]any{
+		"Uses":       uses,
 		"Numbers":    numbers,
 		"Claude":     times[store.SecretClaudeToken],
 		"DeepSeek":   times[store.SecretDeepSeekKey],

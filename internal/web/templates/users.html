@@ -32,12 +32,32 @@
         {{if ne .ID $me}}
         <button class="small icon-only" popovertarget="menu-{{.ID}}" style="anchor-name: --menu-{{.ID}}" title="More" aria-label="More actions">{{icon "more"}}</button>
         <div class="popover" id="menu-{{.ID}}" popover style="position-anchor: --menu-{{.ID}}">
-          <form method="post" action="/admin/users/{{.ID}}/suspend"><button class="small">{{if .Suspended}}Reinstate{{else}}Suspend{{end}} {{.Email}}</button></form>
-          <form method="post" action="/admin/users/{{.ID}}/password" class="inline-form">
+          {{if .Suspended}}
+          <form method="post" action="/admin/users/{{.ID}}/suspend"><button class="small">Reinstate {{.Email}}</button></form>
+          {{else}}
+          <form method="post" action="/admin/users/{{.ID}}/suspend" data-confirm="Suspend" data-confirm-title="Suspend {{.Email}}?">
+            <template data-confirm-body>
+              <p>They are logged out at once and cannot log in. Their agents are put to sleep, and stop answering until you reinstate them.</p>
+              <p>Nothing is deleted.</p>
+            </template>
+            <button class="small">Suspend {{.Email}}…</button>
+          </form>
+          {{end}}
+          <form method="post" action="/admin/users/{{.ID}}/password" class="inline-form" data-confirm="Reset password" data-confirm-title="Reset {{.Email}}'s password?">
+            <template data-confirm-body><p>Their sessions end, and from now on they log in with the password you typed. Tell them what it is.</p></template>
             <input type="password" name="password" placeholder="New password" minlength="10" required autocomplete="new-password" aria-label="New password"><button class="small">Reset</button>
           </form>
-          <form method="post" action="/admin/users/{{.ID}}/delete" class="inline-form">
-            <input name="confirm" placeholder="Type {{.Email}}" required autocomplete="off" aria-label="Type the email to confirm"><button class="small danger">Delete</button>
+          <form method="post" action="/admin/users/{{.ID}}/delete" data-confirm="Delete user" data-confirm-title="Delete {{.Email}}?"
+                data-confirm-type="{{.Email}}" data-confirm-type-label="Type {{.Email}} to confirm." data-confirm-field="confirm">
+            <template data-confirm-body>
+              <ul>
+                <li>Their {{.Agents}} agent{{if ne .Agents 1}}s are{{else}} is{{end}} deleted, with every file in {{if ne .Agents 1}}them{{else}}it{{end}}.</li>
+                <li>Their {{.Accounts}} WhatsApp number{{if ne .Accounts 1}}s are{{else}} is{{end}} logged out and removed.</li>
+                <li>Their credentials and history are deleted.</li>
+              </ul>
+              <p><strong>This cannot be undone.</strong></p>
+            </template>
+            <button class="small danger">{{icon "trash"}}Delete {{.Email}}…</button>
           </form>
         </div>
         {{end}}

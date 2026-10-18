@@ -35,6 +35,8 @@ var funcs = template.FuncMap{
 	"dur":      humanDuration,
 	"triggers": triggerChoice,
 	"icon":     icon,
+	"last4":    lastFour,
+	"join":     strings.Join,
 	"capital": func(s string) string {
 		if s == "" {
 			return s

@@ -52,7 +52,21 @@
   </div>
   <div class="setting">
     <div class="about"><h3>Remove</h3><p>Logs hermitator out of this number. Chats linked through it stop reaching your agents.</p></div>
-    <div class="control"><form method="post" action="/accounts/{{.ID}}/delete"><button class="small danger">{{icon "trash"}}Remove +{{.Phone}}</button></form></div>
+    <div class="control">
+      <form method="post" action="/accounts/{{.ID}}/delete" data-confirm="Remove number" data-confirm-title="Remove +{{.Phone}}?"
+            data-confirm-type="{{last4 .Phone}}" data-confirm-type-label="Type {{last4 .Phone}}, the number's last four digits, to confirm." data-confirm-field="confirm">
+        <template data-confirm-body>
+          <p>hermitator logs out of this number and forgets it. It disappears from the phone's linked devices.</p>
+          <ul>
+            {{with .Chats}}<li><strong>{{len .}} linked chat{{if gt (len .) 1}}s{{end}}</strong> {{if gt (len .) 1}}stop{{else}}stops{{end}} reaching your agents: {{join . ", "}}.</li>{{else}}<li>No chats are linked through it.</li>{{end}}
+            {{with .Fallback}}<li>{{.}} stops answering your direct messages to it.</li>{{end}}
+            <li>Your agents and their files are kept.</li>
+          </ul>
+          <p>To undo this, link the number again with the phone in hand, then send a new <code>/link</code> code in each chat.</p>
+        </template>
+        <button class="small danger">{{icon "trash"}}Remove +{{.Phone}}…</button>
+      </form>
+    </div>
   </div>
 </section>
 {{else}}

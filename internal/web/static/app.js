@@ -126,6 +126,69 @@ document.addEventListener("click", async (e) => {
   } catch {}
 });
 
+// Destructive actions ask first. A form marked data-confirm opens a dialog
+// with its title, its <template data-confirm-body>, and the confirm
+// button's label. With data-confirm-type, the button stays off until that
+// text is typed, and the form sends it as data-confirm-field for the
+// server to check too. data-confirm-when names a selector that must match
+// for the form to ask at all, such as a changed harness.
+document.addEventListener(
+  "submit",
+  (e) => {
+    const form = e.target;
+    if (!(form instanceof HTMLFormElement) || form.dataset.confirm === undefined) return;
+    if (form._confirmed) {
+      form._confirmed = false;
+      return;
+    }
+    if (form.dataset.confirmWhen && !form.querySelector(form.dataset.confirmWhen)) return;
+    const dialog = document.querySelector("[data-confirm-dialog]");
+    if (!dialog) return;
+    // Capturing at the document, this runs before htmx sees the submit.
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    ask(dialog, form, e.submitter);
+  },
+  true,
+);
+
+function ask(dialog, form, submitter) {
+  const $ = (sel) => dialog.querySelector(sel);
+  const want = form.dataset.confirmType;
+  const ok = $("[data-ok]");
+  const input = $("[data-type-input]");
+  $("[data-title]").textContent = form.dataset.confirmTitle || "Are you sure?";
+  const body = form.querySelector("template[data-confirm-body]");
+  $("[data-body]").replaceChildren(body ? body.content.cloneNode(true) : "");
+  ok.textContent = form.dataset.confirm || "Confirm";
+  $("[data-type]").hidden = !want;
+  $("[data-type-label]").textContent = form.dataset.confirmTypeLabel || `Type ${want} to confirm.`;
+  input.value = "";
+  const check = () => (ok.disabled = Boolean(want) && input.value.trim() !== want);
+  input.oninput = check;
+  check();
+  dialog.returnValue = "";
+  dialog.onclose = () => {
+    if (dialog.returnValue !== "ok") return;
+    const name = form.dataset.confirmField;
+    if (name) {
+      let proof = form.querySelector(`input[type="hidden"][name="${name}"]`);
+      if (!proof) form.append((proof = h("input", { type: "hidden", name })));
+      proof.value = input.value.trim();
+    }
+    form._confirmed = true;
+    form.requestSubmit(submitter ?? undefined);
+  };
+  dialog.showModal();
+  // Cancel has the focus, so Enter on its own never destroys anything.
+  (want ? input : $("[data-cancel]")).focus();
+}
+
+// A click on the backdrop cancels.
+document.addEventListener("click", (e) => {
+  if (e.target.matches?.("dialog.modal[open]")) e.target.close();
+});
+
 // The flash message is a toast that leaves on its own, or when dismissed.
 function toast(root) {
   for (const t of root.querySelectorAll?.("[data-toast]") ?? []) {

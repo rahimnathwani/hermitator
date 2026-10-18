@@ -11,6 +11,9 @@ type accountView struct {
 	*store.Account
 	Online   bool
 	Fallback string
+	// Chats are the chats linked through this number, named with their
+	// agent, so removing it can say what stops working.
+	Chats []string
 }
 
 func (s *Server) accountFor(r *http.Request, v *viewer) (*store.Account, error) {
@@ -29,12 +32,21 @@ func (s *Server) accountsPage(w http.ResponseWriter, r *http.Request, v *viewer)
 	accounts, _ := s.Store.Accounts(ctx, v.User.ID)
 	agents, _ := s.Store.Agents(ctx, v.User.ID)
 	names := map[string]string{}
+	chats := map[string][]string{}
 	for _, a := range agents {
 		names[a.ID] = a.Name
+		routes, _ := s.Store.RoutesForAgent(ctx, a.ID)
+		for _, rt := range routes {
+			name := rt.ChatName
+			if name == "" {
+				name = rt.ChatJID
+			}
+			chats[rt.AccountID] = append(chats[rt.AccountID], name+" ("+a.Name+")")
+		}
 	}
 	var views []accountView
 	for _, a := range accounts {
-		views = append(views, accountView{Account: a, Online: s.Gateway.Connected(a.ID), Fallback: names[a.FallbackAgentID]})
+		views = append(views, accountView{Account: a, Online: s.Gateway.Connected(a.ID), Fallback: names[a.FallbackAgentID], Chats: chats[a.ID]})
 	}
 	numbers, _ := s.Store.OwnerNumbers(ctx, v.User.ID)
 	s.render(w, r, v, "accounts.html", "WhatsApp", "accounts", map[string]any{"Accounts": views, "Agents": agents, "Numbers": numbers})
@@ -144,10 +156,24 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, v *viewer
 		http.NotFound(w, r)
 		return
 	}
+	// Linking a number again takes the phone in hand, and every chat
+	// through it needs a new /link, so removal asks for proof.
+	if formValue(r, "confirm") != lastFour(acct.Phone) {
+		s.back(w, r, "/accounts", "Type the last four digits of the number to remove it.")
+		return
+	}
 	if err := s.Gateway.Remove(r.Context(), acct.ID); err != nil {
 		s.back(w, r, "/accounts", "Could not remove the account: "+err.Error())
 		return
 	}
 	s.audit(r, v, "account.remove", "account="+acct.ID+" phone="+acct.Phone)
 	s.back(w, r, "/accounts", "Unlinked +"+acct.Phone+". It no longer appears in your phone's linked devices.")
+}
+
+// lastFour is what to type to confirm removing a number.
+func lastFour(phone string) string {
+	if len(phone) <= 4 {
+		return phone
+	}
+	return phone[len(phone)-4:]
 }

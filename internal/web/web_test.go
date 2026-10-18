@@ -460,3 +460,33 @@ func TestAgentTabs(t *testing.T) {
 		}
 	}
 }
+
+func TestRemovingANumberTakesItsLastFourDigits(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	alice := f.login(t, "alice@example.com")
+	acct := &store.Account{UserID: f.users["alice@example.com"].ID, JID: "1:1@s.whatsapp.net", Phone: "447700900999", Status: store.AccountConnected}
+	f.store.CreateAccount(ctx, acct)
+	removed := func() bool {
+		log, _ := f.store.AuditLog(ctx, 50)
+		for _, e := range log {
+			if e.Action == "account.remove" {
+				return true
+			}
+		}
+		return false
+	}
+	for _, confirm := range []string{"", "9999", "447700900999"} {
+		alice.post("/accounts/"+acct.ID+"/delete", url.Values{"confirm": {confirm}})
+		if removed() {
+			t.Fatalf("removed with confirm=%q", confirm)
+		}
+	}
+	if _, body := alice.get("/accounts"); !strings.Contains(body, `data-confirm-type="0999"`) {
+		t.Fatal("the remove button does not ask for the last four digits")
+	}
+	alice.post("/accounts/"+acct.ID+"/delete", url.Values{"confirm": {"0999"}})
+	if !removed() {
+		t.Fatal("not removed with the right digits")
+	}
+}

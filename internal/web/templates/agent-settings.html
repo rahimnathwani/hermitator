@@ -4,7 +4,12 @@
 <div class="narrow">
 <section class="card">
   <div class="card-head"><div><h2>Settings</h2><p>Model and effort apply from the next message; in the chat, <code>/model</code> and <code>/effort</code> change them too.</p></div></div>
-  <form method="post" action="/agents/{{$a.ID}}/settings" class="settings" data-track>
+  <form method="post" action="/agents/{{$a.ID}}/settings" class="settings" data-track
+        data-confirm="Switch and save" data-confirm-title="Switch {{$a.Name}} to another harness?" data-confirm-when='input[name="harness"]:checked:not([checked])'>
+    <template data-confirm-body>
+      <p>{{$a.Name}} starts a fresh conversation with the new harness. Files in its workspace stay.</p>
+      <p>Switching back later does not bring this conversation back.</p>
+    </template>
     <label class="field"><span class="label">Name</span><input name="name" value="{{$a.Name}}" required maxlength="40"></label>
     {{template "agent-fields" $d.Fields}}
     <label class="field"><span class="label">Sleep after</span><span class="inline"><input type="number" name="idle_minutes" min="1" max="1440" value="{{minutes $a.IdleTimeout}}"> minutes without a message</span>
@@ -27,15 +32,33 @@
 <section class="card">
   <div class="card-head"><div><h2>Image</h2><p>This agent runs <code>{{$a.Image}}</code>. <code>{{.}}</code> is newer, with updated tools.</p></div></div>
   <p class="muted small">Upgrading stops the sandbox; it boots from the new image with the next message. Every file the agent made is kept. Anything running, or saved in a checkpoint, is not.</p>
-  <form method="post" action="/agents/{{$a.ID}}/upgrade-image" class="form-actions"><button>{{icon "upgrade"}}Upgrade to {{.}}</button></form>
+  <form method="post" action="/agents/{{$a.ID}}/upgrade-image" class="form-actions" data-confirm="Upgrade" data-confirm-title="Upgrade {{$a.Name}} to {{.}}?">
+    <template data-confirm-body>
+      <p>The sandbox stops now, and boots from the new image with the next message.</p>
+      <ul>
+        <li>Every file the agent made is kept.</li>
+        <li>Anything running in it ends, and its checkpoint is discarded.</li>
+        <li>There is no going back to <code>{{$a.Image}}</code> from the panel.</li>
+      </ul>
+    </template>
+    <button>{{icon "upgrade"}}Upgrade to {{.}}…</button>
+  </form>
 </section>
 {{end}}
 
 <section class="card danger-zone">
   <div class="card-head"><div><h2>Delete agent</h2><p>Deletes the sandbox and every file in it. This cannot be undone.</p></div></div>
-  <form method="post" action="/agents/{{$a.ID}}/delete" class="inline-form">
-    <input name="confirm" autocomplete="off" required placeholder="Type {{$a.Name}} to confirm" aria-label="Type the agent's name to confirm">
-    <button class="danger solid">{{icon "trash"}}Delete {{$a.Name}}</button>
+  <form method="post" action="/agents/{{$a.ID}}/delete" data-confirm="Delete agent" data-confirm-title="Delete {{$a.Name}}?"
+        data-confirm-type="{{$a.Name}}" data-confirm-type-label="Type {{$a.Name}} to confirm." data-confirm-field="confirm">
+    <template data-confirm-body>
+      <ul>
+        <li>Its sandbox and <strong>every file in it</strong> are deleted.</li>
+        {{with $a.Routes}}<li>{{len .}} linked chat{{if gt (len .) 1}}s are{{else}} is{{end}} unlinked.</li>{{end}}
+        <li>Its history of turns is deleted.</li>
+      </ul>
+      <p><strong>This cannot be undone.</strong></p>
+    </template>
+    <button class="danger solid">{{icon "trash"}}Delete {{$a.Name}}…</button>
   </form>
 </section>
 </div>

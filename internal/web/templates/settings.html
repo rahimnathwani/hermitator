@@ -16,12 +16,22 @@
       <p>Uses your Claude subscription. On your own computer, run <code class="copy">claude setup-token</code> and paste the token it prints.</p>
     </div>
     <div class="control">
+      <div class="form-row">
       <form method="post" action="/settings/secret" class="inline-form">
         <input type="hidden" name="field" value="claude">
         <input type="password" name="value" placeholder="sk-ant-oat01-…" autocomplete="off" aria-label="Claude token"{{if $d.Claude.IsZero}} required{{end}}>
         <button>{{if $d.Claude.IsZero}}Save{{else}}Replace{{end}}</button>
-        {{if not $d.Claude.IsZero}}<button name="remove" value="1" class="danger icon-only" title="Remove the token" aria-label="Remove the token">{{icon "trash"}}</button>{{end}}
       </form>
+      {{if not $d.Claude.IsZero}}
+      <form method="post" action="/settings/secret" data-confirm="Remove token" data-confirm-title="Remove your Claude token?">
+        <input type="hidden" name="field" value="claude"><input type="hidden" name="remove" value="1">
+        <template data-confirm-body>
+          <p>{{with (index $d.Uses "claude")}}{{join . ", "}} cannot answer{{else}}No agent uses it right now, but Claude Code agents cannot run{{end}} until you save a new token. Making one means running <code>claude setup-token</code> again.</p>
+        </template>
+        <button class="danger icon-only" title="Remove token" aria-label="Remove token">{{icon "trash"}}</button>
+      </form>
+      {{end}}
+      </div>
     </div>
   </div>
 
@@ -32,7 +42,12 @@
     </div>
     <div class="control">
       {{if $d.Codex}}
-      <form method="post" action="/settings/codex/disconnect"><button class="small danger">Disconnect</button></form>
+      <form method="post" action="/settings/codex/disconnect" data-confirm="Disconnect" data-confirm-title="Disconnect ChatGPT?">
+        <template data-confirm-body>
+          <p>{{with (index $d.Uses "openai-codex")}}{{join . ", "}} cannot answer{{else}}No agent uses it right now, but pi agents cannot use ChatGPT{{end}} until you connect again, which takes a new login in your browser.</p>
+        </template>
+        <button class="small danger">Disconnect…</button>
+      </form>
       {{else if $d.HasAgents}}
       <div data-mount="codex" data-src="/settings/codex/login">
         <button data-start>{{icon "external"}}Connect ChatGPT</button>
@@ -55,12 +70,22 @@
       <p>An API key from platform.deepseek.com, for pi agents.</p>
     </div>
     <div class="control">
+      <div class="form-row">
       <form method="post" action="/settings/secret" class="inline-form">
         <input type="hidden" name="field" value="deepseek">
         <input type="password" name="value" placeholder="sk-…" autocomplete="off" aria-label="DeepSeek API key">
         <button>{{if $d.DeepSeek.IsZero}}Save{{else}}Replace{{end}}</button>
-        {{if not $d.DeepSeek.IsZero}}<button name="remove" value="1" class="danger icon-only" title="Remove the key" aria-label="Remove the key">{{icon "trash"}}</button>{{end}}
       </form>
+      {{if not $d.DeepSeek.IsZero}}
+      <form method="post" action="/settings/secret" data-confirm="Remove key" data-confirm-title="Remove your DeepSeek key?">
+        <input type="hidden" name="field" value="deepseek"><input type="hidden" name="remove" value="1">
+        <template data-confirm-body>
+          <p>{{with (index $d.Uses "deepseek")}}{{join . ", "}} cannot answer{{else}}No agent uses it right now, but pi agents on DeepSeek cannot run{{end}} until you save a key again.</p>
+        </template>
+        <button class="danger icon-only" title="Remove key" aria-label="Remove key">{{icon "trash"}}</button>
+      </form>
+      {{end}}
+      </div>
     </div>
   </div>
 
@@ -70,12 +95,22 @@
       <p>An API key from openrouter.ai, for pi agents. One key reaches many vendors' models.</p>
     </div>
     <div class="control">
+      <div class="form-row">
       <form method="post" action="/settings/secret" class="inline-form">
         <input type="hidden" name="field" value="openrouter">
         <input type="password" name="value" placeholder="sk-or-…" autocomplete="off" aria-label="OpenRouter API key">
         <button>{{if $d.OpenRouter.IsZero}}Save{{else}}Replace{{end}}</button>
-        {{if not $d.OpenRouter.IsZero}}<button name="remove" value="1" class="danger icon-only" title="Remove the key" aria-label="Remove the key">{{icon "trash"}}</button>{{end}}
       </form>
+      {{if not $d.OpenRouter.IsZero}}
+      <form method="post" action="/settings/secret" data-confirm="Remove key" data-confirm-title="Remove your OpenRouter key?">
+        <input type="hidden" name="field" value="openrouter"><input type="hidden" name="remove" value="1">
+        <template data-confirm-body>
+          <p>{{with (index $d.Uses "openrouter")}}{{join . ", "}} cannot answer{{else}}No agent uses it right now, but pi agents on OpenRouter cannot run{{end}} until you save a key again.</p>
+        </template>
+        <button class="danger icon-only" title="Remove key" aria-label="Remove key">{{icon "trash"}}</button>
+      </form>
+      {{end}}
+      </div>
     </div>
   </div>
 </section>
@@ -86,7 +121,14 @@
   <ul class="numbers">
     {{range .}}
     <li><span class="mono">+{{.}}</span>
-      <form method="post" action="/settings/numbers/delete"><input type="hidden" name="phone" value="{{.}}"><button class="small">Remove</button></form>
+      <form method="post" action="/settings/numbers/delete" data-confirm="Remove number" data-confirm-title="Remove +{{.}}?">
+        <input type="hidden" name="phone" value="{{.}}">
+        <template data-confirm-body>
+          <p>Messages from this number stop counting as you. It can no longer run commands like <code>/status</code> or reach your fallback agents, and in linked chats it is treated like anyone else.</p>
+          <p>Sending a <code>/link</code> code from it adds it back.</p>
+        </template>
+        <button class="small">Remove…</button>
+      </form>
     </li>
     {{end}}
   </ul>

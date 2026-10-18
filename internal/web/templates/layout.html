@@ -43,6 +43,20 @@
     </div>
   </main>
 </div>
+<dialog class="modal" data-confirm-dialog aria-labelledby="confirm-title">
+  <form method="dialog" class="modal-box">
+    <div class="modal-icon">{{icon "alert"}}</div>
+    <div class="modal-content">
+      <h2 id="confirm-title" data-title></h2>
+      <div class="modal-body" data-body></div>
+      <label class="field" data-type hidden><span class="label" data-type-label></span><input data-type-input autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+    </div>
+    <div class="modal-actions">
+      <button value="ok" class="danger solid" data-ok></button>
+      <button value="cancel" data-cancel formnovalidate>Cancel</button>
+    </div>
+  </form>
+</dialog>
 {{- else}}
 {{template "content" .}}
 {{- end}}
