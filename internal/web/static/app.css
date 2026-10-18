@@ -138,6 +138,7 @@ legend { font-weight: 500; margin-bottom: .2rem; }
 .seg input:focus-visible + span { outline: 2px solid var(--text); outline-offset: -3px; }
 
 .field { margin: .9rem 0; }
+.card form > .field:first-child { margin-top: 0; }
 .field > legend, .field > .label, .field-form > .label { display: block; font-weight: 550; font-size: .9rem; padding: 0; }
 .hint { color: var(--muted); font-size: .8rem; margin: .3rem 0 0; }
 .model-set .other { display: none; max-width: 22rem; }
@@ -167,7 +168,7 @@ button, .button {
 }
 button:hover, .button:hover { border-color: var(--muted); text-decoration: none; }
 button:disabled { opacity: .55; cursor: default; }
-button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button.primary, .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 button.danger { color: var(--danger); }
 button.small { font-size: .8rem; padding: .25rem .6rem; }
 button.link { background: none; border: 0; color: var(--muted); padding: 0; font-weight: 400; }
@@ -242,6 +243,8 @@ details.menu[open] > form { margin-top: .4rem; }
 .guide .steps li.done { color: var(--muted); text-decoration: line-through; }
 .guide .steps li.done a { color: inherit; }
 .empty-state { text-align: center; color: var(--muted); padding: 2rem; }
+.empty-state p { max-width: 32rem; margin: 0 auto 1rem; }
+.narrow-card { max-width: 38rem; }
 
 /* Pairing */
 .qr { display: grid; place-items: center; min-height: 340px; background: #fff; border-radius: 8px; margin-top: .75rem; }

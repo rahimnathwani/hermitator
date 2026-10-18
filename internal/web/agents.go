@@ -82,8 +82,6 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, v *viewer) {
 	s.render(w, r, v, "dashboard.html", "Agents", "agents", map[string]any{
 		"Agents":      views,
 		"Accounts":    accounts,
-		"Images":      s.Images.Families(),
-		"Fields":      newAgentFields(&store.Agent{Harness: store.HarnessClaude}),
 		"CanCreate":   len(agents) < v.User.MaxAgents,
 		"MaxAgents":   v.User.MaxAgents,
 		"HasAccount":  len(accounts) > 0,
@@ -96,15 +94,25 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, v *viewer) {
 	})
 }
 
+func (s *Server) newAgentPage(w http.ResponseWriter, r *http.Request, v *viewer) {
+	agents, _ := s.Store.Agents(r.Context(), v.User.ID)
+	s.render(w, r, v, "new-agent.html", "New agent", "agents", map[string]any{
+		"Images":    s.Images.Families(),
+		"Fields":    newAgentFields(&store.Agent{Harness: store.HarnessClaude}),
+		"CanCreate": len(agents) < v.User.MaxAgents,
+		"MaxAgents": v.User.MaxAgents,
+	})
+}
+
 func (s *Server) createAgent(w http.ResponseWriter, r *http.Request, v *viewer) {
 	name := formValue(r, "name")
 	if !agentName.MatchString(name) {
-		s.back(w, r, "/", "Agent names are up to 40 letters, digits, spaces, dots, dashes or underscores.")
+		s.back(w, r, "/agents/new", "Agent names are up to 40 letters, digits, spaces, dots, dashes or underscores.")
 		return
 	}
 	harness := formValue(r, "harness")
 	if harness != store.HarnessClaude && harness != store.HarnessPi {
-		s.back(w, r, "/", "Pick a harness.")
+		s.back(w, r, "/agents/new", "Pick a harness.")
 		return
 	}
 	a := &store.Agent{Name: name, Harness: harness}
@@ -119,13 +127,13 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request, v *viewer) 
 	err := s.Agents.CreateAgent(r.Context(), v.User, a, image)
 	switch {
 	case errors.Is(err, orchestrator.ErrQuota):
-		s.back(w, r, "/", "You already have as many agents as your account allows.")
+		s.back(w, r, "/agents/new", "You already have as many agents as your account allows.")
 		return
 	case errors.Is(err, store.ErrConflict):
-		s.back(w, r, "/", "You already have an agent with that name.")
+		s.back(w, r, "/agents/new", "You already have an agent with that name.")
 		return
 	case err != nil:
-		s.back(w, r, "/", "Could not create the agent: "+err.Error())
+		s.back(w, r, "/agents/new", "Could not create the agent: "+err.Error())
 		return
 	}
 	s.audit(r, v, "agent.create", "agent="+a.ID+" name="+a.Name)

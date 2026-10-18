@@ -426,7 +426,11 @@ func TestModelAndEffortSettings(t *testing.T) {
 func TestNewAgentTakesModelAndEffort(t *testing.T) {
 	f := setup(t)
 	alice := f.login(t, "alice@example.com")
-	_, body := alice.get("/")
+	// The agents page links to the form instead of carrying it.
+	if _, body := alice.get("/"); strings.Contains(body, `action="/agents"`) || !strings.Contains(body, `href="/agents/new"`) {
+		t.Fatal("agents page should link to /agents/new, not hold the form")
+	}
+	_, body := alice.get("/agents/new")
 	if strings.Contains(body, "<select") || !strings.Contains(body, `name="model:pi-openai-codex"`) {
 		t.Fatal("new-agent form is not segmented")
 	}

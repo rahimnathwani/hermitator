@@ -2,6 +2,7 @@
 {{$d := .Data}}
 <div class="page-head">
   <h1>Agents</h1>
+  {{if $d.CanCreate}}<a class="button primary" href="/agents/new">New agent</a>{{else}}<span class="muted small">{{$d.MaxAgents}} of {{$d.MaxAgents}} agents</span>{{end}}
 </div>
 
 {{if $d.ShowGuide}}
@@ -10,7 +11,7 @@
   <ol class="steps">
     <li class="{{if $d.HasAccount}}done{{end}}"><a href="/accounts">Link a WhatsApp number</a> for your agents, the way WhatsApp Web is linked.</li>
     <li class="{{if $d.HasModel}}done{{end}}"><a href="/settings">Add model credentials</a>: a Claude token for Claude Code, or a ChatGPT login or API key for pi.</li>
-    <li class="{{if $d.HasAgent}}done{{end}}">Create an agent below. Each agent is its own sandboxed Linux machine.</li>
+    <li class="{{if $d.HasAgent}}done{{end}}"><a href="/agents/new">Create an agent</a>. Each agent is its own sandboxed Linux machine.</li>
     <li class="{{if $d.HasLink}}done{{end}}">Open the agent and send its <code>/link</code> code to the agent's number from your own WhatsApp.</li>
   </ol>
 </section>
@@ -20,28 +21,11 @@
 <section class="grid">
   {{range .}}{{template "agent-card" .}}{{end}}
 </section>
+{{else}}
+<section class="card empty-state">
+  <p>No agents yet. Each one is its own Linux machine with a coding agent in it, asleep until you message it.</p>
+  <a class="button primary" href="/agents/new">New agent</a>
+</section>
 {{end}}
 
-<section class="card">
-  <h2>New agent</h2>
-  {{if $d.CanCreate}}
-  <form method="post" action="/agents" class="new-agent">
-    <label class="field"><span class="label">Name</span> <input name="name" required maxlength="40" placeholder="frontend" pattern="[\p{L}\p{N}][\p{L}\p{N} ._\-]{0,39}"></label>
-    {{template "agent-fields" $d.Fields}}
-    {{if gt (len $d.Images) 1}}
-    <fieldset class="field">
-      <legend>Image</legend>
-      <div class="seg">
-        {{- range $i, $img := $d.Images}}
-        <label><input type="radio" name="image" value="{{$img}}"{{if eq $i 0}} checked{{end}}><span>{{$img}}</span></label>
-        {{- end}}
-      </div>
-    </fieldset>
-    {{end}}
-    <button class="primary">Create agent</button>
-  </form>
-  {{else}}
-  <p class="muted">You have reached your limit of {{$d.MaxAgents}} agents.</p>
-  {{end}}
-</section>
 {{end}}

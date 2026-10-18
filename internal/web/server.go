@@ -97,6 +97,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	// Pages for users who own agents. Admins reach them by impersonating.
 	tenant := func(pattern string, h handler) { mux.Handle(pattern, s.authed(s.tenantOnly(h))) }
 	tenant("GET /{$}", s.dashboard)
+	tenant("GET /agents/new", s.newAgentPage)
 	tenant("POST /agents", s.createAgent)
 	tenant("GET /agents/{id}", s.agentPage)
 	tenant("GET /agents/{id}/card", s.agentCard)

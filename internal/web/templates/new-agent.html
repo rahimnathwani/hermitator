@@ -1,0 +1,33 @@
+{{define "content"}}
+{{$d := .Data}}
+<div class="page-head">
+  <h1>New agent</h1>
+</div>
+<p class="muted">Each agent is its own sandboxed Linux machine with a coding agent in it, asleep until you message it. You can change all of this later on the agent's page.</p>
+
+<section class="card narrow-card">
+  {{if $d.CanCreate}}
+  <form method="post" action="/agents" class="new-agent">
+    <label class="field"><span class="label">Name</span> <input name="name" required maxlength="40" placeholder="frontend" pattern="[\p{L}\p{N}][\p{L}\p{N} ._\-]{0,39}" autofocus></label>
+    {{template "agent-fields" $d.Fields}}
+    {{if gt (len $d.Images) 1}}
+    <fieldset class="field">
+      <legend>Image</legend>
+      <div class="seg">
+        {{- range $i, $img := $d.Images}}
+        <label><input type="radio" name="image" value="{{$img}}"{{if eq $i 0}} checked{{end}}><span>{{$img}}</span></label>
+        {{- end}}
+      </div>
+    </fieldset>
+    {{end}}
+    <div class="form-actions">
+      <button class="primary">Create agent</button>
+      <a href="/">Cancel</a>
+    </div>
+  </form>
+  {{else}}
+  <p>You have reached your limit of {{$d.MaxAgents}} agents. Delete one, or ask an admin for a higher limit.</p>
+  <p><a href="/">Back to your agents</a></p>
+  {{end}}
+</section>
+{{end}}
