@@ -28,6 +28,25 @@
   </form>
 </section>
 
+{{with $d.OwnCopies}}
+<section class="card">
+  <div class="card-head"><div><h2>Its own Claude Code or pi</h2><p>{{$a.Name}} installed its own copy, which hides the image's version. Image upgrades will not reach it.</p></div></div>
+  <ul class="numbers">
+    {{range .}}<li><span><strong>{{.Name}}</strong> <span class="muted">{{if .Own}}its copy {{.Own}}{{else}}removed by the agent{{end}} · the image has {{if .Image}}{{.Image}}{{else}}none{{end}}</span></span></li>{{end}}
+  </ul>
+  <form method="post" action="/agents/{{$a.ID}}/use-image-harnesses" class="form-actions" data-confirm="Use the image's version" data-confirm-title="Remove {{$a.Name}}'s own copy?">
+    <template data-confirm-body>
+      <p>The sandbox stops now, and the next message runs the image's version.</p>
+      <ul>
+        <li>Only the agent's own Claude Code or pi is removed. Its plugins, extensions, settings and every other file stay.</li>
+        <li>Anything running in it ends, and its checkpoint is discarded.</li>
+      </ul>
+    </template>
+    <button>{{icon "restart"}}Use the image's version…</button>
+  </form>
+</section>
+{{end}}
+
 {{with $d.NewerImage}}
 <section class="card">
   <div class="card-head"><div><h2>Image</h2><p>This agent runs <code>{{$a.Image}}</code>. <code>{{.}}</code> is newer, with updated tools.</p></div></div>

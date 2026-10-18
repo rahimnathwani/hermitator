@@ -44,6 +44,22 @@
 </section>
 {{end}}
 
+{{with $d.Outdated}}
+<div class="callout">{{icon "upgrade"}}<span class="grow">A newer image, <code>{{$d.NewestImage}}</code>, has updated tools for {{join . ", "}}.</span>
+  <form method="post" action="/agents/upgrade-all" data-confirm="Upgrade all" data-confirm-title="Upgrade {{len .}} agent{{if gt (len .) 1}}s{{end}} to {{$d.NewestImage}}?">
+    <template data-confirm-body>
+      <p>{{join . ", "}} stop{{if eq (len .) 1}}s{{end}} now, and boot from the new image with the next message.</p>
+      <ul>
+        <li>Every file they made is kept.</li>
+        <li>Anything running in them ends, and their checkpoints are discarded.</li>
+        <li>Agents in the middle of a turn are skipped; upgrade them later from their Settings tab.</li>
+      </ul>
+    </template>
+    <button class="small">Upgrade all…</button>
+  </form>
+</div>
+{{end}}
+
 {{with $d.Agents}}
 <section class="card flush{{if $d.ShowGuide}} section{{end}}">
   <div class="list-head"><span>Agent</span><span>Status</span><span>Chats</span><span>Last active</span><span></span></div>

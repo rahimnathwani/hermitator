@@ -136,11 +136,24 @@ new master key, configures Caddy, builds the agent image (about 2.5 GB; the
 first build takes a few minutes) and starts the service. Run it again to
 upgrade. Running sandboxes keep running across upgrades.
 
-To refresh the tools inside agents (Claude Code, pi, browsers), rebuild the
-image with `deploy/build-image.sh` on the server. New agents get the newest
-image; existing ones offer an upgrade on their Settings tab, which keeps all
-their files. To also build
-whisper.cpp for voice notes, prefix the command with `WITH_WHISPER=1`.
+The image pins exact versions of Claude Code, pi and Playwright, and
+their auto-updaters are off, so a new release changes nothing until you
+choose it. To move to the newest, run `make image-bump` (it rewrites the
+pins in `image/Containerfile`; review and commit the diff), then
+`make image`, which deploys and builds the image on the server. New agents
+get it; existing ones offer an upgrade, one at a time on their Settings tab
+or all at once from the agents page, and keep all their files. To also
+build whisper.cpp for voice notes, prefix the build with `WITH_WHISPER=1`.
+
+Agents are told not to update Claude Code or pi themselves: a copy they
+install lands in their own layer and hides every later image version. If
+one does anyway, its Settings tab says so and can remove the copy.
+
+Claude Code plugins, pi extensions, skills and MCP servers need no image
+change. They live in each agent's home directory and survive sleep and
+image upgrades: install them from the agent's Terminal tab
+(`claude plugin install …`, `pi install …`), or ask the agent to. They
+take effect from the next message.
 
 Or, without Go, on the server itself: download a release from
 [GitHub](https://github.com/rahimnathwani/hermitator/releases), unpack it and
@@ -308,6 +321,8 @@ running agents you do not trust.
   long-running things instead.
 - No per-agent disk quotas or egress allowlists yet.
 - One host. There is no clustering, and no plan for it.
+
+Ideas not yet built are in [docs/ideas.md](docs/ideas.md).
 
 ## License
 

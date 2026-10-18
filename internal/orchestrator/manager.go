@@ -423,6 +423,42 @@ func (m *Manager) UpgradeImage(ctx context.Context, agentID string) (string, err
 	return latest, err
 }
 
+// OwnCopies lists the harnesses an agent installed over the image's.
+func (m *Manager) OwnCopies(ag *store.Agent) []sandbox.OwnCopy {
+	spec, err := m.Spec(ag)
+	if err != nil {
+		return nil
+	}
+	return spec.OwnCopies()
+}
+
+// UseImageHarnesses removes an agent's own Claude Code and pi, so it runs
+// the image's again. The sandbox stops first, because its upper layer
+// cannot change while mounted; files elsewhere are untouched.
+func (m *Manager) UseImageHarnesses(ctx context.Context, agentID string) error {
+	return m.actor(agentID).call(func(a *actor) error {
+		if a.turn != nil || a.holds > 0 {
+			return ErrBusy
+		}
+		ag, err := m.store.Agent(ctx, agentID)
+		if err != nil {
+			return err
+		}
+		spec, err := m.Spec(ag)
+		if err != nil {
+			return err
+		}
+		if a.state == sandbox.Running {
+			m.scrubCredentials(ctx, spec)
+		}
+		if err := m.rt.Stop(ctx, spec); err != nil {
+			return err
+		}
+		a.setState(sandbox.Stopped)
+		return spec.DropOwnCopies()
+	})
+}
+
 // UpdateAgent saves an agent's settings. Changing the harness starts a
 // fresh conversation, because the two harnesses keep incompatible
 // transcripts. A new memory limit applies from the next cold boot.

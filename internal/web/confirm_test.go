@@ -11,7 +11,7 @@ import (
 // first, saying what it will do. This keeps a new one from slipping in
 // without the dialog.
 func TestDestructiveFormsAskFirst(t *testing.T) {
-	destructive := regexp.MustCompile(`/(delete|disconnect|new-session|upgrade-image|suspend|password)"`)
+	destructive := regexp.MustCompile(`/(delete|disconnect|new-session|upgrade-image|upgrade-all|use-image-harnesses|suspend|password)"`)
 	forms := regexp.MustCompile(`(?s)<form\b[^>]*>.*?</form>`)
 	fs.WalkDir(assets, "templates", func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {

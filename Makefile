@@ -5,7 +5,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 DEV_DIR ?= var/dev
 
-.PHONY: build test lint dev deploy clean
+.PHONY: build test lint dev deploy image-bump image clean
 
 build: ## build both binaries for this machine into bin/
 	go build -trimpath -ldflags "$(LDFLAGS)" -o bin/ ./cmd/...
@@ -28,6 +28,12 @@ dev: build ## run the panel locally with the unsandboxed runtime (no gVisor)
 deploy: ## build for Linux and install on $(DEPLOY_HOST), served at $(DEPLOY_DOMAIN)
 	@test -n "$(DEPLOY_HOST)" || { echo "set DEPLOY_HOST (and DEPLOY_DOMAIN) in .env"; exit 1; }
 	WITH_WHISPER=$(WITH_WHISPER) deploy/deploy.sh $(DEPLOY_HOST) $(DEPLOY_DOMAIN)
+
+image-bump: ## pin image/Containerfile to the newest Claude Code, pi and Playwright
+	deploy/bump-image.sh
+
+image: deploy ## build the agent image on $(DEPLOY_HOST); agents then offer an upgrade
+	ssh $(DEPLOY_HOST) 'cd /usr/local/share/hermitator && HERMITATOR_DATA_DIR=/var/lib/hermitator sh deploy/build-image.sh universal image'
 
 clean:
 	rm -rf bin dist

@@ -80,6 +80,13 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, v *viewer) {
 	_, hasPi := secrets[store.SecretPiAuth]
 	_, hasDeepSeek := secrets[store.SecretDeepSeekKey]
 	_, hasOpenRouter := secrets[store.SecretOpenRouterKey]
+	var outdated []string
+	newest := ""
+	for _, a := range agents {
+		if img := s.Agents.NewerImage(a); img != "" {
+			outdated, newest = append(outdated, a.Name), img
+		}
+	}
 	done := 0
 	for _, ok := range []bool{len(accounts) > 0, hasClaude || hasPi || hasDeepSeek || hasOpenRouter, len(agents) > 0, linked} {
 		if ok {
@@ -88,6 +95,8 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, v *viewer) {
 	}
 	s.render(w, r, v, "dashboard.html", "Agents", "agents", map[string]any{
 		"Done":        done,
+		"Outdated":    outdated,
+		"NewestImage": newest,
 		"Agents":      views,
 		"Accounts":    accounts,
 		"CanCreate":   len(agents) < v.User.MaxAgents,
@@ -188,6 +197,7 @@ func (s *Server) agentData(r *http.Request, a *store.Agent, tab string) map[stri
 		"LinkExpires": expires,
 		"Accounts":    accounts,
 		"NewerImage":  s.Agents.NewerImage(a),
+		"OwnCopies":   s.Agents.OwnCopies(a),
 	}
 	switch tab {
 	case "overview":
@@ -262,6 +272,54 @@ func (s *Server) upgradeImage(w http.ResponseWriter, r *http.Request, v *viewer)
 	default:
 		s.audit(r, v, "agent.image", "agent="+a.ID+" image="+latest)
 		s.back(w, r, "/agents/"+a.ID, "Now on "+latest+". It boots from the new image with the next message.")
+	}
+}
+
+// upgradeAll moves every agent with a newer image onto it, skipping the
+// busy ones rather than waiting for them.
+func (s *Server) upgradeAll(w http.ResponseWriter, r *http.Request, v *viewer) {
+	agents, _ := s.Store.Agents(r.Context(), v.User.ID)
+	var done, busy, failed []string
+	for _, a := range agents {
+		latest, err := s.Agents.UpgradeImage(r.Context(), a.ID)
+		switch {
+		case errors.Is(err, orchestrator.ErrUpToDate):
+		case errors.Is(err, orchestrator.ErrBusy):
+			busy = append(busy, a.Name)
+		case err != nil:
+			failed = append(failed, a.Name)
+		default:
+			done = append(done, a.Name)
+			s.audit(r, v, "agent.image", "agent="+a.ID+" image="+latest)
+		}
+	}
+	msg := "Nothing to upgrade."
+	if len(done) > 0 {
+		msg = "Upgraded " + strings.Join(done, ", ") + "; each boots from the new image with its next message."
+	}
+	if len(busy) > 0 {
+		msg += " Busy, so not upgraded: " + strings.Join(busy, ", ") + "."
+	}
+	if len(failed) > 0 {
+		msg += " Could not upgrade: " + strings.Join(failed, ", ") + "."
+	}
+	s.back(w, r, "/", msg)
+}
+
+func (s *Server) useImageHarnesses(w http.ResponseWriter, r *http.Request, v *viewer) {
+	a, err := s.agentFor(r, v)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	switch err := s.Agents.UseImageHarnesses(r.Context(), a.ID); {
+	case errors.Is(err, orchestrator.ErrBusy):
+		s.back(w, r, "/agents/"+a.ID+"/settings", "The agent is busy (a turn, a terminal or a login is using it).")
+	case err != nil:
+		s.back(w, r, "/agents/"+a.ID+"/settings", "Could not remove its own copy: "+err.Error())
+	default:
+		s.audit(r, v, "agent.harness_reset", "agent="+a.ID)
+		s.back(w, r, "/agents/"+a.ID+"/settings", "Removed. It runs the image's version from its next message.")
 	}
 }
 

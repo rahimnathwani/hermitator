@@ -38,9 +38,10 @@ func (noGateway) ApplyKind(context.Context, string) error { return nil }
 const password = "a long enough password"
 
 type fixture struct {
-	srv   *httptest.Server
-	store *store.Store
-	users map[string]*store.User
+	srv    *httptest.Server
+	store  *store.Store
+	users  map[string]*store.User
+	images string
 }
 
 func setup(t *testing.T) *fixture {
@@ -71,7 +72,7 @@ func setup(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{srv: httptest.NewServer(h), store: st, users: map[string]*store.User{}}
+	f := &fixture{srv: httptest.NewServer(h), store: st, users: map[string]*store.User{}, images: images}
 	t.Cleanup(f.srv.Close)
 	hash, _ := auth.HashPassword(password)
 	for _, u := range []struct{ email, role string }{{"admin@example.com", store.RoleAdmin}, {"alice@example.com", store.RoleUser}, {"bob@example.com", store.RoleUser}} {
@@ -488,5 +489,29 @@ func TestRemovingANumberTakesItsLastFourDigits(t *testing.T) {
 	alice.post("/accounts/"+acct.ID+"/delete", url.Values{"confirm": {"0999"}})
 	if !removed() {
 		t.Fatal("not removed with the right digits")
+	}
+}
+
+func TestUpgradeAll(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	alice := f.login(t, "alice@example.com")
+	ids := []string{alice.createAgent("one"), alice.createAgent("two")}
+	if _, body := alice.get("/"); strings.Contains(body, "/agents/upgrade-all") {
+		t.Fatal("offers an upgrade with nothing newer")
+	}
+	os.MkdirAll(filepath.Join(f.images, "universal-test.1", "rootfs"), 0o755)
+	os.Remove(filepath.Join(f.images, "universal"))
+	os.Symlink("universal-test.1", filepath.Join(f.images, "universal"))
+	if _, body := alice.get("/"); !strings.Contains(body, `action="/agents/upgrade-all" data-confirm=`) {
+		t.Fatal("no confirmed Upgrade all for outdated agents")
+	}
+	if code, _ := alice.post("/agents/upgrade-all", nil); code != http.StatusSeeOther {
+		t.Fatalf("upgrade all: %d", code)
+	}
+	for _, id := range ids {
+		if a, _ := f.store.Agent(ctx, id); a.Image != "universal-test.1" {
+			t.Fatalf("%s still on %s", a.Name, a.Image)
+		}
 	}
 }

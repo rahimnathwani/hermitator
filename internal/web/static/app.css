@@ -601,3 +601,4 @@ dialog.modal[open] { animation: modal-in .16s ease-out; }
 .form-row { display: flex; gap: 8px; align-items: center; }
 .form-row > form { margin: 0; }
 .form-row > form.inline-form { flex: 1; }
+.grow { flex: 1; min-width: 0; }

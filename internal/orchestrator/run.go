@@ -34,7 +34,8 @@ const systemPrompt = `You are running inside hermitator: an isolated Linux machi
 - To send the user a file (a screenshot, chart, PDF, archive...), run: whatsapp-send <path> [caption]
 - /workspace is your working directory. The whole filesystem persists between conversations, including anything you install with apt, npm, pip or uv. Run as root; there is no sudo prompt.
 - When nobody is talking to you the machine is suspended. Background processes you leave running (dev servers, databases) are frozen and continue when the next message arrives. Start them with their output redirected to a file, for example: nohup npm run dev > /tmp/dev.log 2>&1 &. The shell you start them from goes away at the end of your turn.
-- For screenshots and browser automation there is Playwright for Python (from playwright.sync_api import sync_playwright) and for Node (require("playwright")), plus a chromium command for one-off captures. After taking a screenshot, look at it before sending it, so you know the page really loaded.`
+- For screenshots and browser automation there is Playwright for Python (from playwright.sync_api import sync_playwright) and for Node (require("playwright")), plus a chromium command for one-off captures. After taking a screenshot, look at it before sending it, so you know the page really loaded.
+- Claude Code and pi come with this machine and are updated for you. Do not update or reinstall them yourself (npm install -g, claude update, pi update self): a copy you install hides every later update. Plugins, extensions, skills and MCP servers are yours to install.`
 
 func (m *Manager) agentPrompt(spec *sandbox.Spec, last Message) string {
 	who := "The user talks to you over WhatsApp."

@@ -89,3 +89,43 @@ func TestOverlayCanChangeImage(t *testing.T) {
 		t.Fatalf("overlay options %q would pin the upper layer to its first image", opts)
 	}
 }
+
+func TestOwnHarnessCopies(t *testing.T) {
+	dir := t.TempDir()
+	image := filepath.Join(dir, "image")
+	s := &Spec{Dir: filepath.Join(dir, "agent"), Image: Image{Rootfs: image}}
+	write := func(root, name, content string) {
+		p := filepath.Join(root, name)
+		os.MkdirAll(filepath.Dir(p), 0o755)
+		os.WriteFile(p, []byte(content), 0o644)
+	}
+	write(image, "usr/lib/node_modules/@anthropic-ai/claude-code/package.json", `{"version":"2.1.302"}`)
+	if got := s.OwnCopies(); len(got) != 0 {
+		t.Fatalf("own copies before installing any: %+v", got)
+	}
+	write(s.upper(), "usr/lib/node_modules/@anthropic-ai/claude-code/package.json", `{"version":"2.1.290"}`)
+	write(s.upper(), "usr/lib/node_modules/@anthropic-ai/other/package.json", `{}`)
+	got := s.OwnCopies()
+	if len(got) != 1 || got[0].Name != "Claude Code" || got[0].Own != "2.1.290" || got[0].Image != "2.1.302" {
+		t.Fatalf("own copies = %+v", got)
+	}
+
+	// A symlink the agent planted must not lead the host anywhere.
+	outside := filepath.Join(dir, "host-file")
+	os.WriteFile(outside, []byte("keep"), 0o644)
+	os.MkdirAll(filepath.Join(s.upper(), "usr/bin"), 0o755)
+	os.Symlink(outside, filepath.Join(s.upper(), "usr/bin/pi"))
+
+	if err := s.DropOwnCopies(); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.OwnCopies(); len(got) != 0 {
+		t.Fatalf("own copies after dropping them: %+v", got)
+	}
+	if _, err := os.Stat(filepath.Join(s.upper(), "usr/lib/node_modules/@anthropic-ai/other")); err != nil {
+		t.Fatal("dropped a package that is not a harness")
+	}
+	if b, _ := os.ReadFile(outside); string(b) != "keep" {
+		t.Fatal("followed a planted symlink out of the upper layer")
+	}
+}
