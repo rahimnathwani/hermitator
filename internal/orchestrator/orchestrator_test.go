@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -129,6 +130,9 @@ type recorder struct {
 	mu  sync.Mutex
 	log []sent
 	ch  chan sent
+	// failTexts makes that many SendText calls fail, as when WhatsApp is
+	// not connected.
+	failTexts atomic.Int32
 }
 
 func (r *recorder) add(s sent) {
@@ -138,6 +142,10 @@ func (r *recorder) add(s sent) {
 	r.ch <- s
 }
 func (r *recorder) SendText(_ context.Context, _, chat, text string) error {
+	if r.failTexts.Add(-1) >= 0 {
+		return errors.New("not connected")
+	}
+	r.failTexts.Store(0)
 	r.add(sent{"text", chat, text})
 	return nil
 }
@@ -212,13 +220,14 @@ func setup(t *testing.T) *env {
 	rt := &sandbox.Local{}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 	m := New(Config{
-		AgentsDir:    filepath.Join(root, "agents"),
-		Images:       &sandbox.Images{Dir: images},
-		Tools:        tools,
-		Subnet:       netip.MustParsePrefix("10.88.0.0/16"),
-		Debounce:     50 * time.Millisecond,
-		ReapInterval: 100 * time.Millisecond,
-		PublicURL:    "https://hermitator.example.com",
+		AgentsDir:      filepath.Join(root, "agents"),
+		Images:         &sandbox.Images{Dir: images},
+		Tools:          tools,
+		Subnet:         netip.MustParsePrefix("10.88.0.0/16"),
+		Debounce:       50 * time.Millisecond,
+		ReapInterval:   100 * time.Millisecond,
+		ResendInterval: 100 * time.Millisecond,
+		PublicURL:      "https://hermitator.example.com",
 	}, st, box, rt, log)
 	rec := &recorder{ch: make(chan sent, 100)}
 	m.SetMessenger(rec)
@@ -1095,6 +1104,33 @@ func TestSpendingCapInsideATurn(t *testing.T) {
 	// It counts what it spent getting there: $0.50, less the $0.02 before.
 	if turns, _ := e.st.Turns(ctx, e.agent.ID, 1); turns[0].Status != store.TurnError || turns[0].CostUSD < 0.479 || turns[0].CostUSD > 0.481 {
 		t.Fatalf("stopped turn = %+v", turns[0])
+	}
+}
+
+// A reply that fails to send is sent again, in order, marked as possibly
+// a duplicate; so is one a restart cut off before it went.
+func TestFailedSendsAreRetried(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.rec.failTexts.Store(2)
+	e.m.HandleMessage(ctx, e.msg(chat, "hello there", true))
+	if got := e.rec.wait(t, "text"); got.body != resendNote+"*echo:* hello there" {
+		t.Fatalf("resent reply = %q", got.body)
+	}
+
+	// Written down but never sent, as when hermitator stops mid-send.
+	e.st.QueueSends(ctx, e.acct.ID, chat, []string{"part one", "part two"}, time.Now())
+	for _, want := range []string{"part one", "part two"} {
+		if got := e.rec.wait(t, "text"); got.body != resendNote+want {
+			t.Fatalf("after a restart = %q, want %q", got.body, want)
+		}
+	}
+	time.Sleep(300 * time.Millisecond)
+	if left, _ := e.st.DueSends(ctx, time.Now().Add(time.Hour)); len(left) != 0 {
+		t.Fatalf("still unsent: %+v", left)
 	}
 }
 

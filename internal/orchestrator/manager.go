@@ -39,6 +39,8 @@ type Config struct {
 	// StallAfter is how long a turn may go without any sign of progress
 	// before the chat is told, once.
 	StallAfter time.Duration
+	// ResendInterval is how often texts that failed to send are retried.
+	ResendInterval time.Duration
 	// EgressKey derives credential placeholders; set when the egress
 	// proxy runs on this host.
 	EgressKey []byte
@@ -98,6 +100,9 @@ func New(cfg Config, st *store.Store, box *secrets.Box, rt sandbox.Runtime, log 
 	if cfg.StallAfter == 0 {
 		cfg.StallAfter = 10 * time.Minute
 	}
+	if cfg.ResendInterval == 0 {
+		cfg.ResendInterval = 10 * time.Second
+	}
 	return &Manager{cfg: cfg, store: st, box: box, rt: rt, log: log, actors: map[string]*actor{}, msgr: nopMessenger{}}
 }
 
@@ -121,6 +126,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		go m.tellInterrupted(cut)
 	}
 	go m.scheduler()
+	go m.resender()
 	agents, err := m.store.Agents(ctx, "")
 	if err != nil {
 		return err

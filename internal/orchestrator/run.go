@@ -687,10 +687,24 @@ func (c chatRef) send(text string) {
 	if !c.ok() || strings.TrimSpace(text) == "" {
 		return
 	}
-	for _, part := range wamd.Split(text, maxMessage) {
+	parts := wamd.Split(text, maxMessage)
+	ids, err := c.m.store.QueueSends(c.m.ctx, c.msg.AccountID, c.msg.Chat, parts, time.Now().Add(sendingFor))
+	if err != nil {
+		c.m.log.Warn("record a text before sending it", "err", err)
+		ids = nil
+	}
+	for i, part := range parts {
 		if err := c.m.msgr.SendText(c.m.ctx, c.msg.AccountID, c.msg.Chat, part); err != nil {
-			c.m.log.Warn("send reply", "chat", c.msg.Chat, "err", err)
+			c.m.log.Warn("send reply; will try again", "chat", c.msg.Chat, "err", err)
+			if ids != nil {
+				for _, id := range ids[i:] {
+					c.m.store.SendFailed(c.m.ctx, id, time.Now().Add(c.m.cfg.ResendInterval))
+				}
+			}
 			return
+		}
+		if ids != nil {
+			c.m.store.DeleteSend(c.m.ctx, ids[i])
 		}
 	}
 }

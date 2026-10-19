@@ -279,6 +279,13 @@ session's running total, which its budget counts), and pi is aborted
 once the cost it streams crosses it. Either stops after the model call
 that crossed, so the limit can be exceeded by one call.
 
+Every text to a chat is written to the `unsent` table before it is sent
+and deleted once WhatsApp has taken it. One that fails is retried, in
+order within its chat, after 10 seconds and then twice as long each time
+(at most 10 minutes apart) for a day; one that a restart cut off is sent
+when hermitator is back. A resent text opens with a note that it may be
+a duplicate, since the first try may have arrived after all.
+
 Each agent is served by one goroutine (its actor) that owns the queue, the
 running turn and the holds keeping it awake, so none of that needs locks.
 Turns themselves run on their own goroutine and report back to the actor.
