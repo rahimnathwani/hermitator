@@ -67,7 +67,13 @@ var piDialogs = map[string]bool{"select": true, "confirm": true, "input": true, 
 
 func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) error {
 	args := []string{"--mode", "rpc"}
-	if req.SessionID != "" {
+	sessionID := req.SessionID
+	switch {
+	case req.Fork && req.SessionID != "":
+		// pi copies the history into a new session with the ID it is given.
+		sessionID = newSessionID()
+		args = append(args, "--fork", req.SessionID, "--session-id", sessionID)
+	case req.SessionID != "":
 		args = append(args, "--session-id", req.SessionID)
 	}
 	model := req.Model
@@ -143,7 +149,7 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 		// overBudget is set once the turn has spent its MaxCostUSD.
 		overBudget bool
 	)
-	emit(turn.Event{Type: turn.EventStarted, SessionID: req.SessionID})
+	emit(turn.Event{Type: turn.EventStarted, SessionID: sessionID})
 	readLines(stdout, func(line []byte) {
 		var ev piEvent
 		if json.Unmarshal(line, &ev) != nil {
@@ -212,13 +218,13 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 
 	switch {
 	case req.Compact && failed != "":
-		emit(turn.Event{Type: turn.EventError, Text: "pi did not compact: " + failed, SessionID: req.SessionID})
+		emit(turn.Event{Type: turn.EventError, Text: "pi did not compact: " + failed, SessionID: sessionID})
 	case req.Compact && compacted != "":
-		emit(turn.Event{Type: turn.EventResult, Text: compacted, SessionID: req.SessionID, CostUSD: cost, ContextTokens: context})
+		emit(turn.Event{Type: turn.EventResult, Text: compacted, SessionID: sessionID, CostUSD: cost, ContextTokens: context})
 	case failed != "":
-		emit(turn.Event{Type: turn.EventError, Text: "pi rejected the prompt: " + failed, SessionID: req.SessionID})
+		emit(turn.Event{Type: turn.EventError, Text: "pi rejected the prompt: " + failed, SessionID: sessionID})
 	case overBudget:
-		emit(turn.Event{Type: turn.EventResult, Text: lastText, SessionID: req.SessionID, CostUSD: cost, Model: modelUsed,
+		emit(turn.Event{Type: turn.EventResult, Text: lastText, SessionID: sessionID, CostUSD: cost, Model: modelUsed,
 			ContextTokens: context, IsError: true, StopReason: turn.StopBudget})
 	case !settled:
 		msg := stderr.String()
@@ -229,9 +235,9 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 		} else if msg == "" {
 			msg = "pi exited before the turn finished"
 		}
-		emit(turn.Event{Type: turn.EventError, Text: msg, SessionID: req.SessionID})
+		emit(turn.Event{Type: turn.EventError, Text: msg, SessionID: sessionID})
 	default:
-		ev := turn.Event{Type: turn.EventResult, Text: lastText, SessionID: req.SessionID, CostUSD: cost, Model: modelUsed, ContextTokens: context}
+		ev := turn.Event{Type: turn.EventResult, Text: lastText, SessionID: sessionID, CostUSD: cost, Model: modelUsed, ContextTokens: context}
 		if lastText == "" && lastError != "" {
 			ev.Text, ev.IsError = lastError, true
 		}

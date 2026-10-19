@@ -50,28 +50,33 @@ func compactInstructions(now time.Time) string {
 }
 
 // compactFirst starts compacting an agent's conversation instead of
-// suspending it, if that is worth doing; it reports whether it did. The
-// compaction holds the turn slot, so messages arriving meanwhile wait for
-// it, and the next reaper tick suspends the agent.
+// suspending it, if that is worth doing; it reports whether it did.
 func (a *actor) compactFirst(ag *store.Agent) bool {
 	if ag.ContextTokens < a.m.compactAbove() || ag.SessionID == "" || time.Since(a.lastActive) > compactWarm {
 		return false
 	}
+	return a.beforeSleep(ag, "compact-", func(t *activeTurn) { a.m.compact(a, t, ag) })
+}
+
+// beforeSleep runs job, a look at the conversation while it is still
+// cached, in place of suspending the agent. It holds the turn slot, so
+// messages arriving meanwhile wait for it, and leaves the agent as idle
+// as it was, so the next reaper tick suspends it (or runs the next job).
+func (a *actor) beforeSleep(ag *store.Agent, prefix string, job func(*activeTurn)) bool {
 	if a.m.overCap(a.ctx, ag) != "" {
 		return false
 	}
-	t := &activeTurn{id: "compact-" + ids.New()}
+	t := &activeTurn{id: prefix + ids.New()}
 	a.turn = t
 	idleSince := a.lastActive
 	go func() {
-		a.m.compact(a, t, ag)
+		job(t)
 		a.do(func(a *actor) {
 			a.turn = nil
 			if len(a.pending) > 0 {
 				a.lastActive = time.Now()
 				a.startTurn()
 			} else {
-				// Still idle: the next tick suspends it.
 				a.lastActive = idleSince
 			}
 		})

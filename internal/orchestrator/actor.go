@@ -44,6 +44,11 @@ type actor struct {
 	todosAt time.Time
 	// forkNext makes the next turn branch off the current conversation.
 	forkNext bool
+	// lastSystem and lastChat are the last turn's system prompt and chat:
+	// a review before sleep reuses the prompt, to read the conversation
+	// from the cache, and answers in the chat.
+	lastSystem string
+	lastChat   Message
 }
 
 func (a *actor) loop(ctx context.Context) {
@@ -193,8 +198,9 @@ func (a *actor) reap() {
 	if time.Since(a.lastActive) < ag.IdleTimeout || spec.Holding(time.Now()) {
 		return
 	}
-	if a.compactFirst(ag) {
-		return // suspended once it is done
+	// A review reads the whole conversation, so it goes before compacting.
+	if a.reviewFirst(ag) || a.compactFirst(ag) {
+		return // suspended once they are done
 	}
 	if st, err := a.suspend(a.ctx); err != nil {
 		a.m.log.Error("suspend idle agent", "agent", a.id, "err", err)

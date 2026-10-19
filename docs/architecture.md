@@ -150,6 +150,23 @@ compaction that fails or cannot start (no credentials) too, which would
 otherwise be retried on every tick and keep the agent awake. Nothing is
 lost: transcripts keep everything, and agents are told where they are.
 
+### Reviewing before sleep
+
+After ten turns with a person's message (scheduled runs and job reports
+do not count), an agent about to sleep first looks back over its
+conversation for lasting facts, in the same warm window as compaction and
+before it. The review runs in a fork of the session (Claude Code's
+`--fork-session`, pi's `--fork`) with the last turn's system prompt, so
+it reads the history from the cache, and the fork's transcript is
+deleted afterwards (`Request.Discard`): the review never becomes part of
+the conversation. The model adds dated one-line facts under
+`## Remembered` in the memory file its harness reads at the start of
+every conversation (`~/.claude/CLAUDE.md`, `~/.pi/agent/AGENTS.md`). It
+only adds; a line that looks wrong is put to the user in the chat,
+headed 🧠, and otherwise it answers `NO_REPLY` and nothing is sent. The
+count starts again whether or not the review succeeds. The prompt and
+its list of what not to save come from Hermes's background review.
+
 Both harnesses also compact on their own near the model's context limit;
 that keeps them working, not cheap, and a mostly sleeping agent with a
 large-context model may never reach it.

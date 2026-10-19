@@ -68,7 +68,9 @@ keep hundreds of them.
   wake re-reads a summary instead of paying full price for all of it.
   Nothing is lost: `hermitator-guest recall` lets the agent search every
   past conversation, and the chat's history if you keep one, without a
-  model call.
+  model call. Every ten turns or so, before sleeping, it also writes down
+  lasting facts (how your projects are set up, what you prefer) in the
+  memory file it reads at the start of every conversation.
 - **Preview links.** With a preview domain set up, an agent running a dev
   server sends you a link (`/preview 3000`, or the agent asks for one) that
   opens it on your phone, waking the agent if it was asleep.

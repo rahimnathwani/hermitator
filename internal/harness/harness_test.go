@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -285,6 +286,40 @@ func TestBudget(t *testing.T) {
 	}
 	if rest, _ := os.ReadFile(filepath.Join(fakeDir, "rest")); !strings.Contains(string(rest), `{"type":"abort"}`) {
 		t.Fatalf("pi was not told to stop: %q", rest)
+	}
+}
+
+// A fork runs in a copy of the session, which Discard deletes afterwards.
+func TestForkAndDiscard(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	args, _ := fake(t, "HERMITATOR_PI_BIN", "pi-turn.jsonl")
+	events := run(t, &turn.Request{Harness: turn.Pi, SessionID: "p1", Provider: "openai-codex", Prompt: "look back", Fork: true})
+	m := regexp.MustCompile(`--fork\np1\n--session-id\n([0-9a-f-]{36})\n`).FindStringSubmatch(args())
+	if m == nil {
+		t.Fatalf("pi args:\n%s", args())
+	}
+	if res := last(events); res.SessionID != m[1] {
+		t.Fatalf("the fork's result names session %q, not %q", res.SessionID, m[1])
+	}
+
+	claude := filepath.Join(home, ".claude", "projects", "w", "c-fork.jsonl")
+	pi := filepath.Join(home, ".pi", "agent", "sessions", "--w--", "2026-10-19T18-44-10-744Z_p-fork.jsonl")
+	keep := filepath.Join(home, ".claude", "projects", "w", "c-main.jsonl")
+	for _, f := range []string{claude, pi, keep} {
+		os.MkdirAll(filepath.Dir(f), 0o755)
+		os.WriteFile(f, nil, 0o644)
+	}
+	discardSession(turn.Claude, "c-fork")
+	discardSession(turn.Pi, "p-fork")
+	discardSession(turn.Claude, "*")
+	for _, f := range []string{claude, pi} {
+		if _, err := os.Stat(f); err == nil {
+			t.Errorf("%s was kept", f)
+		}
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("another session's transcript went too: %v", err)
 	}
 }
 

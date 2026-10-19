@@ -187,6 +187,8 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		SessionCostUSD: agent.SessionCost,
 	}
 	m.writeTasks(ctx, spec, agent)
+	system := req.SystemPrompt
+	a.do(func(a *actor) { a.lastSystem, a.lastChat = system, last })
 	stdin, _ := json.Marshal(req)
 	client := spec.Spool()
 	if err := client.Submit(spool.Job{ID: t.id, Argv: []string{"hermitator-guest", "turn"}, Stdin: stdin}); err != nil {
@@ -333,6 +335,9 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	}
 
 	if result != nil && result.Type == turn.EventResult {
+		if reviewable(batch) {
+			m.store.CountReviewTurn(ctx, agent.ID)
+		}
 		m.accountSession(ctx, agent, result, prompt)
 		if result.ContextTokens > 0 {
 			rec.ContextTokens = result.ContextTokens

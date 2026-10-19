@@ -6,7 +6,9 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -43,6 +45,18 @@ func Run(ctx context.Context, req *turn.Request, emit Emit) error {
 		return fmt.Errorf("write files: %w", err)
 	}
 	defer syncFiles(req.Files, before, emit)
+	if req.Discard && req.Fork {
+		// The fork's ID comes in its events; its transcript goes after them.
+		inner := emit
+		var forked string
+		emit = func(e turn.Event) {
+			if e.SessionID != "" && e.SessionID != req.SessionID {
+				forked = e.SessionID
+			}
+			inner(e)
+		}
+		defer func() { discardSession(req.Harness, forked) }()
+	}
 
 	switch req.Harness {
 	case turn.Claude:
@@ -52,6 +66,34 @@ func Run(ctx context.Context, req *turn.Request, emit Emit) error {
 	default:
 		return fmt.Errorf("unknown harness %q", req.Harness)
 	}
+}
+
+// discardSession deletes a session's transcript.
+func discardSession(harness, id string) {
+	if id == "" || strings.ContainsAny(id, "/*?[") {
+		return
+	}
+	home, _ := os.UserHomeDir()
+	var pattern string
+	switch harness {
+	case turn.Claude:
+		pattern = filepath.Join(home, ".claude", "projects", "*", id+".jsonl")
+	case turn.Pi:
+		pattern = filepath.Join(home, ".pi", "agent", "sessions", "*", "*_"+id+".jsonl")
+	}
+	matches, _ := filepath.Glob(pattern)
+	for _, m := range matches {
+		os.Remove(m)
+	}
+}
+
+// newSessionID is a random UUID, for a session hermitator starts itself.
+func newSessionID() string {
+	var b [16]byte
+	rand.Read(b[:])
+	b[6], b[8] = b[6]&0x0f|0x40, b[8]&0x3f|0x80
+	h := hex.EncodeToString(b[:])
+	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:]
 }
 
 // Getenv returns the environment variable key, or fallback when unset.

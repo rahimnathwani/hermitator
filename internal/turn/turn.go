@@ -57,8 +57,11 @@ type Request struct {
 	// then says what the summary must keep.
 	Compact bool `json:"compact,omitempty"`
 	// Fork continues SessionID in a new session, leaving the old one as
-	// it was. Claude Code only.
+	// it was.
 	Fork bool `json:"fork,omitempty"`
+	// Discard deletes a forked session's transcript once the turn is over:
+	// a look back at the conversation that should not become part of it.
+	Discard bool `json:"discard,omitempty"`
 	// SteerID names the spool directory where messages sent during the
 	// turn arrive. Claude Code only; pi's messages wait for the next turn.
 	SteerID      string `json:"steer_id,omitempty"`

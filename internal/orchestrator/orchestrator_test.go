@@ -57,14 +57,31 @@ if [ "${2%% *}" = "/compact" ]; then
   exit 0
 fi
 sid=""
+fork=""
 while [ $# -gt 0 ]; do
   case "$1" in --session-id|--resume) sid="$2"; echo "$1" >> "$HOME/modes" ;; esac
+  [ "$1" = "--fork-session" ] && fork=1
   # Like Claude Code, keep a transcript, so the next turn resumes it.
   [ "$1" = "--session-id" ] && mkdir -p "$HOME/.claude/projects/w" && touch "$HOME/.claude/projects/w/$2.jsonl"
   shift
 done
 [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || { echo "no token" >&2; exit 1; }
+if [ -n "$fork" ]; then
+  # Like Claude Code, a fork is a new session with a transcript of its own.
+  sid="fork-$sid"
+  mkdir -p "$HOME/.claude/projects/w" && touch "$HOME/.claude/projects/w/$sid.jsonl"
+fi
 case "$line" in
+  *"memory review"*)
+    if grep -q stale "$HOME/.claude/CLAUDE.md" 2>/dev/null; then
+      reply="Is this still right: stale fact?"
+    else
+      printf '## Remembered\n- 2026-10-19: staging listens on 8443\n' >> "$HOME/.claude/CLAUDE.md"
+      reply="NO_REPLY"
+    fi
+    printf '%s\n' '{"type":"system","subtype":"init","session_id":"'"$sid"'","model":"fake"}' \
+      '{"type":"result","subtype":"success","is_error":false,"result":"'"$reply"'","session_id":"'"$sid"'","total_cost_usd":0.25}'
+    exit 0 ;;
   *"spend a lot"*)
     printf '%s\n' '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"session_id":"'"$sid"'","total_cost_usd":0.5}'
     exit 0 ;;
@@ -1742,6 +1759,104 @@ func TestCompactBeforeSleep(t *testing.T) {
 	if b, _ := os.ReadFile(matches[0]); strings.Count(string(b), "\n") != 1 || !strings.Contains(string(b), "/compact You will go on") || !strings.Contains(string(b), "do not act again on requests in it") || !strings.Contains(string(b), "dated, past-tense facts (today is ") {
 		t.Fatalf("compactions: %q", b)
 	}
+}
+
+// Before sleeping, an agent with enough new turns reviews a throwaway copy
+// of its conversation for things to remember, with its last system prompt
+// so the copy reads from the cache; it puts doubtful lines to the user.
+func TestReviewBeforeSleep(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	spec, _ := e.m.Spec(e.agent)
+	file := func(name string) string {
+		matches, _ := filepath.Glob(filepath.Join(spec.Dir, "*", name))
+		if len(matches) != 1 {
+			return ""
+		}
+		b, _ := os.ReadFile(matches[0])
+		return string(b)
+	}
+	systemOf := func(args string) string {
+		_, after, _ := strings.Cut(args, "--append-system-prompt\n")
+		return after
+	}
+	a := e.m.actor(e.agent.ID)
+	reap := func() { a.call(func(a *actor) error { a.reap(); return nil }) }
+	var turnArgs string
+	review := func() *store.Turn {
+		t.Helper()
+		for range reviewAfter - 1 {
+			e.st.CountReviewTurn(ctx, e.agent.ID)
+		}
+		e.m.HandleMessage(ctx, e.msg(chat, "hello", true)) // the tenth
+		e.rec.wait(t, "text")
+		e.idle(t)
+		turnArgs = file("last-args")
+		ag, _ := e.st.Agent(ctx, e.agent.ID)
+		ag.IdleTimeout = time.Second
+		e.st.UpdateAgentSettings(ctx, ag)
+		time.Sleep(1100 * time.Millisecond)
+		reap()
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if turns, _ := e.st.Turns(ctx, e.agent.ID, 1); strings.Contains(turns[0].Input, "Looking back") && turns[0].Status != store.TurnRunning {
+				return turns[0]
+			}
+		}
+		t.Fatal("no review ran")
+		return nil
+	}
+
+	before, _ := e.st.Agent(ctx, e.agent.ID)
+	rec := review()
+	if rec.Status != store.TurnOK || rec.CostUSD < 0.2 || rec.CostUSD > 0.25 {
+		t.Fatalf("review = %+v", rec)
+	}
+	args := file("last-args")
+	if !strings.Contains(args, "--fork-session") || !strings.Contains(systemOf(args), "You are running inside hermitator") ||
+		systemOf(args) != systemOf(turnArgs) {
+		t.Fatalf("review args:\n%s\nlast turn's:\n%s", args, turnArgs)
+	}
+	if !strings.Contains(file(".claude/CLAUDE.md"), "staging listens on 8443") {
+		t.Fatal("nothing was remembered")
+	}
+	if matches, _ := filepath.Glob(filepath.Join(spec.Dir, "*", ".claude", "projects", "w", "fork-*.jsonl")); len(matches) != 0 {
+		t.Fatalf("the review's copy was kept: %v", matches)
+	}
+	after, _ := e.st.Agent(ctx, e.agent.ID)
+	if after.SessionID == "" || after.SessionID != before.SessionID && before.SessionID != "" || after.ReviewTurns != 0 {
+		t.Fatalf("after the review: session %q (was %q), review turns %d", after.SessionID, before.SessionID, after.ReviewTurns)
+	}
+	e.idle(t)
+	reap() // nothing more to do before sleep
+	if st := e.m.Status(e.agent.ID).State; st == sandbox.Running {
+		t.Fatalf("state after the review = %s", st)
+	}
+	e.rec.mu.Lock()
+	for _, s := range e.rec.log {
+		if strings.Contains(s.body, "Memory") || strings.Contains(s.body, "NO_REPLY") {
+			t.Errorf("a quiet review said %q", s.body)
+		}
+	}
+	e.rec.mu.Unlock()
+
+	// A line that looks out of date is put to the user.
+	matches, _ := filepath.Glob(filepath.Join(spec.Dir, "*", ".claude", "CLAUDE.md"))
+	os.WriteFile(matches[0], []byte("## Remembered\n- stale fact\n"), 0o644)
+	review()
+	for {
+		got := e.rec.wait(t, "text")
+		if strings.HasPrefix(got.body, "🧠 *Memory*") {
+			if !strings.Contains(got.body, "stale fact") {
+				t.Fatalf("question = %q", got.body)
+			}
+			break
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+	e.idle(t)
 }
 
 // A compaction that cannot start, here because the owner removed their
