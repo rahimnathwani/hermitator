@@ -310,6 +310,9 @@ func TestForkAndDiscard(t *testing.T) {
 		os.MkdirAll(filepath.Dir(f), 0o755)
 		os.WriteFile(f, nil, 0o644)
 	}
+	if res := last(run(t, &turn.Request{Harness: turn.Claude, SessionID: "missing", Prompt: "look back", Fork: true, Discard: true})); res.Type != turn.EventError {
+		t.Fatalf("a throwaway fork of a missing conversation = %+v", res)
+	}
 	discardSession(turn.Claude, "c-fork")
 	discardSession(turn.Pi, "p-fork")
 	discardSession(turn.Claude, "*")

@@ -90,6 +90,12 @@ func runClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit
 		// reply instead, and the user answers in the chat.
 		"--disallowedTools", "AskUserQuestion,EnterPlanMode,ExitPlanMode",
 	}
+	if req.Discard && !claudeSessionExists(req.SessionID) {
+		// A throwaway look at a conversation that is not there would start
+		// a real one.
+		emit(turn.Event{Type: turn.EventError, Text: "no conversation to look back at"})
+		return nil
+	}
 	if req.SessionID != "" {
 		if claudeSessionExists(req.SessionID) {
 			args = append(args, "--resume", req.SessionID)

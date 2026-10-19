@@ -70,7 +70,9 @@ func (m *Manager) hold(ctx context.Context, ag *store.Agent, msg Message) {
 		Text:       clip(strings.TrimSpace(msg.Text), 4000),
 		SentAt:     msg.Time,
 	}
-	if md := msg.Media; md != nil {
+	// A quoted attachment is fetched only for a message that starts a turn:
+	// held chatter quotes photos often, and the quote's text says enough.
+	if md := msg.Media; md != nil && !md.Quoted {
 		h.MediaKind, h.MediaMIME, h.Voice = md.Kind, md.MIME, md.Voice
 		if spec, err := m.Spec(ag); err == nil {
 			if data, err := md.Fetch(ctx); err == nil {
