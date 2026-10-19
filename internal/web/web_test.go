@@ -757,3 +757,18 @@ func TestPreviewLinks(t *testing.T) {
 		t.Fatal("a new link is the old one")
 	}
 }
+
+func TestNewAgentRejectsABadRepository(t *testing.T) {
+	f := setup(t)
+	alice := f.login(t, "alice@example.com")
+	code, loc := alice.post("/agents", url.Values{"name": {"bot"}, "harness": {"claude"}, "repo": {"https://tok@github.com/a/b"}})
+	if code != http.StatusSeeOther || loc != "/agents/new" {
+		t.Fatalf("create with a token in the URL: %d %s", code, loc)
+	}
+	if agents, _ := f.store.Agents(context.Background(), f.users["alice@example.com"].ID); len(agents) != 0 {
+		t.Fatal("an agent was created anyway")
+	}
+	if _, body := alice.get("/agents/new"); !strings.Contains(body, `name="repo"`) {
+		t.Fatal("the form has no repository field")
+	}
+}

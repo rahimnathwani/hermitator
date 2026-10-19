@@ -120,6 +120,7 @@ func (s *Server) newAgentPage(w http.ResponseWriter, r *http.Request, v *viewer)
 		"Fields":    newAgentFields(&store.Agent{Harness: store.HarnessClaude}),
 		"CanCreate": len(agents) < v.User.MaxAgents,
 		"MaxAgents": v.User.MaxAgents,
+		"GitHub":    s.Agents.Secret(r.Context(), v.User.ID, store.SecretGitHubToken) != "",
 	})
 }
 
@@ -143,6 +144,14 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request, v *viewer) 
 	if image == "" {
 		image = "universal"
 	}
+	var cloneURL, dir string
+	if repo := formValue(r, "repo"); repo != "" {
+		var err error
+		if cloneURL, dir, err = orchestrator.ParseRepo(repo); err != nil {
+			s.back(w, r, "/agents/new", "Repository: "+err.Error()+".")
+			return
+		}
+	}
 	err := s.Agents.CreateAgent(r.Context(), v.User, a, image)
 	switch {
 	case errors.Is(err, orchestrator.ErrQuota):
@@ -156,6 +165,16 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request, v *viewer) 
 		return
 	}
 	s.audit(r, v, "agent.create", "agent="+a.ID+" name="+a.Name)
+	if cloneURL != "" {
+		setup := formValue(r, "setup") == "on"
+		s.Agents.StartFromRepo(a.ID, cloneURL, dir, setup)
+		s.audit(r, v, "agent.clone", "agent="+a.ID+" repo="+cloneURL)
+		msg := "Cloning " + cloneURL + " into /workspace/" + dir + "."
+		if setup {
+			msg += " Then " + a.Name + " sets it up and reports back below; that takes a few minutes."
+		}
+		s.setFlash(w, msg)
+	}
 	http.Redirect(w, r, "/agents/"+a.ID, http.StatusSeeOther)
 }
 

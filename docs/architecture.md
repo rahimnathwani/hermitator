@@ -120,6 +120,18 @@ and multicast ranges, and all new inbound connections to agents. Outbound
 traffic to the internet is masqueraded. The table is rewritten at every
 start.
 
+### Starting from a repository
+
+A new agent can be given a repository. The host boots the sandbox and
+clones it into `/workspace/NAME` as a spool job; the GitHub token (a
+placeholder, with the egress proxy on) arrives on the job's stdin and is
+offered by a credential helper to github.com only, so a URL on another
+host cannot collect it. The clone's output goes through the redactor.
+With setup chosen, the agent then gets a first message, through the same
+path as the web console, asking it to read, install, test and report. If
+the clone fails, that message says why instead, so the owner sees it and
+the agent can try itself.
+
 ### Preview links
 
 `https://PORT-AGENT.<preview domain>/` reaches PORT in an agent's sandbox.

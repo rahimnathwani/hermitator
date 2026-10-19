@@ -15,6 +15,16 @@
     <label class="field"><span class="label">Name</span><input name="name" required maxlength="40" placeholder="frontend" pattern="[\p{L}\p{N}][\p{L}\p{N} ._\-]{0,39}" autofocus>
       <p class="hint">Up to 40 letters, digits, spaces, dots, dashes or underscores. In a group, typing <code>@name</code> mentions it.</p></label>
     {{template "agent-fields" $d.Fields}}
+    <label class="field"><span class="label">Start from a repository <span class="muted">(optional)</span></span><input name="repo" placeholder="owner/repo or https://…" maxlength="300" autocomplete="off" spellcheck="false">
+      <p class="hint">Cloned into <code>/workspace</code>. Private GitHub repositories use your GitHub token from Settings{{if not $d.GitHub}}, which is not set up yet{{end}}.</p></label>
+    <fieldset class="field">
+      <legend>After cloning</legend>
+      <div class="seg">
+        <label><input type="radio" name="setup" value="on" checked><span>set it up</span></label>
+        <label><input type="radio" name="setup" value="off"><span>just clone</span></label>
+      </div>
+      <p class="hint">Setting up: the agent reads the repository, installs what it needs, runs the tests and reports back here. That is one turn on your model.</p>
+    </fieldset>
     {{if gt (len $d.Images) 1}}
     <fieldset class="field">
       <legend>Image</legend>

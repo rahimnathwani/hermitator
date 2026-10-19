@@ -51,6 +51,11 @@ keep hundreds of them.
   Background jobs report back with `whatsapp-send --text` after the turn
   has ended, and `/sh` runs a quick command without the model. Optional
   daily and monthly spending limits stop anything running away.
+- **Agents that start from a repository.** Give a new agent `owner/repo`
+  or an https URL and it starts with the repository cloned into its
+  workspace (private GitHub ones with your token), and, if you like, sets
+  it up: installs dependencies, runs the tests, notes how to run it, and
+  reports back.
 - **Preview links.** With a preview domain set up, an agent running a dev
   server sends you a link (`/preview 3000`, or the agent asks for one) that
   opens it on your phone, waking the agent if it was asleep.
