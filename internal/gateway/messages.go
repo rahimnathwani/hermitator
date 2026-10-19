@@ -113,6 +113,11 @@ func (g *Gateway) convert(ctx context.Context, a *account, e *events.Message) (o
 			if quoted := quotedText(q); quoted != "" {
 				msg.Text = "> " + strings.ReplaceAll(quoted, "\n", "\n> ") + "\n\n" + msg.Text
 			}
+			// "What's in this?" in reply to a photo means the photo: bring it
+			// along, from WhatsApp's servers, as if it came with this message.
+			if msg.Media == nil {
+				msg.Media = quotedMedia(q, download)
+			}
 		}
 	}
 	msg.ChatName, msg.GroupSize = g.chatName(ctx, cli, info)
@@ -154,6 +159,29 @@ func canonicalChat(ctx context.Context, cli *whatsmeow.Client, info types.Messag
 		return pn.ToNonAD()
 	}
 	return chat
+}
+
+// quotedMedia is the attachment of a quoted message, or nil.
+func quotedMedia(q *waE2E.Message, download func(whatsmeow.DownloadableMessage, uint64) func(context.Context) ([]byte, error)) *orchestrator.Media {
+	var md *orchestrator.Media
+	switch {
+	case q.GetImageMessage() != nil:
+		im := q.GetImageMessage()
+		md = &orchestrator.Media{Kind: "image", MIME: im.GetMimetype(), Size: int64(im.GetFileLength()), Fetch: download(im, im.GetFileLength())}
+	case q.GetAudioMessage() != nil:
+		au := q.GetAudioMessage()
+		md = &orchestrator.Media{Kind: "audio", MIME: au.GetMimetype(), Size: int64(au.GetFileLength()), Voice: au.GetPTT(), Fetch: download(au, au.GetFileLength())}
+	case q.GetVideoMessage() != nil:
+		v := q.GetVideoMessage()
+		md = &orchestrator.Media{Kind: "video", MIME: v.GetMimetype(), Size: int64(v.GetFileLength()), Fetch: download(v, v.GetFileLength())}
+	case q.GetDocumentMessage() != nil:
+		d := q.GetDocumentMessage()
+		md = &orchestrator.Media{Kind: "document", MIME: d.GetMimetype(), FileName: d.GetFileName(), Size: int64(d.GetFileLength()), Fetch: download(d, d.GetFileLength())}
+	default:
+		return nil
+	}
+	md.Quoted = true
+	return md
 }
 
 func quotedText(q *waE2E.Message) string {

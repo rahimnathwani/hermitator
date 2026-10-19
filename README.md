@@ -41,8 +41,10 @@ keep hundreds of them.
   with that number (or each group it is in) is bound to an agent with
   `/link CODE`. Photos, voice notes (transcribed locally with whisper.cpp, with a word list per
   agent for names and jargon)
-  and documents go in; files come back when the agent runs `whatsapp-send`.
-  Read receipts and a ⏳ reaction say it is working, ✅ says it is done.
+  and documents go in; replying to a photo or file sends it along again.
+  Files come back when the agent runs `whatsapp-send`.
+  Read receipts and a ⏳ reaction say it is working, ✅ says it is done,
+  and 📥 says a message is waiting for the turn in progress.
   When an agent needs you to choose ("Deploy to production?"), it can
   send a WhatsApp poll; your tap comes back to it as a message.
 - **Work that carries on without you.** Ask an agent to do something
@@ -275,7 +277,7 @@ the agent either.
 Messages sent in quick succession, a photo and then its caption say, become
 one turn. A message you send while a Claude Code agent is working ("actually,
 make it blue") reaches it in the middle of what it is doing, and gets 👀;
-with pi, it waits for the next turn.
+with pi, it waits for the next turn, and gets 📥.
 
 Each turn's cost appears under Recent turns on the agent's Overview. It is what the model would
 have charged at API prices: on a Claude or ChatGPT subscription you are not

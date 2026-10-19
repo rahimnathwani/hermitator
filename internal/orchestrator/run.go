@@ -481,6 +481,9 @@ func (m *Manager) buildPrompt(ctx context.Context, spec *sandbox.Spec, batch []M
 		var lines []string
 		if msg.Media != nil {
 			note, img := m.saveMedia(ctx, spec, msg, i)
+			if msg.Media.Quoted {
+				note = "[From the message replied to:] " + note
+			}
 			lines = append(lines, note)
 			if img != nil {
 				images = append(images, *img)

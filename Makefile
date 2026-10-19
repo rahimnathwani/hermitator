@@ -29,7 +29,7 @@ deploy: ## build for Linux and install on $(DEPLOY_HOST), served at $(DEPLOY_DOM
 	@test -n "$(DEPLOY_HOST)" || { echo "set DEPLOY_HOST (and DEPLOY_DOMAIN) in .env"; exit 1; }
 	WITH_WHISPER=$(WITH_WHISPER) PREVIEW_DOMAIN=$(DEPLOY_PREVIEW_DOMAIN) deploy/deploy.sh $(DEPLOY_HOST) $(DEPLOY_DOMAIN)
 
-image-bump: ## pin image/Containerfile to the newest Claude Code, pi and Playwright
+image-bump: ## pin image/Containerfile to the newest Claude Code, pi and Playwright a week old
 	deploy/bump-image.sh
 
 image: deploy ## build the agent image on $(DEPLOY_HOST); agents then offer an upgrade

@@ -59,7 +59,9 @@ type Media struct {
 	FileName string
 	Size     int64
 	Voice    bool
-	Fetch    func(ctx context.Context) ([]byte, error)
+	// Quoted means it came with the message being replied to, not this one.
+	Quoted bool
+	Fetch  func(ctx context.Context) ([]byte, error)
 }
 
 // Messenger sends things back to a chat.

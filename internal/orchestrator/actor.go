@@ -96,6 +96,10 @@ func (a *actor) enqueue(msg Message) {
 		a.lastActive = time.Now()
 		return
 	}
+	if a.turn != nil && msg.ID != "" {
+		// Behind a turn it may wait a while; say it arrived.
+		go chatRef{m: a.m, msg: msg}.react(queuedReaction)
+	}
 	a.pending = append(a.pending, msg)
 	a.lastActive = time.Now()
 	if a.debounce != nil {
@@ -103,6 +107,9 @@ func (a *actor) enqueue(msg Message) {
 	}
 	a.debounce = time.NewTimer(a.m.cfg.Debounce)
 }
+
+// queuedReaction marks a message waiting for the turn in progress.
+const queuedReaction = "📥"
 
 func (a *actor) startTurn() {
 	if a.turn != nil || len(a.pending) == 0 {

@@ -616,6 +616,45 @@ func TestEachChatGetsItsOwnTurn(t *testing.T) {
 	}
 }
 
+// A message that has to wait for another chat's turn says it arrived.
+func TestQueuedMessagesAreMarked(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	e.link(t, "one@s.whatsapp.net")
+	e.link(t, "two@s.whatsapp.net")
+	e.m.HandleMessage(ctx, e.msg("one@s.whatsapp.net", "go quiet for a bit", true))
+	for deadline := time.Now().Add(10 * time.Second); !e.m.Status(e.agent.ID).Busy; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the first turn never started")
+		}
+	}
+	e.m.HandleMessage(ctx, e.msg("two@s.whatsapp.net", "me next", true))
+	for {
+		got := e.rec.wait(t, "react")
+		if got.chat == "two@s.whatsapp.net" {
+			if got.body != queuedReaction {
+				t.Fatalf("first reaction in the waiting chat = %q", got.body)
+			}
+			break
+		}
+	}
+}
+
+// Media from the message replied to comes along, and says so.
+func TestQuotedMediaIsLabelled(t *testing.T) {
+	e := setup(t)
+	spec, _ := e.m.Spec(e.agent)
+	msg := e.msg("self@s.whatsapp.net", "what is in this?", true)
+	msg.Owner = true
+	msg.Media = &Media{Kind: "document", MIME: "text/plain", FileName: "notes.txt", Quoted: true,
+		Fetch: func(context.Context) ([]byte, error) { return []byte("hello"), nil }}
+	prompt, _ := e.m.buildPrompt(context.Background(), spec, []Message{msg})
+	if !strings.HasPrefix(prompt, "[From the message replied to:] [File saved at ") || !strings.Contains(prompt, "notes.txt") {
+		t.Fatalf("prompt = %q", prompt)
+	}
+}
+
 func TestMentionsName(t *testing.T) {
 	for text, want := range map[string]bool{
 		"@bot hi":         true,
