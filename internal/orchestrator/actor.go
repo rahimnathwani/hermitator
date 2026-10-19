@@ -30,10 +30,12 @@ type actor struct {
 	state      string
 
 	// outbox serialises outbox delivery between a turn and the background
-	// tick, which run outside the actor; bgSent, under it, rate-limits
-	// what the agent sends between turns.
+	// tick, which run outside the actor; bgSent and wakes, under it,
+	// rate-limit what the agent sends between turns and the turns its
+	// background jobs start.
 	outbox sync.Mutex
 	bgSent []time.Time
+	wakes  []time.Time
 	// inBackground keeps one background delivery at a time per agent.
 	inBackground atomic.Bool
 
@@ -254,7 +256,7 @@ func chatKey(m Message) string { return m.AccountID + "\x00" + m.Chat }
 // steerable is a plain message: one that changes nothing about how the
 // turn runs, so it can join a turn already under way.
 func (m Message) steerable() bool {
-	return m.Prompt == "" && m.Model == "" && m.Effort == "" && m.TaskName == ""
+	return m.Prompt == "" && m.Model == "" && m.Effort == "" && m.TaskName == "" && m.JobName == ""
 }
 
 func (t *activeTurn) kill(m *Manager) {

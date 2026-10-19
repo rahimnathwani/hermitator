@@ -107,6 +107,9 @@ case "$text" in
   *"in the background"*)
     (sleep 1; whatsapp-send --text "background job done") >/dev/null 2>&1 &
     ;;
+  *"run the suite"*)
+    nohup hermitator-guest notify --name "suite" -- sh -c 'echo compiling; echo "FAILED: 2 tests"; exit 3' >/dev/null 2>&1 &
+    ;;
   *"say nothing"*)
     printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"","session_id":"'"$sid"'","total_cost_usd":0.001}'
     exit 0 ;;
@@ -648,6 +651,7 @@ func TestQueuedMessagesAreMarked(t *testing.T) {
 			break
 		}
 	}
+	e.idle(t)
 }
 
 // Media from the message replied to comes along, and says so.
@@ -1131,6 +1135,37 @@ func TestFailedSendsAreRetried(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if left, _ := e.st.DueSends(ctx, time.Now().Add(time.Hour)); len(left) != 0 {
 		t.Fatalf("still unsent: %+v", left)
+	}
+}
+
+// A job started with notify starts a turn of its own when it ends, with
+// how it went, headed with its name.
+func TestNotifyStartsATurn(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "run the suite", true))
+	e.rec.wait(t, "text") // the turn's own reply
+	if got := e.rec.wait(t, "text"); !strings.HasPrefix(got.body, "🔔 *suite*") || got.chat != chat {
+		t.Fatalf("report = %+v", got)
+	}
+	e.idle(t)
+	turns, _ := e.st.Turns(ctx, e.agent.ID, 1)
+	if p := turns[0].Prompt; !strings.Contains(p, "exit code 3") || !strings.Contains(p, "FAILED: 2 tests") || !strings.Contains(p, "compiling") {
+		t.Fatalf("report prompt = %q", p)
+	}
+
+	// Background jobs may only start so many turns an hour.
+	a := e.m.actor(e.agent.ID)
+	a.outbox.Lock()
+	for range maxWakesPerHour {
+		a.wakes = append(a.wakes, time.Now())
+	}
+	a.outbox.Unlock()
+	if ans := e.m.wake(e.agent, chatRef{m: e.m, msg: Message{AccountID: e.acct.ID, Chat: chat}}, turn.HostRequest{Op: "wake", Prompt: "again"}); ans.OK {
+		t.Fatalf("a wake past the limit: %+v", ans)
 	}
 }
 

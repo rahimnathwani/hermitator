@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/harness"
@@ -147,9 +149,7 @@ func tasks() int {
 }
 
 // hold keeps the sandbox awake while a command runs, so background work
-// progresses instead of freezing when the agent goes idle. The file it
-// keeps fresh is what the host checks; a hold that stops refreshing it
-// (because the sandbox was killed, say) lapses after a few minutes.
+// progresses instead of freezing when the agent goes idle.
 func hold(args []string) int {
 	if len(args) > 0 && args[0] == "--" {
 		args = args[1:]
@@ -158,14 +158,27 @@ func hold(args []string) int {
 		fmt.Fprintln(os.Stderr, "usage: hermitator-guest hold [--] COMMAND [ARGS...]\n\nKeeps this machine awake until COMMAND exits (at most 12 hours).")
 		return 2
 	}
+	release, err := keepAwake(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "hold:", err)
+		return 1
+	}
+	defer release()
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return exitCode("hold", cmd.Run())
+}
+
+// keepAwake holds the sandbox awake until release is called. The file it
+// keeps fresh is what the host checks; a hold that stops refreshing it
+// (because the sandbox was killed, say) lapses after a few minutes.
+func keepAwake(args []string) (release func(), err error) {
 	dir := shared(turn.HoldsDir)
 	os.MkdirAll(dir, 0o755)
 	file := filepath.Join(dir, fmt.Sprintf("%d-%d", time.Now().Unix(), os.Getpid()))
 	if err := os.WriteFile(file, []byte(strings.Join(args, " ")), 0o644); err != nil {
-		fmt.Fprintln(os.Stderr, "hold:", err)
-		return 1
+		return nil, err
 	}
-	defer os.Remove(file)
 	done := make(chan struct{})
 	go func() {
 		tick := time.NewTicker(30 * time.Second)
@@ -179,17 +192,103 @@ func hold(args []string) int {
 			}
 		}
 	}()
-	cmd := exec.Command(args[0], args[1:]...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	err := cmd.Run()
-	close(done)
+	return func() { close(done); os.Remove(file) }, nil
+}
+
+func exitCode(what string, err error) int {
 	if exit, ok := err.(*exec.ExitError); ok {
 		return exit.ExitCode()
 	} else if err != nil {
-		fmt.Fprintln(os.Stderr, "hold:", err)
+		fmt.Fprintln(os.Stderr, what+":", err)
 		return 127
 	}
 	return 0
+}
+
+const notifyUsage = `usage: hermitator-guest notify [--name NAME] [--] COMMAND [ARGS...]
+
+Runs COMMAND, keeping this machine awake until it exits (at most 12
+hours), then starts a new turn for you, in the chat you last talked in,
+with its exit code and the end of its output. Start it in the
+background and end your turn; don't wait or poll for it:
+
+  nohup hermitator-guest notify --name "test suite" -- npm test > /tmp/tests.log 2>&1 &
+
+COMMAND's output still goes where this command's does.`
+
+// notifyTail is how much of a job's output its report carries.
+const notifyTail = 3000
+
+// notify runs a job the agent wants to hear back from, and hands the host
+// a report on it when it ends. The report is handed over while the hold
+// still keeps the sandbox awake, or the sandbox could sleep before the
+// host had read it.
+func notify(args []string) int {
+	fs := flag.NewFlagSet("notify", flag.ContinueOnError)
+	fs.Usage = func() { fmt.Fprintln(os.Stderr, notifyUsage) }
+	name := fs.String("name", "", "")
+	if fs.Parse(args) != nil {
+		return 2
+	}
+	args = fs.Args()
+	if len(args) == 0 {
+		fs.Usage()
+		return 2
+	}
+	if *name == "" {
+		*name = clipText(strings.Join(args, " "), 60)
+	}
+	release, err := keepAwake(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "notify:", err)
+		return 1
+	}
+	defer release()
+	out := &tailBuffer{max: notifyTail}
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout, cmd.Stderr = io.MultiWriter(os.Stdout, out), io.MultiWriter(os.Stderr, out)
+	start := time.Now()
+	code := exitCode("notify", cmd.Run())
+	took := time.Since(start).Round(time.Second)
+	output := strings.TrimSpace(out.String())
+	if output == "" {
+		output = "(no output)"
+	}
+	report := fmt.Sprintf("[Background job %q, which you started with hermitator-guest notify, finished after %s with exit code %d. The end of its output:]\n```\n%s\n```\nTell the user how it went.",
+		*name, took, code, output)
+	askOr(turn.HostRequest{Op: "wake", Name: *name, Prompt: report}, time.Minute, "hermitator has not answered; the report may not have reached you.")
+	return code
+}
+
+// tailBuffer keeps the last max bytes written to it.
+type tailBuffer struct {
+	mu  sync.Mutex
+	max int
+	buf []byte
+}
+
+func (t *tailBuffer) Write(p []byte) (int, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.buf = append(t.buf, p...)
+	if over := len(t.buf) - t.max; over > 0 {
+		t.buf = t.buf[over:]
+	}
+	return len(p), nil
+}
+
+func (t *tailBuffer) String() string {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return strings.ToValidUTF8(string(t.buf), "")
+}
+
+func clipText(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n-1]) + "…"
+	}
+	return s
 }
 
 // askPoll sends the user a WhatsApp poll.

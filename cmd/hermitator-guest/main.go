@@ -54,6 +54,8 @@ func main() {
 		os.Exit(preview(os.Args[2:]))
 	case "hold":
 		os.Exit(hold(os.Args[2:]))
+	case "notify":
+		os.Exit(notify(os.Args[2:]))
 	case "version":
 		fmt.Println(version)
 	default:
@@ -62,7 +64,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: hermitator-guest init | turn | send FILE [CAPTION] | schedule ... | unschedule ID | tasks | ask QUESTION OPTION... | preview PORT | hold COMMAND | version")
+	fmt.Fprintln(os.Stderr, "usage: hermitator-guest init | turn | send FILE [CAPTION] | schedule ... | unschedule ID | tasks | ask QUESTION OPTION... | preview PORT | hold COMMAND | notify COMMAND | version")
 	os.Exit(2)
 }
 

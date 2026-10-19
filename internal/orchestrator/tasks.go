@@ -304,6 +304,8 @@ func (m *Manager) answer(ctx context.Context, spec *sandbox.Spec, ag *store.Agen
 		return turn.HostAnswer{OK: true, Message: "Cancelled " + t.Name + "."}
 	case "poll":
 		return m.poll(ctx, chat, req)
+	case "wake":
+		return m.wake(ag, chat, req)
 	case "preview":
 		link, err := m.NewPreview(ctx, ag.ID, req.Port)
 		if err != nil {
@@ -312,6 +314,43 @@ func (m *Manager) answer(ctx context.Context, spec *sandbox.Spec, ag *store.Agen
 		return turn.HostAnswer{OK: true, Message: link}
 	}
 	return turn.HostAnswer{Message: "unknown request " + req.Op}
+}
+
+// maxWakesPerHour caps the turns an agent's background jobs may start, so
+// a loop of them cannot run up a bill while nobody watches.
+const maxWakesPerHour = 6
+
+// wake starts a turn for a background job's report, in the chat the
+// agent last talked in.
+func (m *Manager) wake(ag *store.Agent, chat chatRef, req turn.HostRequest) turn.HostAnswer {
+	if !chat.ok() {
+		return turn.HostAnswer{Message: "There is no chat to report in; tell the user in your next reply."}
+	}
+	a := m.actor(ag.ID)
+	a.outbox.Lock()
+	now := time.Now()
+	recent := a.wakes[:0]
+	for _, t := range a.wakes {
+		if now.Sub(t) < time.Hour {
+			recent = append(recent, t)
+		}
+	}
+	a.wakes = recent
+	full := len(recent) >= maxWakesPerHour
+	if !full {
+		a.wakes = append(a.wakes, now)
+	}
+	a.outbox.Unlock()
+	if full {
+		return turn.HostAnswer{Message: fmt.Sprintf("Not started: background jobs have already started %d turns in the last hour.", maxWakesPerHour)}
+	}
+	name := clip(strings.TrimSpace(req.Name), 80)
+	if name == "" {
+		name = "background job"
+	}
+	msg := Message{AccountID: chat.msg.AccountID, Chat: chat.msg.Chat, Owner: true, Time: now, JobName: name, Prompt: clip(req.Prompt, 6000)}
+	a.do(func(a *actor) { a.enqueue(msg) })
+	return turn.HostAnswer{OK: true, Message: "Reported; a turn will start to tell the user."}
 }
 
 // poll sends a multiple-choice question as a WhatsApp poll; the answer

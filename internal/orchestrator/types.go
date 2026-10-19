@@ -50,6 +50,9 @@ type Message struct {
 	TaskName string
 	// TaskID is the task's, so a run is not queued twice.
 	TaskID string
+	// JobName is set when a background job the agent started with
+	// hermitator-guest notify reports back; the reply is headed with it.
+	JobName string
 }
 
 // Media is an attachment. It is only downloaded if the chat is routed.

@@ -249,6 +249,13 @@ while a `hermitator-guest hold` file in `/shared/holds` is fresh. A hold
 refreshes its file every 30 seconds and lapses after three minutes
 without, or after twelve hours.
 
+`hermitator-guest notify -- CMD` is a hold that reports back: when CMD
+exits, it asks the host (a `wake` request) to start a turn in the chat the
+agent last talked in, with CMD's exit code and the last 3,000 bytes of its
+output, headed 🔔 with the job's name. It asks before letting go of its
+hold, so the sandbox cannot sleep between the job ending and the host
+reading the request. Background jobs may start at most six turns an hour.
+
 `hermitator-guest ask QUESTION OPTION...` sends a single-choice WhatsApp
 poll the same way. A vote carries only SHA-256 hashes of the chosen
 options, so the host keeps each poll it sends (`polls` table) and maps the

@@ -50,8 +50,10 @@ keep hundreds of them.
 - **Work that carries on without you.** Ask an agent to do something
   later ("every weekday at 9, check CI and tell me") and it schedules it;
   the host keeps the timetable, so the agent still sleeps until then.
-  Background jobs report back with `whatsapp-send --text` after the turn
-  has ended, and `/sh` runs a quick command without the model. Optional
+  A long job the agent starts with `hermitator-guest notify` (a test
+  suite, a build) wakes it when it ends, so it can tell you how it went;
+  other background jobs report with `whatsapp-send --text`. `/sh` runs a
+  quick command without the model. Optional
   daily and monthly spending limits stop anything running away.
 - **Agents that start from a repository.** Give a new agent `owner/repo`
   or an https URL and it starts with the repository cloned into its

@@ -37,7 +37,7 @@ const systemPrompt = `You are running inside hermitator: an isolated Linux machi
 - For screenshots and browser automation there is Playwright for Python (from playwright.sync_api import sync_playwright) and for Node (require("playwright")), plus a chromium command for one-off captures. After taking a screenshot, look at it before sending it, so you know the page really loaded.
 - Claude Code and pi come with this machine and are updated for you. Do not update or reinstall them yourself (npm install -g, claude update, pi update self): a copy you install hides every later update. Plugins, extensions, skills and MCP servers are yours to install.
 - To do something later, run: hermitator-guest schedule --at 9am|--in 2h|--cron "0 9 * * 1-5" --name "short name" PROMPT. At that time PROMPT reaches you here as a message, in this conversation, and your reply goes to this chat. Times are the owner's (%s; TZ is set to it, so date shows their time). hermitator-guest tasks lists tasks, hermitator-guest unschedule ID cancels one. Schedule only what the user asked for or agreed to; hermitator tells them about every task you set.
-- To report on background work after your turn has ended, have the job finish with whatsapp-send --text "..." (or send a file). A background job freezes when the machine sleeps; to keep it awake until the job ends, start it as: nohup hermitator-guest hold -- sh -c 'CMD > /tmp/job.log 2>&1; whatsapp-send --text "done: ..."' >/dev/null 2>&1 &
+- A background job freezes when the machine sleeps. For a long one whose result you should look at (a test suite, a build, a deploy), start it as: nohup hermitator-guest notify --name "test suite" -- CMD > /tmp/job.log 2>&1 & and end your turn: it keeps the machine awake while CMD runs, then starts a new turn for you with its exit code and the end of its output, so you can tell the user how it went. Never wait or poll for it. For a fixed message instead, have the job finish with whatsapp-send --text "...", started as: nohup hermitator-guest hold -- sh -c 'CMD > /tmp/job.log 2>&1; whatsapp-send --text "done: ..."' >/dev/null 2>&1 &
 - When you need the user to choose between a few options, ask with a poll they can tap: hermitator-guest ask "Deploy to production?" "Yes" "No" "Staging first". Their choice arrives as their next message. Use it for real decisions, not for every question.
 - A table, chart or diagram wider than a phone screen is unreadable in WhatsApp. Render it to an image instead (HTML or Mermaid through Playwright), look at it, and send it with whatsapp-send.
 - Each message starts you afresh in the same conversation, so anything you install or configure is loaded from the next message, not this one; say so when you install something. Add MCP servers for the whole machine (claude mcp add --scope user ...), not in a project .mcp.json, which needs approval you cannot give here. A server that signs in through a browser cannot sign in from here: tell the user to open your Terminal tab on the hermitator page, run claude, and sign in with /mcp.`
@@ -66,8 +66,11 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	defer cancel()
 	last := batch[len(batch)-1]
 	chat := chatRef{m: m, msg: last}
-	if last.TaskName != "" {
+	switch {
+	case last.TaskName != "":
 		chat.prefix = "⏰ *" + last.TaskName + "*\n\n"
+	case last.JobName != "":
+		chat.prefix = "🔔 *" + last.JobName + "*\n\n"
 	}
 	chat.quiet = true
 	for _, msg := range batch {
