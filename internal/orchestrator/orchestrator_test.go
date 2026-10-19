@@ -1350,3 +1350,17 @@ func TestPreviewCommands(t *testing.T) {
 		}
 	}
 }
+
+func TestRequestsAnsweredBeforeAnyChat(t *testing.T) {
+	e := setup(t)
+	e.m.cfg.PreviewDomain, e.m.cfg.PreviewKey = "preview.test", []byte("k")
+	spec, _ := e.m.Spec(e.agent)
+	dir := filepath.Join(spec.SharedDir(), turn.RequestsDir)
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "1.json"), []byte(`{"op":"preview","port":8000}`), 0o644)
+	e.m.background(spec, e.agent)
+	b, err := os.ReadFile(filepath.Join(dir, "1.answer.json"))
+	if err != nil || !strings.Contains(string(b), "8000-"+e.agent.ID+".preview.test") {
+		t.Fatalf("answer = %s, %v", b, err)
+	}
+}

@@ -17,13 +17,14 @@ const maxBackgroundPerHour = 20
 // its turn has ended: files and messages go to the chat it last talked
 // in, and schedule requests are answered.
 func (m *Manager) background(spec *sandbox.Spec, ag *store.Agent) {
-	last, err := m.store.LastTurn(m.ctx, ag.ID)
-	if err != nil || last.AccountID == "" {
-		return
+	chat := chatRef{m: m}
+	if last, err := m.store.LastTurn(m.ctx, ag.ID); err == nil && last.AccountID != "" {
+		chat.msg = Message{AccountID: last.AccountID, Chat: last.ChatJID}
 	}
-	chat := chatRef{m: m, msg: Message{AccountID: last.AccountID, Chat: last.ChatJID}}
+	// Requests are answered even with no chat to talk to: a preview link,
+	// say, is printed for the job that asked.
 	m.handleRequests(m.ctx, spec, ag, chat)
-	if !outboxPending(spec) {
+	if !chat.ok() || !outboxPending(spec) {
 		return
 	}
 	creds, problem := m.credentials(m.ctx, ag)
