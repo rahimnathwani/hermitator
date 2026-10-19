@@ -233,7 +233,7 @@ func (m *Manager) syncFile(ctx context.Context, userID string, ev turn.Event) {
 	if ev.Path != turn.PiAuthPath || !json.Valid([]byte(ev.Content)) {
 		return
 	}
-	if err := m.PutSecret(ctx, userID, store.SecretPiAuth, ev.Content); err != nil {
+	if err := m.PutSecret(ctx, userID, store.SecretPiAuth, m.restorePiAuth(ctx, userID, ev.Content)); err != nil {
 		m.log.Error("store refreshed pi credentials", "user", userID, "err", err)
 	}
 }
@@ -279,6 +279,9 @@ func (m *Manager) Terminal(ctx context.Context, agentID string) (cmd *exec.Cmd, 
 	}
 	sort.Strings(env)
 	if auth := m.Secret(ctx, ag.UserID, store.SecretPiAuth); auth != "" {
+		if creds.placeholders {
+			auth = m.sandboxPiAuth(ag.UserID, auth)
+		}
 		wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		spec.Spool().Run(wctx, spool.Job{ID: "creds-" + ids.New(), Stdin: []byte(auth),
 			Argv: []string{"sh", "-c", `mkdir -p "$HOME/.pi/agent" && umask 077 && cat > "$HOME/.pi/agent/auth.json"`}})
@@ -296,8 +299,9 @@ func (m *Manager) Terminal(ctx context.Context, agentID string) (cmd *exec.Cmd, 
 		out, exit, err := spec.Spool().Run(rctx, spool.Job{ID: "creds-" + ids.New(),
 			Argv: []string{"sh", "-c", `cat "$HOME/.pi/agent/auth.json" 2>/dev/null`}})
 		if err == nil && exit.OK() && json.Valid(out) && len(strings.TrimSpace(string(out))) > 2 {
-			if current := m.Secret(rctx, ag.UserID, store.SecretPiAuth); strings.TrimSpace(current) != strings.TrimSpace(string(out)) {
-				m.PutSecret(rctx, ag.UserID, store.SecretPiAuth, strings.TrimSpace(string(out)))
+			back := strings.TrimSpace(m.restorePiAuth(rctx, ag.UserID, string(out)))
+			if current := m.Secret(rctx, ag.UserID, store.SecretPiAuth); strings.TrimSpace(current) != back {
+				m.PutSecret(rctx, ag.UserID, store.SecretPiAuth, back)
 			}
 		}
 		release()

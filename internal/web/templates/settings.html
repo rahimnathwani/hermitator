@@ -155,7 +155,7 @@
   <div class="setting">
     <div class="about">
       <h3>Keep them out of the sandbox {{if $d.Egress}}<span class="badge ok">On</span>{{else}}<span class="badge">Off</span>{{end}} <span class="badge info">Beta</span></h3>
-      <p>Your agents hold placeholders, and hermitator swaps in the real values only as a request leaves for that credential's own service: Claude's for the Claude token, GitHub's for the GitHub token, and the hosts you give for your secrets. An agent tricked into sending its credentials anywhere else sends nothing of use. ChatGPT's login for pi is not covered yet.</p>
+      <p>Your agents hold placeholders, and hermitator swaps in the real values only as a request leaves for that credential's own service: Claude's for the Claude token, ChatGPT's for pi's ChatGPT login, GitHub's for the GitHub token, and the hosts you give for your secrets. An agent tricked into sending its credentials anywhere else sends nothing of use.</p>
     </div>
     <div class="control">
       <form method="post" action="/settings/egress" class="inline-form" data-track>

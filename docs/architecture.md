@@ -284,8 +284,17 @@ Sandboxes trust the CA through `NODE_EXTRA_CA_CERTS` and a CA bundle
 (`SSL_CERT_FILE` and friends) in the tools bundle. A sandbox only holds
 placeholders if the configuration it runs with, the one a restore reuses,
 trusts the CA; turning the proxy on stops idle agents so they boot
-afresh, and busy ones keep real credentials until they do. pi's ChatGPT
-login (an OAuth file pi refreshes itself) is not covered yet.
+afresh, and busy ones keep real credentials until they do.
+
+pi's ChatGPT login is an OAuth file that pi reads the account ID from (the
+access token is a JWT) and refreshes itself when it nears expiry. A
+sandbox holding placeholders gets an unsigned JWT that decodes the same
+way, a refresh placeholder that is refused everywhere, and an expiry in
+2100, so pi never refreshes; the host refreshes the real token when it
+has under six hours left, before turns and as the proxy looks it up.
+When pi's file comes back after a turn or a terminal session, an entry
+still holding the placeholder is replaced by the stored real one, so
+only a fresh login from the terminal changes what is stored.
 
 Every credential value of eight characters or more, and the long strings in
 pi's credential file, is replaced with `[secret removed]` in what the agent

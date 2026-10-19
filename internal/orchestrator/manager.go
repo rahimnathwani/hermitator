@@ -57,6 +57,7 @@ type Manager struct {
 
 	msgr   Messenger
 	egress egressCache
+	codex  codexState
 	// bg counts background deliveries in flight, for Wait.
 	bg  sync.WaitGroup
 	stt Transcriber

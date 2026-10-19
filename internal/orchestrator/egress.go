@@ -10,6 +10,7 @@ import (
 	"github.com/rahimnathwani/hermitator/internal/egress"
 	"github.com/rahimnathwani/hermitator/internal/sandbox"
 	"github.com/rahimnathwani/hermitator/internal/store"
+	"github.com/rahimnathwani/hermitator/internal/turn"
 )
 
 // Keeping credentials out of sandboxes. With the egress proxy on for a
@@ -51,11 +52,19 @@ func (m *Manager) usePlaceholders(ctx context.Context, ag *store.Agent, spec *sa
 	if err != nil || !u.Egress {
 		return
 	}
+	if err := m.refreshCodex(ctx, u.ID); err != nil {
+		m.log.Warn("ChatGPT token refresh", "user", u.ID, "err", err)
+	}
 	for _, s := range m.egressSecrets(ctx, u) {
 		for k, v := range c.env {
 			if v == s.Value {
 				c.env[k] = s.Placeholder
 			}
+		}
+	}
+	for i, f := range c.files {
+		if f.Path == turn.PiAuthPath {
+			c.files[i].Content = m.sandboxPiAuth(u.ID, f.Content)
 		}
 	}
 	c.placeholders = true
@@ -85,6 +94,7 @@ func (m *Manager) EgressSecrets(ctx context.Context, from netip.Addr) ([]egress.
 	if !u.Egress {
 		return nil, true
 	}
+	m.refreshCodex(ctx, u.ID)
 	return m.egressSecrets(ctx, u), true
 }
 
@@ -101,6 +111,7 @@ func (m *Manager) egressSecrets(ctx context.Context, u *store.User) []egress.Sec
 				Placeholder: egress.Placeholder(m.cfg.EgressKey, u.ID, b.secret, b.prefix)})
 		}
 	}
+	out = append(out, m.codexSecrets(ctx, u.ID)...)
 	hosts, _ := m.store.SecretHosts(ctx, u.ID)
 	for name, hs := range hosts {
 		if v := m.Secret(ctx, u.ID, store.SecretEnvPrefix+name); v != "" && len(hs) > 0 {
