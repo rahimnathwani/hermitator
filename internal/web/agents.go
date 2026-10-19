@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -240,6 +241,9 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request, v *viewer) 
 	memory, _ := strconv.Atoi(formValue(r, "memory_mb"))
 	memory = min(max(memory, 512), 65536)
 	a.Name, a.Harness = name, harness
+	if r.Form.Has("vocabulary") {
+		a.Vocabulary = strings.Join(strings.Fields(clipRunes(formValue(r, "vocabulary"), 500)), " ")
+	}
 	a.PiProvider = formValue(r, "provider")
 	a.Model, a.Effort = formModel(r, harness, a.PiProvider), formEffort(r, harness)
 	a.IdleTimeout = time.Duration(idle) * time.Minute
@@ -512,6 +516,31 @@ func (s *Server) deleteRoute(w http.ResponseWriter, r *http.Request, v *viewer) 
 	s.Store.DeleteRoute(ctx, route.AccountID, route.ChatJID)
 	s.audit(r, v, "route.unlink", "agent="+a.ID+" chat="+route.ChatJID)
 	s.back(w, r, "/agents/"+a.ID, "Unlinked.")
+}
+
+func (s *Server) routeHistory(w http.ResponseWriter, r *http.Request, v *viewer) {
+	a, err := s.agentFor(r, v)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	ctx := r.Context()
+	route, err := s.Store.Route(ctx, formValue(r, "account"), formValue(r, "chat"))
+	if err != nil || route.AgentID != a.ID {
+		http.NotFound(w, r)
+		return
+	}
+	on := formValue(r, "history") == "on"
+	s.Store.SetRouteHistory(ctx, route.AccountID, route.ChatJID, on)
+	s.audit(r, v, "route.history", fmt.Sprintf("agent=%s chat=%s on=%v", a.ID, route.ChatJID, on))
+	s.back(w, r, "/agents/"+a.ID+"/chats", "Saved.")
+}
+
+func clipRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
 }
 
 func (s *Server) routeTriggers(w http.ResponseWriter, r *http.Request, v *viewer) {

@@ -39,7 +39,8 @@ keep hundreds of them.
   way WhatsApp Web does: ideally one that belongs to your agents, so you
   message them like a contact, though it can share your own too. Each chat
   with that number (or each group it is in) is bound to an agent with
-  `/link CODE`. Photos, voice notes (transcribed locally with whisper.cpp)
+  `/link CODE`. Photos, voice notes (transcribed locally with whisper.cpp, with a word list per
+  agent for names and jargon)
   and documents go in; files come back when the agent runs `whatsapp-send`.
   Read receipts and a ⏳ reaction say it is working, ✅ says it is done.
   When an agent needs you to choose ("Deploy to production?"), it can
@@ -215,6 +216,7 @@ hermitator answers itself:
 | `/usage` | Claude subscription use (5-hour and weekly, with pace) and spending |
 | `/sessions`, `/resume N` | Past conversations, and going back to one (`/new` keeps them) |
 | `/fork` | Branch the next message off this conversation (Claude Code) |
+| `/history on`, `/history off` | Keep this chat's messages, everyone's, in a file the agent can search |
 | `/timezone Europe/London` | The time zone schedules use (also in Settings) |
 | `/new` | Start a fresh conversation; files are kept (alias `/clear`) |
 | `/model`, `/model opus`, `/model default` | Show or change the model |

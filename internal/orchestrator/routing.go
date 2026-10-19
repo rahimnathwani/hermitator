@@ -92,6 +92,9 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) {
 		if err != nil {
 			return
 		}
+		if route.History {
+			m.recordHistory(acct.ID, msg.Chat, senderLabel(msg), historyText(msg), msg.Time)
+		}
 		if !triggers(route, ag, msg) {
 			// Kept for the agent's next turn; nothing wakes up.
 			m.hold(ctx, ag, msg)
@@ -196,6 +199,8 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		m.retry(ctx, agentID, msg, reply)
 	case "tasks":
 		m.tasksCommand(ctx, ag, cmd.Arg, reply)
+	case "history":
+		m.historyCommand(route, cmd.Arg, reply)
 	case "usage":
 		reply(m.usageText(ctx, ag))
 	case "plan":

@@ -28,6 +28,7 @@ var commandAliases = map[string]string{
 	"retry":    "retry",
 	"tasks":    "tasks",
 	"usage":    "usage",
+	"history":  "history",
 	"plan":     "plan",
 	"todo":     "plan",
 	"sessions": "sessions",
@@ -67,6 +68,7 @@ const helpText = `*hermitator commands*
 /fork: branch the next message off this conversation
 /plan: the agent's task list for what it is doing
 /usage: your Claude subscription use and spending
+/history on|off: keep this chat's messages in a file the agent can search
 /model [NAME]: show or change the model (/model default to reset)
 /effort [LEVEL]: show or change how hard it thinks
 /once [MODEL] [EFFORT]: MESSAGE: use them for one message only

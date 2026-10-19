@@ -75,7 +75,9 @@ type Messenger interface {
 // Transcriber turns a voice note into text.
 type Transcriber interface {
 	Available() bool
-	Transcribe(ctx context.Context, path string) (string, error)
+	// Transcribe turns audio into text; prompt, which may be empty, lists
+	// words to get right.
+	Transcribe(ctx context.Context, path, prompt string) (string, error)
 }
 
 // UIEvent is published to web clients watching an agent.

@@ -1246,3 +1246,65 @@ func TestPlaceholdersInsteadOfCredentials(t *testing.T) {
 		t.Fatal("the proxy served an address that is no agent's")
 	}
 }
+
+type fakeSTT struct{ prompt chan string }
+
+func (f fakeSTT) Available() bool { return true }
+func (f fakeSTT) Transcribe(_ context.Context, _, prompt string) (string, error) {
+	f.prompt <- prompt
+	return "ship it to Kaltura on Friday", nil
+}
+
+func TestChatHistoryAndVocabulary(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	stt := fakeSTT{prompt: make(chan string, 4)}
+	e.m.SetTranscriber(stt)
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	ag, _ := e.st.Agent(ctx, e.agent.ID)
+	ag.Vocabulary = "Kaltura, whatsmeow"
+	e.st.UpdateAgentSettings(ctx, ag)
+
+	say := func(msg Message) { e.m.HandleMessage(ctx, msg) }
+	say(e.msg(chat, "/history on", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "/shared/chats/") {
+		t.Fatalf("/history on = %q", got.body)
+	}
+	say(e.msg(chat, "the logo should be blue", true))
+	e.rec.wait(t, "text")
+	e.idle(t)
+
+	voice := e.msg(chat, "", true)
+	voice.Media = &Media{Kind: "audio", MIME: "audio/ogg", Voice: true, Fetch: func(context.Context) ([]byte, error) { return []byte("ogg"), nil }}
+	say(voice)
+	if got := <-stt.prompt; got != "Kaltura, whatsmeow" {
+		t.Fatalf("whisper prompt = %q", got)
+	}
+	e.rec.wait(t, "text")
+	e.idle(t)
+
+	spec, _ := e.m.Spec(e.agent)
+	files, _ := filepath.Glob(filepath.Join(spec.SharedDir(), "chats", "*.md"))
+	if len(files) != 1 {
+		t.Fatalf("history files = %v", files)
+	}
+	b, _ := os.ReadFile(files[0])
+	for _, want := range []string{"the owner: the logo should be blue", "you (the agent): **echo:** the logo should be blue", "the owner: [audio]"} {
+		if !strings.Contains(string(b), want) {
+			t.Errorf("history lacks %q:\n%s", want, b)
+		}
+	}
+	if a := e.lastArgs(t); !strings.Contains(a, "/chats/") || !strings.Contains(a, "earlier conversations") {
+		t.Fatalf("the agent is not told about its history:\n%s", a)
+	}
+	say(e.msg(chat, "/history off", true))
+	e.rec.wait(t, "text")
+	say(e.msg(chat, "not kept", true))
+	e.rec.wait(t, "text")
+	e.idle(t)
+	if b, _ := os.ReadFile(files[0]); strings.Contains(string(b), "not kept") {
+		t.Fatal("history kept a message after /history off")
+	}
+}

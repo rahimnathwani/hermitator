@@ -617,3 +617,25 @@ func TestWorkAtRiskEndpoint(t *testing.T) {
 		t.Fatal("the delete dialog does not check for unpushed work")
 	}
 }
+
+func TestRouteHistorySwitch(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	alice := f.login(t, "alice@example.com")
+	bob := f.login(t, "bob@example.com")
+	id := alice.createAgent("bot")
+	acct := &store.Account{UserID: f.users["alice@example.com"].ID, JID: "1:7@s.whatsapp.net", Phone: "15550007777", Status: store.AccountConnected}
+	f.store.CreateAccount(ctx, acct)
+	f.store.PutRoute(ctx, &store.Route{AccountID: acct.ID, ChatJID: "team@g.us", ChatName: "Team", AgentID: id, OwnerTrigger: store.TriggerAll, OthersTrigger: store.TriggerNone})
+	form := url.Values{"account": {acct.ID}, "chat": {"team@g.us"}, "history": {"on"}}
+	if code, _ := bob.post("/agents/"+id+"/routes/history", form); code != http.StatusNotFound {
+		t.Fatalf("bob switched alice's history: %d", code)
+	}
+	alice.post("/agents/"+id+"/routes/history", form)
+	if r, _ := f.store.Route(ctx, acct.ID, "team@g.us"); !r.History {
+		t.Fatal("history not on")
+	}
+	if _, body := alice.get("/agents/" + id + "/chats"); !strings.Contains(body, `name="history" value="on" checked`) {
+		t.Fatal("the Chats tab does not show history as on")
+	}
+}

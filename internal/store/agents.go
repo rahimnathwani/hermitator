@@ -33,7 +33,9 @@ type Agent struct {
 	Harness string
 	Model   string
 	// Effort is the harness's thinking effort; empty for its default.
-	Effort     string
+	Effort string
+	// Vocabulary is words voice notes should get right.
+	Vocabulary string
 	PiProvider string
 	State      string
 	SessionID  string
@@ -47,14 +49,14 @@ type Agent struct {
 	CreatedAt   time.Time
 }
 
-const agentColumns = `id, user_id, name, image, harness, model, effort, pi_provider, state, session_id, session_cost, idle_timeout_sec, memory_mb, ip, last_active_at, created_at`
+const agentColumns = `id, user_id, name, image, harness, model, effort, vocabulary, pi_provider, state, session_id, session_cost, idle_timeout_sec, memory_mb, ip, last_active_at, created_at`
 
 func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	var a Agent
 	var idle int
 	var last sql.NullString
 	var created string
-	if err := row.Scan(&a.ID, &a.UserID, &a.Name, &a.Image, &a.Harness, &a.Model, &a.Effort, &a.PiProvider, &a.State,
+	if err := row.Scan(&a.ID, &a.UserID, &a.Name, &a.Image, &a.Harness, &a.Model, &a.Effort, &a.Vocabulary, &a.PiProvider, &a.State,
 		&a.SessionID, &a.SessionCost, &idle, &a.MemoryMB, &a.IP, &last, &created); err != nil {
 		return nil, one(err)
 	}
@@ -90,8 +92,8 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent, subnet netip.Prefix) 
 	if a.MemoryMB == 0 {
 		a.MemoryMB = 4096
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO agents (`+agentColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.UserID, a.Name, a.Image, a.Harness, a.Model, a.Effort, a.PiProvider, a.State, a.SessionID, a.SessionCost,
+	_, err = tx.ExecContext(ctx, `INSERT INTO agents (`+agentColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.UserID, a.Name, a.Image, a.Harness, a.Model, a.Effort, a.Vocabulary, a.PiProvider, a.State, a.SessionID, a.SessionCost,
 		int(a.IdleTimeout/time.Second), a.MemoryMB, a.IP, nullTS(a.LastActive), ts(a.CreatedAt))
 	if isUnique(err) {
 		return ErrConflict
@@ -189,8 +191,8 @@ func (s *Store) CountAgents(ctx context.Context, userID string) (int, error) {
 // UpdateAgentSettings saves the user-editable fields of a. The session is
 // left alone; see SetAgentSession.
 func (s *Store) UpdateAgentSettings(ctx context.Context, a *Agent) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE agents SET name = ?, harness = ?, model = ?, effort = ?, pi_provider = ?, idle_timeout_sec = ?, memory_mb = ? WHERE id = ?`,
-		a.Name, a.Harness, a.Model, a.Effort, a.PiProvider, int(a.IdleTimeout/time.Second), a.MemoryMB, a.ID)
+	_, err := s.db.ExecContext(ctx, `UPDATE agents SET name = ?, harness = ?, model = ?, effort = ?, vocabulary = ?, pi_provider = ?, idle_timeout_sec = ?, memory_mb = ? WHERE id = ?`,
+		a.Name, a.Harness, a.Model, a.Effort, a.Vocabulary, a.PiProvider, int(a.IdleTimeout/time.Second), a.MemoryMB, a.ID)
 	if isUnique(err) {
 		return ErrConflict
 	}

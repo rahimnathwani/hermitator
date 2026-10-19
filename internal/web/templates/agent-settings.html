@@ -14,6 +14,8 @@
     {{template "agent-fields" $d.Fields}}
     <label class="field"><span class="label">Sleep after</span><span class="inline"><input type="number" name="idle_minutes" min="1" max="1440" value="{{minutes $a.IdleTimeout}}"> minutes without a message</span>
       <p class="hint">Asleep, it uses no memory. Background processes survive a checkpoint.</p></label>
+    <label class="field"><span class="label">Words voice notes should get right</span><input name="vocabulary" value="{{$a.Vocabulary}}" placeholder="Kaltura, whatsmeow, Sam Okafor" maxlength="500" autocomplete="off">
+      <p class="hint">Names and jargon, as you would spell them; the transcriber prefers these spellings.</p></label>
     <fieldset class="field">
       <legend>Memory limit</legend>
       {{template "seg" $d.Memory}}

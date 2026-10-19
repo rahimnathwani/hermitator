@@ -116,7 +116,7 @@ func (w *Whisper) ffmpeg() string {
 }
 
 // Transcribe returns the text spoken in an audio file.
-func (w *Whisper) Transcribe(ctx context.Context, path string) (string, error) {
+func (w *Whisper) Transcribe(ctx context.Context, path, prompt string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	tmp, err := os.MkdirTemp("", "hermitator-whisper-")
@@ -133,7 +133,12 @@ func (w *Whisper) Transcribe(ctx context.Context, path string) (string, error) {
 		threads = min(runtime.NumCPU(), 8)
 	}
 	base := filepath.Join(tmp, "out")
-	if err := run(ctx, w.Binary, "-m", w.Model, "-f", wav, "-l", "auto", "-t", fmt.Sprint(threads), "-nt", "-np", "-otxt", "-of", base); err != nil {
+	args := []string{"-m", w.Model, "-f", wav, "-l", "auto", "-t", fmt.Sprint(threads), "-nt", "-np", "-otxt", "-of", base}
+	if prompt = strings.TrimSpace(prompt); prompt != "" {
+		// whisper.cpp's initial prompt: spellings it should prefer.
+		args = append(args, "--prompt", prompt)
+	}
+	if err := run(ctx, w.Binary, args...); err != nil {
 		return "", err
 	}
 	text, err := os.ReadFile(base + ".txt")

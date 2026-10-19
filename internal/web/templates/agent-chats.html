@@ -40,9 +40,19 @@
         <span class="label">Others wake it</span>{{template "seg" (triggers "others" .OthersTrigger)}}
         <div class="form-actions"><button class="small" data-save>Save</button><span class="unsaved">Unsaved</span></div>
       </form>
+      <form method="post" action="/agents/{{$a.ID}}/routes/history" class="triggers" data-track>
+        <input type="hidden" name="account" value="{{.AccountID}}"><input type="hidden" name="chat" value="{{.ChatJID}}">
+        <span class="label">Keep history</span>
+        <div class="seg">
+          <label><input type="radio" name="history" value="off"{{if not .History}} checked{{end}}><span>off</span></label>
+          <label><input type="radio" name="history" value="on"{{if .History}} checked{{end}}><span>on</span></label>
+        </div>
+        <div class="form-actions"><button class="small" data-save>Save</button><span class="unsaved">Unsaved</span></div>
+      </form>
     </li>
     {{end}}
   </ul>
+  <p class="hint">With history on, every message in the chat, other people's included, is kept in a file in the agent's <code>/shared/chats</code>, so it can look things up. Turning it off stops that; what was kept stays until you ask the agent to delete it.</p>
   <p class="hint">Mentioning it means an @mention of its number, a reply to one of its messages, or typing <code>@{{$a.Name}}</code>.</p>
   {{else}}
   <div class="empty">

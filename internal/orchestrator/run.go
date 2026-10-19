@@ -161,7 +161,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		Effort:       effort,
 		Fork:         fork,
 		Provider:     agent.PiProvider,
-		SystemPrompt: m.agentPrompt(spec, loc, last) + credentialsNote(creds),
+		SystemPrompt: m.agentPrompt(spec, loc, last) + credentialsNote(creds) + m.historyNote(ctx, spec, agent, last),
 		SteerID:      t.id,
 		Env:          env,
 		Files:        creds.files,
@@ -493,7 +493,7 @@ func (m *Manager) saveMedia(ctx context.Context, spec *sandbox.Spec, msg Message
 	case md.Kind == "image" && media.InlineImage(md.MIME):
 		return "[Image attached, also saved at " + guest + "]", &turn.Image{Path: path.Join(turn.InboxDir, name), MIME: md.MIME}
 	case md.Kind == "audio" && m.stt != nil && m.stt.Available():
-		text, err := m.transcribe(ctx, data, name)
+		text, err := m.transcribe(ctx, spec.ID, data, name)
 		if err != nil {
 			m.log.Warn("transcription failed", "err", err)
 			return fmt.Sprintf("[Voice note saved at %s (%s); transcription failed]", guest, size), nil
@@ -508,7 +508,7 @@ func (m *Manager) saveMedia(ctx context.Context, spec *sandbox.Spec, msg Message
 
 // transcribe works on a private copy: the copy in the inbox belongs to the
 // agent, which could swap it for something else.
-func (m *Manager) transcribe(ctx context.Context, data []byte, name string) (string, error) {
+func (m *Manager) transcribe(ctx context.Context, agentID string, data []byte, name string) (string, error) {
 	f, err := os.CreateTemp("", "hermitator-audio-*"+filepath.Ext(name))
 	if err != nil {
 		return "", err
@@ -521,7 +521,11 @@ func (m *Manager) transcribe(ctx context.Context, data []byte, name string) (str
 	if err != nil {
 		return "", err
 	}
-	return m.stt.Transcribe(ctx, f.Name())
+	vocabulary := ""
+	if ag, err := m.store.Agent(ctx, agentID); err == nil {
+		vocabulary = ag.Vocabulary
+	}
+	return m.stt.Transcribe(ctx, f.Name(), vocabulary)
 }
 
 // maxOutboxFile is the largest file an agent can send.
@@ -653,7 +657,13 @@ func (c chatRef) send(text string) {
 }
 
 // sendAgent delivers the agent's Markdown, converted for WhatsApp.
-func (c chatRef) sendAgent(text string) { c.send(c.prefix + wamd.Format(c.redact.apply(text))) }
+func (c chatRef) sendAgent(text string) {
+	text = c.redact.apply(text)
+	c.send(c.prefix + wamd.Format(text))
+	if c.ok() {
+		c.m.recordHistory(c.msg.AccountID, c.msg.Chat, "you (the agent)", text, time.Now())
+	}
+}
 
 func (c chatRef) sendFile(name string, data []byte, caption string) error {
 	if !c.ok() {
@@ -827,4 +837,23 @@ func credentialsNote(c credentials) string {
 type stallState struct {
 	at    time.Time
 	doing string
+}
+
+// historyNote points the agent at its earlier conversations and, where
+// the chat keeps one, at its history file.
+func (m *Manager) historyNote(ctx context.Context, spec *sandbox.Spec, ag *store.Agent, last Message) string {
+	var b strings.Builder
+	switch ag.Harness {
+	case store.HarnessClaude:
+		b.WriteString("\n- Transcripts of your earlier conversations with this owner, from before a /new, are in ~/.claude/projects/ (one .jsonl per conversation); search them when someone refers to something from before.")
+	case store.HarnessPi:
+		b.WriteString("\n- Transcripts of your earlier conversations with this owner, from before a /new, are in ~/.pi/agent/sessions/; search them when someone refers to something from before.")
+	}
+	if last.AccountID != "" {
+		if route, err := m.store.Route(ctx, last.AccountID, last.Chat); err == nil && route.History {
+			fmt.Fprintf(&b, "\n- Everything said in this chat since its history was turned on, other people's messages included, is in %s; grep it when someone refers to something said before.",
+				path.Join(m.rt.GuestShared(spec), historyFile(route)))
+		}
+	}
+	return b.String()
 }

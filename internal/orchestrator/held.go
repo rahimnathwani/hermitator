@@ -124,7 +124,7 @@ func (m *Manager) heldMediaNote(ctx context.Context, spec *sandbox.Spec, h *stor
 	guest := path.Join(m.rt.GuestShared(spec), turn.InboxDir, h.MediaFile)
 	if h.MediaKind == "audio" && m.stt != nil && m.stt.Available() {
 		if data, err := readShared(spec, path.Join(turn.InboxDir, h.MediaFile)); err == nil {
-			if text, err := m.transcribe(ctx, data, h.MediaFile); err == nil {
+			if text, err := m.transcribe(ctx, spec.ID, data, h.MediaFile); err == nil {
 				return fmt.Sprintf("[voice note, transcribed: %q; audio at %s]", text, guest)
 			}
 		}

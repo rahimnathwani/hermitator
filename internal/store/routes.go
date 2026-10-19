@@ -27,15 +27,17 @@ type Route struct {
 	// and from everyone else, start a turn. The rest are held.
 	OwnerTrigger  string
 	OthersTrigger string
-	CreatedAt     time.Time
+	// History keeps the chat's messages in a file the agent can search.
+	History   bool
+	CreatedAt time.Time
 }
 
-const routeColumns = `account_id, chat_jid, chat_name, agent_id, owner_trigger, others_trigger, created_at`
+const routeColumns = `account_id, chat_jid, chat_name, agent_id, owner_trigger, others_trigger, history, created_at`
 
 func scanRoute(row interface{ Scan(...any) error }) (*Route, error) {
 	var r Route
 	var created string
-	if err := row.Scan(&r.AccountID, &r.ChatJID, &r.ChatName, &r.AgentID, &r.OwnerTrigger, &r.OthersTrigger, &created); err != nil {
+	if err := row.Scan(&r.AccountID, &r.ChatJID, &r.ChatName, &r.AgentID, &r.OwnerTrigger, &r.OthersTrigger, &r.History, &created); err != nil {
 		return nil, one(err)
 	}
 	r.CreatedAt = parseTS(created)
@@ -61,12 +63,12 @@ func (s *Store) PutRoute(ctx context.Context, r *Route) error {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO routes (`+routeColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO routes (`+routeColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (account_id, chat_jid) DO UPDATE SET
 			chat_name = excluded.chat_name, agent_id = excluded.agent_id,
 			owner_trigger = excluded.owner_trigger, others_trigger = excluded.others_trigger,
 			created_at = excluded.created_at`,
-		r.AccountID, r.ChatJID, r.ChatName, r.AgentID, r.OwnerTrigger, r.OthersTrigger, ts(r.CreatedAt)); err != nil {
+		r.AccountID, r.ChatJID, r.ChatName, r.AgentID, r.OwnerTrigger, r.OthersTrigger, r.History, ts(r.CreatedAt)); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -147,4 +149,9 @@ func (s *Store) ConsumeLinkCode(ctx context.Context, code string) (string, error
 		return "", err
 	}
 	return agentID, tx.Commit()
+}
+
+// SetRouteHistory turns a chat's history file on or off.
+func (s *Store) SetRouteHistory(ctx context.Context, accountID, chatJID string, on bool) error {
+	return affected(s.db.ExecContext(ctx, `UPDATE routes SET history = ? WHERE account_id = ? AND chat_jid = ?`, on, accountID, chatJID))
 }
