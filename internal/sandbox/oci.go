@@ -159,6 +159,11 @@ func writeSpec(s *Spec, spec *specs.Spec) error {
 	return os.Rename(tmp, filepath.Join(s.Dir, "config.json"))
 }
 
+// BootedTools is the guest bundle the sandbox's current boot mounts, which
+// a checkpointed sandbox keeps until it boots afresh; empty when the
+// runtime keeps no bundle config.
+func (s *Spec) BootedTools() string { return bundleTools(s.Dir) }
+
 // bundleTools returns the guest bundle a sandbox's current config mounts,
 // so the bundle is not deleted while a checkpoint still refers to it.
 func bundleTools(dir string) string {

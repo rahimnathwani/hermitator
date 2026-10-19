@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -1857,6 +1858,30 @@ func TestReviewBeforeSleep(t *testing.T) {
 	}
 	time.Sleep(200 * time.Millisecond)
 	e.idle(t)
+}
+
+// The prompt mentions only the guest commands the sandbox has: one
+// restored from a checkpoint keeps the bundle it booted with.
+func TestPromptMatchesTheGuest(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	spec, _ := e.m.Spec(e.agent)
+	booted := func(tools string) {
+		cfg, _ := json.Marshal(map[string]any{"mounts": []map[string]string{{"destination": turn.ToolsDir, "source": tools}}})
+		os.MkdirAll(spec.Dir, 0o755)
+		os.WriteFile(filepath.Join(spec.Dir, "config.json"), cfg, 0o600)
+	}
+	prompt := func() string {
+		return e.m.agentPrompt(spec, time.UTC, Message{}) + e.m.historyNote(ctx, spec, e.agent, Message{})
+	}
+	booted("/var/lib/hermitator/tools/older")
+	if p := prompt(); strings.Contains(p, "notify") || strings.Contains(p, "--if") || strings.Contains(p, "recall") || !strings.Contains(p, "Search them") {
+		t.Fatalf("an older guest's prompt:\n%s", p)
+	}
+	booted(e.m.cfg.Tools)
+	if p := prompt(); !strings.Contains(p, "hermitator-guest notify") || !strings.Contains(p, "--if 'COMMAND'") || !strings.Contains(p, "hermitator-guest recall") {
+		t.Fatalf("the current guest's prompt:\n%s", p)
+	}
 }
 
 // A compaction that cannot start, here because the owner removed their

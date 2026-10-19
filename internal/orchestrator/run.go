@@ -36,8 +36,8 @@ const systemPrompt = `You are running inside hermitator: an isolated Linux machi
 - When nobody is talking to you the machine is suspended. Background processes you leave running (dev servers, databases) are frozen and continue when the next message arrives. Start them with their output redirected to a file, for example: nohup npm run dev > /tmp/dev.log 2>&1 &. The shell you start them from goes away at the end of your turn.
 - For screenshots and browser automation there is Playwright for Python (from playwright.sync_api import sync_playwright) and for Node (require("playwright")), plus a chromium command for one-off captures. After taking a screenshot, look at it before sending it, so you know the page really loaded.
 - Claude Code and pi come with this machine and are updated for you. Do not update or reinstall them yourself (npm install -g, claude update, pi update self): a copy you install hides every later update. Plugins, extensions, skills and MCP servers are yours to install.
-- To do something later, run: hermitator-guest schedule --at 9am|--in 2h|--cron "0 9 * * 1-5" --name "short name" PROMPT. At that time PROMPT reaches you here as a message, in this conversation, and your reply goes to this chat. Times are the owner's (%s; TZ is set to it, so date shows their time). hermitator-guest tasks lists tasks, hermitator-guest unschedule ID cancels one. Schedule only what the user asked for or agreed to; hermitator tells them about every task you set. To watch for something (a failing build, a new issue), add --if 'COMMAND': at each time hermitator runs COMMAND here first and wakes you, with what it printed, only if it prints something, so checks that find nothing cost no model calls.
-- A background job freezes when the machine sleeps. For a long one whose result you should look at (a test suite, a build, a deploy), start it as: nohup hermitator-guest notify --name "test suite" -- CMD > /tmp/job.log 2>&1 & and end your turn: it keeps the machine awake while CMD runs, then starts a new turn for you with its exit code and the end of its output, so you can tell the user how it went. Never wait or poll for it. For a fixed message instead, have the job finish with whatsapp-send --text "...", started as: nohup hermitator-guest hold -- sh -c 'CMD > /tmp/job.log 2>&1; whatsapp-send --text "done: ..."' >/dev/null 2>&1 &
+- To do something later, run: hermitator-guest schedule --at 9am|--in 2h|--cron "0 9 * * 1-5" --name "short name" PROMPT. At that time PROMPT reaches you here as a message, in this conversation, and your reply goes to this chat. Times are the owner's (%s; TZ is set to it, so date shows their time). hermitator-guest tasks lists tasks, hermitator-guest unschedule ID cancels one. Schedule only what the user asked for or agreed to; hermitator tells them about every task you set.%s
+- A background job freezes when the machine sleeps.%s For a fixed message when it ends, have the job finish with whatsapp-send --text "...", started as: nohup hermitator-guest hold -- sh -c 'CMD > /tmp/job.log 2>&1; whatsapp-send --text "done: ..."' >/dev/null 2>&1 &
 - When you need the user to choose between a few options, ask with a poll they can tap: hermitator-guest ask "Deploy to production?" "Yes" "No" "Staging first". Their choice arrives as their next message. Use it for real decisions, not for every question.
 - A table, chart or diagram wider than a phone screen is unreadable in WhatsApp. Render it to an image instead (HTML or Mermaid through Playwright), look at it, and send it with whatsapp-send.
 - Each message starts you afresh in the same conversation, so anything you install or configure is loaded from the next message, not this one; say so when you install something. Add MCP servers for the whole machine (claude mcp add --scope user ...), not in a project .mcp.json, which needs approval you cannot give here. A server that signs in through a browser cannot sign in from here: tell the user to open your Terminal tab on the hermitator page, run claude, and sign in with /mcp.`
@@ -52,7 +52,14 @@ func (m *Manager) agentPrompt(spec *sandbox.Spec, loc *time.Location, last Messa
 	case last.SenderName != "" && !last.FromMe:
 		who = fmt.Sprintf("You are talking to %s over WhatsApp.", last.SenderName)
 	}
-	prompt := fmt.Sprintf(systemPrompt, who, path.Join(m.rt.GuestShared(spec), turn.InboxDir), loc)
+	// What this sandbox's guest commands can do: one restored from a
+	// checkpoint keeps the bundle it booted with, which may predate some.
+	watch, notify := "", ""
+	if m.newGuest(spec) {
+		watch = " To watch for something (a failing build, a new issue), add --if 'COMMAND': at each time hermitator runs COMMAND here first and wakes you, with what it printed, only if it prints something, so checks that find nothing cost no model calls."
+		notify = ` For a long one whose result you should look at (a test suite, a build, a deploy), start it as: nohup hermitator-guest notify --name "test suite" -- CMD > /tmp/job.log 2>&1 & and end your turn: it keeps the machine awake while CMD runs, then starts a new turn for you with its exit code and the end of its output, so you can tell the user how it went. Never wait or poll for it.`
+	}
+	prompt := fmt.Sprintf(systemPrompt, who, path.Join(m.rt.GuestShared(spec), turn.InboxDir), loc, watch, notify)
 	if m.Previews() {
 		prompt += "\n- To let the user open a web server you run (a dev server, a demo), have it listen on 0.0.0.0 (vite --host, next dev -H 0.0.0.0) and run: hermitator-guest preview PORT. It prints a link to send them; it works from their phone, and opening it wakes this machine. Anyone with the link can see the page, so offer it for things meant to be seen."
 	}
@@ -927,7 +934,11 @@ func (m *Manager) historyNote(ctx context.Context, spec *sandbox.Spec, ag *store
 	case store.HarnessPi:
 		b.WriteString("\n- Full transcripts of your conversations with this owner, including what was summarised and what came before a /new, are in ~/.pi/agent/sessions/.")
 	}
-	b.WriteString(" When someone refers to something from before, or you need a detail a summary dropped, look it up before guessing: hermitator-guest recall WORDS lists the newest messages containing all of WORDS, in your transcripts and in chat history files, and hermitator-guest recall --show REF reads the messages around one.")
+	if m.newGuest(spec) {
+		b.WriteString(" When someone refers to something from before, or you need a detail a summary dropped, look it up before guessing: hermitator-guest recall WORDS lists the newest messages containing all of WORDS, in your transcripts and in chat history files, and hermitator-guest recall --show REF reads the messages around one.")
+	} else {
+		b.WriteString(" Search them when someone refers to something from before.")
+	}
 	if last.AccountID != "" {
 		if route, err := m.store.Route(ctx, last.AccountID, last.Chat); err == nil && route.History {
 			fmt.Fprintf(&b, "\n- Everything said in this chat since its history was turned on, other people's messages included, is in %s; hermitator-guest recall searches it too.",
@@ -935,6 +946,13 @@ func (m *Manager) historyNote(ctx context.Context, spec *sandbox.Spec, ag *store
 		}
 	}
 	return b.String()
+}
+
+// newGuest reports whether the sandbox runs the current guest bundle, with
+// every command the prompt may mention, or one it booted with earlier.
+func (m *Manager) newGuest(spec *sandbox.Spec) bool {
+	booted := spec.BootedTools()
+	return booted == "" || booted == m.cfg.Tools
 }
 
 // recordFailed records a turn that could not run and had no chat to say
