@@ -136,12 +136,19 @@ about to suspend an idle agent whose conversation is 60k tokens or more,
 and it went idle under 45 minutes ago, it compacts first, while the
 history is still cached and cheap to read: Claude Code gets `/compact` as
 a print-mode prompt (stream-json input does not take slash commands), pi
-gets its `compact` RPC command. The compaction runs as a turn of its own,
-recorded with its cost, holding the turn slot so a message arriving
-meanwhile waits; the next reaper tick suspends the agent. Afterwards the
-agent's size is 0, or pi's estimate, so it is not compacted again until a
-turn measures it anew. Nothing is lost: transcripts keep everything, and
-agents are told where they are.
+gets its `compact` RPC command. Both take instructions for the summary
+(`compactKeep`, adapted from UniiChat's compactor): the people's own words
+first and close to verbatim, then lasting effects and failures, then
+findings, tool steps last; names, ids, paths and errors copied exactly.
+Agents are also told that summaries keep little of tool output, so they
+say in their replies what they learned that will matter later. The
+compaction runs as a turn of its own, recorded with its cost, holding the
+turn slot so a message arriving meanwhile waits; the next reaper tick
+suspends the agent. Afterwards the agent's size is 0, or pi's estimate, so
+it is not compacted again until a turn measures it anew; that holds for a
+compaction that fails or cannot start (no credentials) too, which would
+otherwise be retried on every tick and keep the agent awake. Nothing is
+lost: transcripts keep everything, and agents are told where they are.
 
 Both harnesses also compact on their own near the model's context limit;
 that keeps them working, not cheap, and a mostly sleeping agent with a

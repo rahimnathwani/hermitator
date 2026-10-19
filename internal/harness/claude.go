@@ -309,13 +309,15 @@ func steer(dir string, stdin io.Writer, emit Emit) (stop func()) {
 }
 
 // compactClaude runs /compact on a session. Claude Code takes slash
-// commands as the prompt of a print-mode run, not over stream-json input.
+// commands as the prompt of a print-mode run, not over stream-json input,
+// and adds what follows /compact to its summarising instructions.
 func compactClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit) error {
 	if req.SessionID == "" || !claudeSessionExists(req.SessionID) {
 		emit(turn.Event{Type: turn.EventError, Text: "no conversation to compact"})
 		return nil
 	}
-	args := []string{"-p", "/compact", "--resume", req.SessionID, "--output-format", "stream-json", "--verbose"}
+	command := strings.TrimSpace("/compact " + req.Prompt)
+	args := []string{"-p", command, "--resume", req.SessionID, "--output-format", "stream-json", "--verbose"}
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
 	}

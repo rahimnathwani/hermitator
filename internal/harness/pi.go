@@ -97,7 +97,11 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 	}
 	prompt, _ := json.Marshal(map[string]any{"id": "turn", "type": "prompt", "message": req.Prompt, "images": images})
 	if req.Compact {
-		prompt = []byte(`{"id":"turn","type":"compact"}`)
+		compact := map[string]any{"id": "turn", "type": "compact"}
+		if req.Prompt != "" {
+			compact["customInstructions"] = req.Prompt
+		}
+		prompt, _ = json.Marshal(compact)
 	}
 
 	cmd := exec.CommandContext(ctx, Getenv("HERMITATOR_PI_BIN", "pi"), args...)

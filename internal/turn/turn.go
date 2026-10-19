@@ -53,7 +53,8 @@ type Request struct {
 	// Provider selects pi's model provider; ignored for Claude.
 	Provider string `json:"provider,omitempty"`
 	// Compact summarises the session's older history instead of running
-	// a prompt, so the next turn after a long sleep re-reads less.
+	// a prompt, so the next turn after a long sleep re-reads less. Prompt
+	// then says what the summary must keep.
 	Compact bool `json:"compact,omitempty"`
 	// Fork continues SessionID in a new session, leaving the old one as
 	// it was. Claude Code only.

@@ -223,11 +223,11 @@ func TestClaudeUsageAndTodos(t *testing.T) {
 
 func TestCompact(t *testing.T) {
 	args, stdin := fake(t, "HERMITATOR_PI_BIN", "pi-compact.jsonl")
-	res := last(run(t, &turn.Request{Harness: turn.Pi, SessionID: "4a0d6c4e", Provider: "openai-codex", Compact: true}))
+	res := last(run(t, &turn.Request{Harness: turn.Pi, SessionID: "4a0d6c4e", Provider: "openai-codex", Compact: true, Prompt: "Keep the codeword."}))
 	if res.Type != turn.EventResult || res.ContextTokens != 26484 || res.CostUSD < 0.0056 || !strings.Contains(res.Text, "43425") {
 		t.Fatalf("pi compact = %+v", res)
 	}
-	if !strings.Contains(stdin(), `"type":"compact"`) || !strings.Contains(args(), "--session-id\n4a0d6c4e") {
+	if !strings.Contains(stdin(), `"customInstructions":"Keep the codeword."`) || !strings.Contains(args(), "--session-id\n4a0d6c4e") {
 		t.Fatalf("pi was sent %q with %q", stdin(), args())
 	}
 
@@ -236,11 +236,11 @@ func TestCompact(t *testing.T) {
 	os.MkdirAll(filepath.Join(home, ".claude", "projects", "w"), 0o755)
 	os.WriteFile(filepath.Join(home, ".claude", "projects", "w", "b2fbb8dd.jsonl"), nil, 0o644)
 	args, _ = fake(t, "HERMITATOR_CLAUDE_BIN", "claude-compact.jsonl")
-	res = last(run(t, &turn.Request{Harness: turn.Claude, SessionID: "b2fbb8dd", Compact: true, Model: "haiku"}))
+	res = last(run(t, &turn.Request{Harness: turn.Claude, SessionID: "b2fbb8dd", Compact: true, Model: "haiku", Prompt: "Keep the codeword."}))
 	if res.Type != turn.EventResult || res.CostUSD != 0.0213 || !strings.Contains(res.Text, "36641") || res.ContextTokens != 0 {
 		t.Fatalf("claude compact = %+v", res)
 	}
-	if a := args(); !strings.HasPrefix(a, "-p\n/compact\n--resume\nb2fbb8dd\n") || !strings.Contains(a, "--model\nhaiku") {
+	if a := args(); !strings.HasPrefix(a, "-p\n/compact Keep the codeword.\n--resume\nb2fbb8dd\n") || !strings.Contains(a, "--model\nhaiku") {
 		t.Fatalf("claude args:\n%s", a)
 	}
 	// Nothing to compact without a transcript.

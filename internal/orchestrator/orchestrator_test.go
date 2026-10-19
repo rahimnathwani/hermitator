@@ -46,8 +46,8 @@ func TestMain(m *testing.M) {
 const fakeClaude = `#!/usr/bin/env bash
 read -r line
 printf '%s\n' "$@" > "$HOME/last-args"
-if [ "$2" = "/compact" ]; then
-  echo "$4" >> "$HOME/compactions"
+if [ "${2%% *}" = "/compact" ]; then
+  echo "$4: $2" >> "$HOME/compactions"
   printf '%s\n' '{"type":"system","subtype":"status","status":"compacting"}' \
     '{"type":"system","subtype":"status","status":null,"compact_result":"success"}' \
     '{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"manual","pre_tokens":70000,"post_tokens":3000}}' \
@@ -1306,7 +1306,7 @@ func TestChatHistoryAndVocabulary(t *testing.T) {
 			t.Errorf("history lacks %q:\n%s", want, b)
 		}
 	}
-	if a := e.lastArgs(t); !strings.Contains(a, "/chats/") || !strings.Contains(a, "earlier conversations") {
+	if a := e.lastArgs(t); !strings.Contains(a, "/chats/") || !strings.Contains(a, "Full transcripts of your conversations") {
 		t.Fatalf("the agent is not told about its history:\n%s", a)
 	}
 	say(e.msg(chat, "/history off", true))
@@ -1418,7 +1418,42 @@ func TestCompactBeforeSleep(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatal("no record of the fake's compaction")
 	}
-	if b, _ := os.ReadFile(matches[0]); strings.Count(string(b), "\n") != 1 {
+	if b, _ := os.ReadFile(matches[0]); strings.Count(string(b), "\n") != 1 || !strings.Contains(string(b), "/compact "+compactKeep) {
 		t.Fatalf("compactions: %q", b)
+	}
+}
+
+// A compaction that cannot start, here because the owner removed their
+// Claude token after the last turn, must not keep the agent awake.
+func TestCompactWithoutCredentialsSleeps(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "fill up", true))
+	e.rec.wait(t, "text")
+	e.idle(t)
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "")
+	ag, _ := e.st.Agent(ctx, e.agent.ID)
+	ag.IdleTimeout = time.Second
+	e.st.UpdateAgentSettings(ctx, ag)
+	time.Sleep(1100 * time.Millisecond)
+	a := e.m.actor(ag.ID)
+	reap := func() { a.call(func(a *actor) error { a.reap(); return nil }) }
+	busy := func() (b bool) { a.call(func(a *actor) error { b = a.turn != nil; return nil }); return }
+
+	reap() // tries to compact, and cannot
+	for deadline := time.Now().Add(10 * time.Second); busy(); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the compaction never ended")
+		}
+	}
+	reap()
+	if st := e.m.Status(ag.ID).State; st == sandbox.Running {
+		t.Fatalf("state = %s, want asleep", st)
+	}
+	if turns, _ := e.st.Turns(ctx, ag.ID, 1); strings.Contains(turns[0].Input, "Compacting") {
+		t.Fatalf("recorded a compaction that never ran: %+v", turns[0])
 	}
 }

@@ -859,11 +859,12 @@ type stallState struct {
 // the chat keeps one, at its history file.
 func (m *Manager) historyNote(ctx context.Context, spec *sandbox.Spec, ag *store.Agent, last Message) string {
 	var b strings.Builder
+	b.WriteString("\n- A long conversation is summarised before you sleep, and the summary keeps little of what tools showed you. When you learn something that will matter later (a cause found, a value, where something lives), say it in a few words in your reply.")
 	switch ag.Harness {
 	case store.HarnessClaude:
-		b.WriteString("\n- Transcripts of your earlier conversations with this owner, from before a /new, are in ~/.claude/projects/ (one .jsonl per conversation); search them when someone refers to something from before.")
+		b.WriteString("\n- Full transcripts of your conversations with this owner, including what was summarised and what came before a /new, are in ~/.claude/projects/ (one .jsonl per conversation); search them when someone refers to something from before.")
 	case store.HarnessPi:
-		b.WriteString("\n- Transcripts of your earlier conversations with this owner, from before a /new, are in ~/.pi/agent/sessions/; search them when someone refers to something from before.")
+		b.WriteString("\n- Full transcripts of your conversations with this owner, including what was summarised and what came before a /new, are in ~/.pi/agent/sessions/; search them when someone refers to something from before.")
 	}
 	if last.AccountID != "" {
 		if route, err := m.store.Route(ctx, last.AccountID, last.Chat); err == nil && route.History {
