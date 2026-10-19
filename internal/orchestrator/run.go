@@ -176,6 +176,9 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		SteerID:      t.id,
 		Env:          env,
 		Files:        creds.files,
+		// overCap only looks before the turn; this stops a runaway in it.
+		MaxCostUSD:     m.allowance(ctx, agent),
+		SessionCostUSD: agent.SessionCost,
 	}
 	m.writeTasks(ctx, spec, agent)
 	stdin, _ := json.Marshal(req)
@@ -347,6 +350,9 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 			detail = exit.String()
 		}
 		return m.finish(ctx, chat, rec, nil, "⚠️ The agent exited without replying: "+detail, true)
+	case result.StopReason == turn.StopBudget:
+		return m.finish(ctx, chat, rec, result, fmt.Sprintf("💸 Stopped partway: this turn reached the $%.2f left under your spending limit. "+
+			"Raise the limit in hermitator's Settings, then send /retry to carry on.", req.MaxCostUSD), true)
 	case result.Type == turn.EventResult && !result.IsError && strings.TrimSpace(result.Text) == "" && filesSent.Load() == 0:
 		// Said nothing and sent nothing: from the chat, indistinguishable
 		// from a turn that failed, so it counts as one.
@@ -403,6 +409,10 @@ func (m *Manager) finish(ctx context.Context, chat chatRef, rec *store.Turn, res
 			rec.Output, rec.CostUSD = result.Text, result.CostUSD
 		}
 		deliver = func() { chat.react("⏹") }
+	case result != nil && result.StopReason == turn.StopBudget:
+		// Stopped at the spending limit: what it spent getting there counts.
+		rec.Status, rec.Output, rec.CostUSD = store.TurnError, failure, result.CostUSD
+		deliver = func() { chat.send(failure); chat.react("❌") }
 	case failure != "":
 		rec.Status, rec.Output = store.TurnError, failure
 		deliver = func() { chat.send(failure); chat.react("❌") }

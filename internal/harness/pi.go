@@ -140,6 +140,8 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 		failed    string
 		context   int
 		compacted string
+		// overBudget is set once the turn has spent its MaxCostUSD.
+		overBudget bool
 	)
 	emit(turn.Event{Type: turn.EventStarted, SessionID: req.SessionID})
 	readLines(stdout, func(line []byte) {
@@ -177,6 +179,10 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 				return
 			}
 			cost += m.Usage.Cost.Total
+			if req.MaxCostUSD > 0 && cost >= req.MaxCostUSD && !overBudget {
+				overBudget = true
+				stdin.writeLine([]byte(`{"type":"abort"}`))
+			}
 			if u := m.Usage; u.Input+u.CacheRead+u.CacheWrite > 0 {
 				context = u.Input + u.CacheRead + u.CacheWrite
 			}
@@ -211,6 +217,9 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 		emit(turn.Event{Type: turn.EventResult, Text: compacted, SessionID: req.SessionID, CostUSD: cost, ContextTokens: context})
 	case failed != "":
 		emit(turn.Event{Type: turn.EventError, Text: "pi rejected the prompt: " + failed, SessionID: req.SessionID})
+	case overBudget:
+		emit(turn.Event{Type: turn.EventResult, Text: lastText, SessionID: req.SessionID, CostUSD: cost, Model: modelUsed,
+			ContextTokens: context, IsError: true, StopReason: turn.StopBudget})
 	case !settled:
 		msg := stderr.String()
 		if ctx.Err() != nil {

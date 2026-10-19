@@ -265,11 +265,19 @@ task's name. Agents create them with `hermitator-guest schedule`, and the
 owner is told about each one. Times are in the owner's time zone, which
 is also the agent's `TZ`. A task may run at most every five minutes, an
 agent may have 25, and a task missed while hermitator was down runs once
-when it is back. If its chat is no longer linked to the agent, it pauses.
+when it is back, told how late it is. If its chat is no longer linked to
+the agent, it pauses. A run that finds nothing worth saying answers
+`NO_REPLY` and nothing is sent; a run is skipped while the task's
+previous run is still queued or going.
 
 Before any turn starts, the owner's optional daily and monthly spending
 limits are checked against the API-equivalent cost of their turns; a turn
-that would start past one does not, and crossing 80% sends a warning.
+that would start past one does not, and crossing 80% sends a warning. A
+turn is also given what is left, so one long turn cannot run far past a
+limit: Claude Code gets it as `--max-budget-usd` (on top of the resumed
+session's running total, which its budget counts), and pi is aborted
+once the cost it streams crosses it. Either stops after the model call
+that crossed, so the limit can be exceeded by one call.
 
 Each agent is served by one goroutine (its actor) that owns the queue, the
 running turn and the holds keeping it awake, so none of that needs locks.

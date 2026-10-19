@@ -63,6 +63,12 @@ type Request struct {
 	// turn arrive. Claude Code only; pi's messages wait for the next turn.
 	SteerID      string `json:"steer_id,omitempty"`
 	SystemPrompt string `json:"system_prompt,omitempty"`
+	// MaxCostUSD is the most the turn may spend, in the dollars costs are
+	// reported in; 0 is no limit. The harness stops partway past it.
+	MaxCostUSD float64 `json:"max_cost_usd,omitempty"`
+	// SessionCostUSD is what the session had cost before this turn, as
+	// Claude Code reports it: its budget counts the restored total too.
+	SessionCostUSD float64 `json:"session_cost_usd,omitempty"`
 	// Env is added to the harness environment. Credentials travel here so
 	// they never touch a command line.
 	Env map[string]string `json:"env,omitempty"`
@@ -105,6 +111,10 @@ const (
 	EventSteered = "steered"
 )
 
+// StopBudget, a result's StopReason, says the turn stopped partway at
+// its MaxCostUSD.
+const StopBudget = "budget"
+
 // Steer is a message for a running turn, from the spool's steer directory.
 type Steer struct {
 	Text string `json:"text"`
@@ -130,6 +140,8 @@ type Event struct {
 	// in "result" events: what the next turn re-reads. After compacting,
 	// it is the harness's own estimate, or 0 when it has none.
 	ContextTokens int `json:"context_tokens,omitempty"`
+	// StopReason says why a result came early: StopBudget.
+	StopReason string `json:"stop_reason,omitempty"`
 }
 
 // UsageWindow is how much of a subscription's allowance for a period is

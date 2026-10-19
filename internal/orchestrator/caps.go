@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/store"
@@ -38,6 +39,27 @@ func (m *Manager) overCap(ctx context.Context, ag *store.Agent) string {
 		}
 	}
 	return ""
+}
+
+// allowance is what the agent's owner may still spend before a cap, or 0
+// when there is no cap. A turn is stopped partway if it would go further.
+func (m *Manager) allowance(ctx context.Context, ag *store.Agent) float64 {
+	u, err := m.store.User(ctx, ag.UserID)
+	if err != nil || (u.DailyCap <= 0 && u.MonthlyCap <= 0) {
+		return 0
+	}
+	day, month := capWindow(u, time.Now())
+	left := math.Inf(1)
+	if u.DailyCap > 0 {
+		spent, _ := m.store.SpentSince(ctx, u.ID, day)
+		left = min(left, u.DailyCap-spent)
+	}
+	if u.MonthlyCap > 0 {
+		spent, _ := m.store.SpentSince(ctx, u.ID, month)
+		left = min(left, u.MonthlyCap-spent)
+	}
+	// overCap has already turned away a turn with nothing left.
+	return max(left, 0.0001)
 }
 
 // capWarning says so once, when a turn takes spending past 80% of a cap.

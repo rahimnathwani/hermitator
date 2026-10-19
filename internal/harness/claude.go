@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -106,6 +108,15 @@ func runClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit
 	}
 	if req.SystemPrompt != "" {
 		args = append(args, "--append-system-prompt", req.SystemPrompt)
+	}
+	if req.MaxCostUSD > 0 {
+		// Claude Code checks its budget against the session's running
+		// total, which a resumed session starts from.
+		budget := req.MaxCostUSD
+		if slices.Contains(args, "--resume") {
+			budget += req.SessionCostUSD
+		}
+		args = append(args, "--max-budget-usd", strconv.FormatFloat(budget, 'f', 4, 64))
 	}
 
 	var content []claudeContent
@@ -227,6 +238,9 @@ func runClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit
 				text = "Claude Code stopped: " + ev.Subtype
 			}
 			result = &turn.Event{Type: turn.EventResult, Text: text, SessionID: sessionID, CostUSD: ev.CostUSD, IsError: ev.IsError, ContextTokens: contextTokens}
+			if ev.Subtype == "error_max_budget_usd" {
+				result.StopReason = turn.StopBudget
+			}
 		}
 	})
 	waitErr := cmd.Wait()

@@ -64,6 +64,9 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || { echo "no token" >&2; exit 1; }
 case "$line" in
+  *"spend a lot"*)
+    printf '%s\n' '{"type":"result","subtype":"error_max_budget_usd","is_error":true,"session_id":"'"$sid"'","total_cost_usd":0.5}'
+    exit 0 ;;
   *"nothing new"*)
     printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"NO_REPLY","session_id":"'"$sid"'","total_cost_usd":0.001}'
     exit 0 ;;
@@ -1018,6 +1021,41 @@ func TestSpendingCaps(t *testing.T) {
 	e.idle(t)
 	if turns, _ := e.st.Turns(ctx, e.agent.ID, 10); len(turns) != 2 {
 		t.Fatalf("%d turns ran; the cap should have stopped the third", len(turns))
+	}
+}
+
+// A turn may not spend past the cap either: Claude Code is given what is
+// left, on top of the session's running total, and stops there.
+func TestSpendingCapInsideATurn(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	say := func(text string) { e.m.HandleMessage(ctx, e.msg(chat, text, true)) }
+	e.st.SetCaps(ctx, e.user.ID, 0, 1)
+	say("first")
+	e.rec.wait(t, "text")
+	e.idle(t)
+	say("second") // $0.99 left, and the session stands at $0.01
+	e.rec.wait(t, "text")
+	e.idle(t)
+	spec, _ := e.m.Spec(e.agent)
+	matches, _ := filepath.Glob(filepath.Join(spec.Dir, "*", "last-args"))
+	if len(matches) != 1 {
+		t.Fatal("no record of the fake's arguments")
+	}
+	if b, _ := os.ReadFile(matches[0]); !strings.Contains(string(b), "--max-budget-usd\n1.0000\n") {
+		t.Fatalf("args:\n%s", b)
+	}
+	say("now spend a lot")
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "Stopped partway: this turn reached the $0.98 left under your spending limit") {
+		t.Fatalf("budget stop = %q", got.body)
+	}
+	e.idle(t)
+	// It counts what it spent getting there: $0.50, less the $0.02 before.
+	if turns, _ := e.st.Turns(ctx, e.agent.ID, 1); turns[0].Status != store.TurnError || turns[0].CostUSD < 0.479 || turns[0].CostUSD > 0.481 {
+		t.Fatalf("stopped turn = %+v", turns[0])
 	}
 }
 

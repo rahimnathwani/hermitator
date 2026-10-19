@@ -18,6 +18,7 @@ import (
 func fake(t *testing.T, envVar, fixture string) (args, stdin func() string) {
 	t.Helper()
 	dir := t.TempDir()
+	fakeDir = dir
 	fixturePath, _ := filepath.Abs(filepath.Join("testdata", fixture))
 	script := filepath.Join(dir, "fake")
 	body := "#!/bin/sh\n" +
@@ -37,6 +38,10 @@ func fake(t *testing.T, envVar, fixture string) (args, stdin func() string) {
 	}
 	return read("args"), read("stdin")
 }
+
+// fakeDir is the last fake's directory; "rest" there holds what it was
+// sent after the first line.
+var fakeDir string
 
 func run(t *testing.T, req *turn.Request) []turn.Event {
 	t.Helper()
@@ -246,6 +251,40 @@ func TestCompact(t *testing.T) {
 	// Nothing to compact without a transcript.
 	if res := last(run(t, &turn.Request{Harness: turn.Claude, SessionID: "none", Compact: true})); res.Type != turn.EventError {
 		t.Fatalf("compacting a missing conversation = %+v", res)
+	}
+}
+
+// A turn with a spending limit stops partway at it, in both harnesses.
+func TestBudget(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	os.MkdirAll(filepath.Join(home, ".claude", "projects", "w"), 0o755)
+	os.WriteFile(filepath.Join(home, ".claude", "projects", "w", "b2fbb8dd.jsonl"), nil, 0o644)
+	args, _ := fake(t, "HERMITATOR_CLAUDE_BIN", "claude-budget.jsonl")
+	res := last(run(t, &turn.Request{Harness: turn.Claude, SessionID: "b2fbb8dd", Prompt: "build it", MaxCostUSD: 0.25, SessionCostUSD: 1.5}))
+	if res.Type != turn.EventResult || res.StopReason != turn.StopBudget || !res.IsError || res.CostUSD != 1.76 {
+		t.Fatalf("claude over budget = %+v", res)
+	}
+	// Claude Code counts the resumed session's running total against it.
+	if a := args(); !strings.Contains(a, "--max-budget-usd\n1.7500\n") {
+		t.Fatalf("claude args:\n%s", a)
+	}
+	run(t, &turn.Request{Harness: turn.Claude, SessionID: "new-one", Prompt: "hi", MaxCostUSD: 0.25, SessionCostUSD: 1.5})
+	if a := args(); !strings.Contains(a, "--max-budget-usd\n0.2500\n") {
+		t.Fatalf("a new session's budget:\n%s", a)
+	}
+	run(t, &turn.Request{Harness: turn.Claude, SessionID: "new-one", Prompt: "hi"})
+	if strings.Contains(args(), "--max-budget-usd") {
+		t.Fatal("a budget with no limit set")
+	}
+
+	fake(t, "HERMITATOR_PI_BIN", "pi-budget.jsonl")
+	res = last(run(t, &turn.Request{Harness: turn.Pi, SessionID: "p1", Provider: "openai-codex", Prompt: "build it", MaxCostUSD: 0.05}))
+	if res.Type != turn.EventResult || res.StopReason != turn.StopBudget || res.CostUSD < 0.0699 || res.CostUSD > 0.0701 || res.Text != "Still building." {
+		t.Fatalf("pi over budget = %+v", res)
+	}
+	if rest, _ := os.ReadFile(filepath.Join(fakeDir, "rest")); !strings.Contains(string(rest), `{"type":"abort"}`) {
+		t.Fatalf("pi was not told to stop: %q", rest)
 	}
 }
 
