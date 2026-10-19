@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"encoding/json"
 	"context"
 	"fmt"
 	"net/netip"
@@ -198,8 +199,14 @@ func (n *Network) Attach(ctx context.Context, id string, ip netip.Addr) error {
 	return n.allow(ctx, id, ip)
 }
 
-// Detach removes an agent's namespace and veth.
+// Detach removes an agent's namespace and veth, and its place in the
+// anti-spoofing set.
 func (n *Network) Detach(ctx context.Context, id string) error {
+	if out, err := command(ctx, "nft", "-j", "list", "set", "bridge", "hermitator", "ports"); err == nil {
+		for _, ip := range portAddrs(out, vethName(id)) {
+			command(ctx, "nft", "delete", "element", "bridge", "hermitator", "ports", "{", vethName(id), ".", ip, "}")
+		}
+	}
 	command(ctx, "ip", "link", "del", vethName(id))
 	if _, err := os.Stat(n.NamespacePath(id)); err == nil {
 		if _, err := command(ctx, "ip", "netns", "del", nsName(id)); err != nil {
@@ -207,4 +214,33 @@ func (n *Network) Detach(ctx context.Context, id string) error {
 		}
 	}
 	return nil
+}
+
+// portAddrs finds the addresses the anti-spoofing set allows for a veth,
+// in `nft -j list set` output.
+func portAddrs(listing []byte, veth string) []string {
+	var doc struct {
+		Nftables []struct {
+			Set *struct {
+				Elem []struct {
+					Concat []string `json:"concat"`
+				} `json:"elem"`
+			} `json:"set"`
+		} `json:"nftables"`
+	}
+	if json.Unmarshal(listing, &doc) != nil {
+		return nil
+	}
+	var out []string
+	for _, item := range doc.Nftables {
+		if item.Set == nil {
+			continue
+		}
+		for _, e := range item.Set.Elem {
+			if len(e.Concat) == 2 && e.Concat[0] == veth {
+				out = append(out, e.Concat[1])
+			}
+		}
+	}
+	return out
 }

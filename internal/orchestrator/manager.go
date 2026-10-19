@@ -288,6 +288,8 @@ func (m *Manager) DeleteAgent(ctx context.Context, agentID string) error {
 		return nil
 	})
 	m.dropActor(agentID)
+	// Its address may go to another agent, which must not inherit its route.
+	m.routeEgress(ctx, a, false)
 	if spec, err := m.Spec(a); err == nil {
 		if err := m.rt.Destroy(ctx, spec); err != nil {
 			return err

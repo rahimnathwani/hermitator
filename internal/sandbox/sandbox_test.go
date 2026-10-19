@@ -199,3 +199,10 @@ func TestRuleset(t *testing.T) {
 		t.Error("redirects with the proxy off")
 	}
 }
+
+func TestPortAddrs(t *testing.T) {
+	listing := []byte(`{"nftables": [{"metainfo": {"version": "1.1.7"}}, {"set": {"family": "bridge", "name": "ports", "table": "hermitator", "type": ["ifname", "ipv4_addr"], "elem": [{"concat": ["hvaaa", "10.231.0.3"]}, {"concat": ["hvbbb", "10.231.0.2"]}, {"concat": ["hvaaa", "10.231.0.9"]}]}}]}`)
+	if got := portAddrs(listing, "hvaaa"); len(got) != 2 || got[0] != "10.231.0.3" || got[1] != "10.231.0.9" {
+		t.Fatalf("portAddrs = %v", got)
+	}
+}
