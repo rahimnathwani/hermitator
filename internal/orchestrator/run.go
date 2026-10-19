@@ -69,6 +69,10 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	if last.TaskName != "" {
 		chat.prefix = "⏰ *" + last.TaskName + "*\n\n"
 	}
+	chat.quiet = true
+	for _, msg := range batch {
+		chat.quiet = chat.quiet && msg.TaskID != ""
+	}
 
 	agent, err := m.store.Agent(ctx, a.id)
 	if err != nil {
@@ -408,6 +412,9 @@ func (m *Manager) finish(ctx context.Context, chat chatRef, rec *store.Turn, res
 	default:
 		rec.Status, rec.Output, rec.CostUSD = store.TurnOK, result.Text, result.CostUSD
 		deliver = func() {
+			if chat.quiet && strings.Trim(result.Text, " \t\n.*`") == noReply {
+				return // a scheduled run with nothing to report
+			}
 			// No text is fine when the agent's answer was the files it sent.
 			if strings.TrimSpace(result.Text) != "" {
 				chat.sendAgent(result.Text)
@@ -653,6 +660,9 @@ type chatRef struct {
 	msg Message
 	// prefix starts the agent's messages: a scheduled task's name.
 	prefix string
+	// quiet allows a reply of NO_REPLY, which sends nothing: the turn
+	// answers scheduled runs and nobody else.
+	quiet bool
 	// redact keeps secret values out of what the agent sends.
 	redact redactor
 }

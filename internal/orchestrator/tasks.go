@@ -26,7 +26,13 @@ const (
 	minTaskGap    = 5 * time.Minute
 	maxTaskAhead  = 366 * 24 * time.Hour
 	schedulerTick = 20 * time.Second
+	// lateAfter is how far past its time a run is called late.
+	lateAfter = 2 * time.Minute
 )
+
+// noReply is what a scheduled run answers when there is nothing to say;
+// hermitator then sends nothing.
+const noReply = "NO_REPLY"
 
 func (m *Manager) scheduler() {
 	tick := time.NewTicker(schedulerTick)
@@ -75,13 +81,27 @@ func (m *Manager) runDueTasks(now time.Time) {
 		if t.Cron != "" {
 			when = "on the schedule " + t.Cron
 		}
+		if late := now.Sub(t.NextRun); late > lateAfter {
+			// Most likely hermitator was down; a check of "the last hour",
+			// say, should know.
+			when += fmt.Sprintf(", %s late: it was due at %s", humanize(late), t.NextRun.In(loc).Format("Mon 15:04"))
+		}
 		msg := Message{
-			AccountID: t.AccountID, Chat: t.ChatJID, Owner: true, Time: now, TaskName: t.Name,
-			Prompt: fmt.Sprintf("[Scheduled task %q, set up by %s on %s, running %s. Do what it asks; your reply goes to this chat.]\n\n%s",
-				t.Name, by, t.CreatedAt.In(loc).Format("2 Jan 2006"), when, t.Prompt),
+			AccountID: t.AccountID, Chat: t.ChatJID, Owner: true, Time: now, TaskName: t.Name, TaskID: t.ID,
+			Prompt: fmt.Sprintf("[Scheduled task %q, set up by %s on %s, running %s. Do what it asks; your reply goes to this chat. "+
+				"If this time there is nothing worth telling the owner, reply with just %s and nothing is sent.]\n\n%s",
+				t.Name, by, t.CreatedAt.In(loc).Format("2 Jan 2006"), when, noReply, t.Prompt),
 		}
 		m.log.Info("running scheduled task", "agent", t.AgentID, "task", t.ID)
-		m.actor(t.AgentID).do(func(a *actor) { a.enqueue(msg) })
+		m.actor(t.AgentID).do(func(a *actor) {
+			// A run still waiting, or still going, makes another pointless:
+			// a long turn would otherwise come out to a pile of them.
+			if a.hasTask(msg.TaskID) {
+				m.log.Info("skipped a scheduled run; the last one has not finished", "agent", a.id, "task", msg.TaskID)
+				return
+			}
+			a.enqueue(msg)
+		})
 		if spec, err := m.Spec(ag); err == nil {
 			m.writeTasks(m.ctx, spec, ag)
 		}

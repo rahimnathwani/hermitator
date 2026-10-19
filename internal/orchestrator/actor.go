@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"github.com/rahimnathwani/hermitator/internal/turn"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -119,6 +120,11 @@ func (a *actor) startTurn() {
 	}
 	a.pending = rest
 	t := &activeTurn{id: ids.New()}
+	for _, msg := range batch {
+		if msg.TaskID != "" {
+			t.tasks = append(t.tasks, msg.TaskID)
+		}
+	}
 	a.turn = t
 	go func() {
 		ok := a.m.runTurn(a, t, batch)
@@ -133,6 +139,16 @@ func (a *actor) startTurn() {
 			}
 		})
 	}()
+}
+
+// hasTask reports whether a run of the task is queued or running.
+func (a *actor) hasTask(id string) bool {
+	for _, msg := range a.pending {
+		if msg.TaskID == id {
+			return true
+		}
+	}
+	return a.turn != nil && slices.Contains(a.turn.tasks, id)
 }
 
 func (a *actor) abort() bool {
@@ -212,6 +228,8 @@ func (a *actor) setState(st string) {
 // goroutine running it.
 type activeTurn struct {
 	id string
+	// tasks are the scheduled tasks whose runs this turn answers.
+	tasks []string
 
 	mu      sync.Mutex
 	client  *spool.Client

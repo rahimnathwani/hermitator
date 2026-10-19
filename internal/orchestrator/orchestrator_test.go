@@ -46,6 +46,7 @@ func TestMain(m *testing.M) {
 const fakeClaude = `#!/usr/bin/env bash
 read -r line
 printf '%s\n' "$@" > "$HOME/last-args"
+printf '%s\n' "$line" >> "$HOME/prompts"
 if [ "${2%% *}" = "/compact" ]; then
   echo "$4: $2" >> "$HOME/compactions"
   printf '%s\n' '{"type":"system","subtype":"status","status":"compacting"}' \
@@ -62,6 +63,11 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || { echo "no token" >&2; exit 1; }
+case "$line" in
+  *"nothing new"*)
+    printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"NO_REPLY","session_id":"'"$sid"'","total_cost_usd":0.001}'
+    exit 0 ;;
+esac
 text=$(printf '%s' "$line" | sed -n 's/.*"type":"text","text":"\([^"]*\)".*/\1/p' | tr -d '\\')
 echo '{"type":"system","subtype":"init","session_id":"'"$sid"'","model":"fake"}'
 case "$text" in
@@ -921,6 +927,51 @@ func TestScheduledTasks(t *testing.T) {
 	}
 }
 
+// A scheduled run with nothing to say stays quiet, says when it is late,
+// and is not queued again while the last run is still waiting.
+func TestQuietScheduledRuns(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	task := &store.Task{AgentID: e.agent.ID, AccountID: e.acct.ID, ChatJID: chat, Name: "watch", Prompt: "tell me if there is anything, or nothing new",
+		Cron: "*/5 * * * *", NextRun: time.Now().Add(-time.Hour), CreatedBy: store.TaskByOwner}
+	e.st.CreateTask(ctx, task)
+	e.m.runDueTasks(time.Now())
+	e.st.SetTaskPaused(ctx, task.ID, false, time.Now().Add(-time.Second))
+	e.m.runDueTasks(time.Now()) // the first run has not finished
+	time.Sleep(200 * time.Millisecond)
+	e.idle(t)
+	e.rec.mu.Lock()
+	for _, s := range e.rec.log[1:] { // after the link reply
+		if s.kind == "text" {
+			t.Errorf("a quiet run sent %q", s.body)
+		}
+	}
+	e.rec.mu.Unlock()
+	var runs []*store.Turn
+	turns, _ := e.st.Turns(ctx, e.agent.ID, 10)
+	for _, tr := range turns {
+		if strings.Contains(tr.Input, "Scheduled task") {
+			runs = append(runs, tr)
+		}
+	}
+	// Copies waiting together would share one turn, so count the prompts.
+	if len(runs) != 1 || runs[0].Status != store.TurnOK || strings.Count(runs[0].Prompt, "[Scheduled task") != 1 {
+		t.Fatalf("runs = %+v", runs)
+	}
+	if !strings.Contains(runs[0].Prompt, "1h00m late: it was due at") || !strings.Contains(runs[0].Prompt, "reply with just NO_REPLY") {
+		t.Fatalf("prompt = %q", runs[0].Prompt)
+	}
+
+	// The same answer to the owner is sent: only scheduled runs may stay quiet.
+	e.m.HandleMessage(ctx, e.msg(chat, "there is nothing new", true))
+	if got := e.rec.wait(t, "text"); got.body != "NO_REPLY" {
+		t.Fatalf("reply to the owner = %q", got.body)
+	}
+}
+
 func TestScheduleValidation(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
@@ -1418,7 +1469,7 @@ func TestCompactBeforeSleep(t *testing.T) {
 	if len(matches) != 1 {
 		t.Fatal("no record of the fake's compaction")
 	}
-	if b, _ := os.ReadFile(matches[0]); strings.Count(string(b), "\n") != 1 || !strings.Contains(string(b), "/compact "+compactKeep) {
+	if b, _ := os.ReadFile(matches[0]); strings.Count(string(b), "\n") != 1 || !strings.Contains(string(b), "/compact You will go on") || !strings.Contains(string(b), "do not act again on requests in it") || !strings.Contains(string(b), "dated, past-tense facts (today is ") {
 		t.Fatalf("compactions: %q", b)
 	}
 }
