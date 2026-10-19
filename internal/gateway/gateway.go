@@ -9,6 +9,7 @@ package gateway
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -19,11 +20,13 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waCompanionReg"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
+	"google.golang.org/protobuf/proto"
 	_ "modernc.org/sqlite"
 
 	"github.com/rahimnathwani/hermitator/internal/orchestrator"
@@ -35,8 +38,14 @@ import (
 // answer yesterday's chatter.
 const staleAfter = 15 * time.Minute
 
-// Handler receives incoming messages.
-type Handler func(ctx context.Context, msg orchestrator.Message)
+// Handler receives incoming messages. It reports whether the message is
+// queued for a turn, which marks it done when it starts; any other
+// message is done when the handler returns.
+type Handler func(ctx context.Context, msg orchestrator.Message) (queued bool)
+
+// inboundKeep is how long a message's ID is remembered, to recognise
+// WhatsApp delivering it again.
+const inboundKeep = 72 * time.Hour
 
 // Gateway manages every linked WhatsApp account.
 type Gateway struct {
@@ -57,6 +66,9 @@ type account struct {
 	id     string
 	client *whatsmeow.Client
 	queue  chan orchestrator.Message
+	// replayed hands over, once per process, messages a restart left
+	// unanswered.
+	replayed sync.Once
 }
 
 func init() {
@@ -133,17 +145,26 @@ func (g *Gateway) attach(accountID string, client *whatsmeow.Client) {
 	g.mu.Lock()
 	g.accounts[accountID] = a
 	g.mu.Unlock()
+	// WhatsApp is told a message arrived only once handleEvent has
+	// written it down; by default it is told at once, and a message a
+	// restart caught in between was lost.
+	client.SynchronousAck = true
 	client.AddEventHandler(func(evt any) { g.handleEvent(a, evt) })
 	// whatsmeow calls handlers synchronously; hand messages to a goroutine
 	// that preserves their order.
 	go func() {
+		pruned := time.Now()
 		for {
 			select {
 			case <-g.ctx.Done():
 				return
 			case msg := <-a.queue:
-				if g.handler != nil {
-					g.handler(g.ctx, msg)
+				if g.handler != nil && !g.handler(g.ctx, msg) {
+					g.store.InboundDone(g.ctx, a.id, msg.ID)
+				}
+				if time.Since(pruned) > time.Hour {
+					pruned = time.Now()
+					g.store.PruneInbound(g.ctx, pruned.Add(-inboundKeep))
 				}
 			}
 		}
@@ -229,15 +250,19 @@ func (g *Gateway) handleEvent(a *account, evt any) {
 		if !ok {
 			return
 		}
-		select {
-		case a.queue <- msg:
-		default:
-			g.log.Warn("message queue full; dropping message", "account", a.id)
+		raw, err := encodeEvent(e)
+		if err == nil {
+			fresh, err := g.store.Receive(ctx, a.id, msg.ID, raw)
+			if err == nil && !fresh {
+				return // WhatsApp delivered it again
+			}
 		}
+		g.dispatch(a, msg)
 	case *events.Connected:
 		g.store.SetAccountStatus(ctx, a.id, hstore.AccountConnected, a.client.Store.PushName)
 		g.ApplyKind(ctx, a.id)
 		g.log.Info("whatsapp connected", "account", a.id)
+		a.replayed.Do(func() { go g.replay(a) })
 	case *events.PushNameSetting:
 		g.store.SetAccountStatus(ctx, a.id, hstore.AccountConnected, a.client.Store.PushName)
 		g.ApplyKind(ctx, a.id)
@@ -254,6 +279,65 @@ func (g *Gateway) handleEvent(a *account, evt any) {
 	case *events.TemporaryBan:
 		g.log.Error("whatsapp temporary ban", "account", a.id, "detail", e.String())
 	}
+}
+
+// dispatch queues a message for the handler.
+func (g *Gateway) dispatch(a *account, msg orchestrator.Message) {
+	select {
+	case a.queue <- msg:
+	default:
+		// Still written down: the next start hands it over.
+		g.log.Warn("message queue full; leaving a message for later", "account", a.id)
+	}
+}
+
+// replay hands over again the messages no turn took before hermitator
+// last stopped. One that has gone stale meanwhile is dropped, as it would
+// have been on arrival.
+func (g *Gateway) replay(a *account) {
+	pending, err := g.store.PendingInbound(g.ctx, a.id)
+	if err != nil {
+		g.log.Warn("pending messages", "account", a.id, "err", err)
+		return
+	}
+	for _, in := range pending {
+		if e, err := decodeEvent(in.Raw); err == nil {
+			if msg, ok := g.convert(g.ctx, a, e); ok {
+				g.log.Info("handing over a message from before the restart", "account", a.id, "message", in.MessageID)
+				g.dispatch(a, msg)
+				continue
+			}
+		}
+		g.store.InboundDone(g.ctx, a.id, in.MessageID)
+	}
+	g.store.PruneInbound(g.ctx, time.Now().Add(-inboundKeep))
+}
+
+// storedEvent is how a message is written down: its envelope as JSON, and
+// its content as the protobuf WhatsApp sent.
+type storedEvent struct {
+	Info    types.MessageInfo `json:"info"`
+	Message []byte            `json:"message"`
+}
+
+func encodeEvent(e *events.Message) ([]byte, error) {
+	m, err := proto.Marshal(e.Message)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(storedEvent{Info: e.Info, Message: m})
+}
+
+func decodeEvent(raw []byte) (*events.Message, error) {
+	var s storedEvent
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return nil, err
+	}
+	var m waE2E.Message
+	if err := proto.Unmarshal(s.Message, &m); err != nil {
+		return nil, err
+	}
+	return &events.Message{Info: s.Info, Message: &m}, nil
 }
 
 // recent remembers IDs of messages hermitator sent, so their echoes are

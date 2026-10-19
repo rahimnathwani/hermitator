@@ -360,3 +360,28 @@ func TestPolls(t *testing.T) {
 		t.Fatalf("missing poll: %v", err)
 	}
 }
+
+func TestInbound(t *testing.T) {
+	st := open(t)
+	ctx := context.Background()
+	if fresh, err := st.Receive(ctx, "a1", "m1", []byte("one")); !fresh || err != nil {
+		t.Fatalf("first receive = %v, %v", fresh, err)
+	}
+	if fresh, _ := st.Receive(ctx, "a1", "m1", []byte("one again")); fresh {
+		t.Fatal("a second delivery looked new")
+	}
+	st.Receive(ctx, "a1", "m2", []byte("two"))
+	st.Receive(ctx, "a2", "m3", []byte("other account"))
+	st.InboundDone(ctx, "a1", "m1")
+	pending, _ := st.PendingInbound(ctx, "a1")
+	if len(pending) != 1 || pending[0].MessageID != "m2" || string(pending[0].Raw) != "two" {
+		t.Fatalf("pending = %+v", pending)
+	}
+	if fresh, _ := st.Receive(ctx, "a1", "m1", []byte("late")); fresh {
+		t.Fatal("a delivery of a message already answered looked new")
+	}
+	st.PruneInbound(ctx, time.Now().Add(time.Minute))
+	if fresh, _ := st.Receive(ctx, "a1", "m1", []byte("much later")); !fresh {
+		t.Fatal("pruned messages are still remembered")
+	}
+}

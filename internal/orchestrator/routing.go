@@ -35,7 +35,9 @@ func (m *Manager) LinkCode(ctx context.Context, agentID string, fresh bool) (str
 	return code, time.Now().Add(LinkCodeTTL), nil
 }
 
-// HandleMessage routes one incoming chat message.
+// HandleMessage routes one incoming chat message. It reports whether the
+// message is queued for a turn: until the turn starts, a restart hands it
+// over again (see the gateway).
 //
 // The owner is whoever the linked account belongs to: messages the account
 // itself sends (when it is the owner's own number) and messages from the
@@ -46,10 +48,10 @@ func (m *Manager) LinkCode(ctx context.Context, agentID string, fresh bool) (str
 // one of the owner's numbers goes to the account's fallback agent, if it
 // has one. Everything else, including strangers messaging an agent's
 // number, is ignored.
-func (m *Manager) HandleMessage(ctx context.Context, msg Message) {
+func (m *Manager) HandleMessage(ctx context.Context, msg Message) (queued bool) {
 	acct, err := m.store.Account(ctx, msg.AccountID)
 	if err != nil {
-		return
+		return false
 	}
 	reply := func(text string) { chatRef{m: m, msg: msg}.send(text) }
 	owner := msg.FromMe || m.store.IsOwnerNumber(ctx, acct.UserID, msg.SenderPhone)
@@ -60,7 +62,7 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) {
 		// A valid code proves its sender can see the agent's page, so it
 		// is accepted from anyone; guessing is throttled.
 		m.link(ctx, acct, msg, cmd.Arg, owner, reply)
-		return
+		return false
 	}
 
 	route, err := m.store.Route(ctx, acct.ID, msg.Chat)
@@ -70,27 +72,26 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) {
 		agentID = route.AgentID
 	case errors.Is(err, store.ErrNotFound):
 		if acct.FallbackAgentID == "" || msg.FromMe || msg.IsGroup || !owner {
-			return
+			return false
 		}
 		agentID = acct.FallbackAgentID
 		route = nil
 	default:
 		m.log.Error("route lookup", "err", err)
-		return
+		return false
 	}
 	msg.Owner = owner
 
 	if isCmd && owner {
-		m.command(ctx, acct, agentID, route, msg, cmd, reply)
-		return
+		return m.command(ctx, acct, agentID, route, msg, cmd, reply)
 	}
 	if strings.TrimSpace(msg.Text) == "" && msg.Media == nil {
-		return
+		return false
 	}
 	if route != nil {
 		ag, err := m.store.Agent(ctx, agentID)
 		if err != nil {
-			return
+			return false
 		}
 		if route.History {
 			m.recordHistory(acct.ID, msg.Chat, senderLabel(msg), historyText(msg), msg.Time)
@@ -98,10 +99,11 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) {
 		if !triggers(route, ag, msg) {
 			// Kept for the agent's next turn; nothing wakes up.
 			m.hold(ctx, ag, msg)
-			return
+			return false
 		}
 	}
 	m.actor(agentID).do(func(a *actor) { a.enqueue(msg) })
+	return true
 }
 
 // Wrong /link codes allowed per sender per hour before hermitator stops
@@ -187,16 +189,17 @@ func (m *Manager) link(ctx context.Context, acct *store.Account, msg Message, co
 	reply(text)
 }
 
-func (m *Manager) command(ctx context.Context, acct *store.Account, agentID string, route *store.Route, msg Message, cmd Command, reply func(string)) {
+// command runs an owner's command; it reports whether one queued a turn.
+func (m *Manager) command(ctx context.Context, acct *store.Account, agentID string, route *store.Route, msg Message, cmd Command, reply func(string)) (queued bool) {
 	ag, err := m.store.Agent(ctx, agentID)
 	if err != nil {
-		return
+		return false
 	}
 	switch cmd.Name {
 	case "help":
 		reply(helpText)
 	case "retry":
-		m.retry(ctx, agentID, msg, reply)
+		return m.retry(ctx, agentID, msg, reply)
 	case "tasks":
 		m.tasksCommand(ctx, ag, cmd.Arg, reply)
 	case "preview", "previews":
@@ -267,6 +270,7 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		once.Text, once.Model, once.Effort = text, model, effort
 		// Asking explicitly wakes the agent whatever the chat's settings.
 		m.actor(agentID).do(func(a *actor) { a.enqueue(once) })
+		return true
 	case "switch":
 		target := strings.ToLower(cmd.Arg)
 		if target != store.HarnessClaude && target != store.HarnessPi {
@@ -296,6 +300,7 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		m.store.Audit(ctx, acct.UserID, acct.UserID, "agent.switch", fmt.Sprintf("agent=%s harness=%s", ag.ID, target))
 		reply("🔀 *" + ag.Name + "* now uses " + harnessName(target) + ", starting a fresh conversation in the same workspace.")
 	}
+	return false
 }
 
 func (m *Manager) statusText(ctx context.Context, ag *store.Agent) string {

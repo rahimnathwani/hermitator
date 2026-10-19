@@ -84,6 +84,9 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	}
 	log := m.log.With("agent", agent.ID, "turn", t.id)
 
+	// From here the batch is answered, if only with an error: a restart
+	// must not hand it over again (an interrupted turn offers /retry).
+	m.answered(batch...)
 	for _, msg := range batch {
 		chatRef{m: m, msg: msg}.markRead()
 	}
@@ -812,25 +815,26 @@ func (m *Manager) tellInterrupted(turns []*store.Turn) {
 	}
 }
 
-// retry runs the last turn in this chat again, if it did not succeed.
-func (m *Manager) retry(ctx context.Context, agentID string, msg Message, reply func(string)) {
+// retry runs the last turn in this chat again, if it did not succeed; it
+// reports whether it queued one.
+func (m *Manager) retry(ctx context.Context, agentID string, msg Message, reply func(string)) bool {
 	last, err := m.store.LastChatTurn(ctx, agentID, msg.AccountID, msg.Chat)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
 		reply("There is nothing to retry in this chat yet.")
-		return
+		return false
 	case err != nil:
 		reply("⚠️ Could not look up the last message: " + err.Error())
-		return
+		return false
 	case last.Status == store.TurnRunning:
 		reply("It is still working on that one.")
-		return
+		return false
 	case last.Status == store.TurnOK:
 		reply("The last message here went through, so there is nothing to retry.")
-		return
+		return false
 	case last.Prompt == "":
 		reply("That message is from before hermitator kept enough to retry it. Please send it again.")
-		return
+		return false
 	}
 	why := "failed"
 	switch last.Status {
@@ -844,6 +848,7 @@ func (m *Manager) retry(ctx context.Context, agentID string, msg Message, reply 
 	again.Prompt = "(The user asked to retry this message; the previous attempt " + why +
 		". Check what was already done before repeating any step.)\n\n" + last.Prompt
 	m.actor(agentID).do(func(a *actor) { a.enqueue(again) })
+	return true
 }
 
 // steer passes a message to the running turn: the harness reads it from
@@ -871,7 +876,18 @@ func (m *Manager) steer(agentID string, t *activeTurn, seq int, msg Message) {
 		return
 	}
 	chat.react("👀")
+	m.answered(msg)
 	m.hub.publish(agentID, UIEvent{Kind: "steer", TurnID: t.id, Input: summarizeBatch([]Message{msg})})
+}
+
+// answered marks chat messages as taken by a turn, so a restart does not
+// hand them over again.
+func (m *Manager) answered(msgs ...Message) {
+	for _, msg := range msgs {
+		if msg.AccountID != "" && msg.ID != "" {
+			m.store.InboundDone(m.ctx, msg.AccountID, msg.ID)
+		}
+	}
 }
 
 // credentialsNote tells the agent about the secrets and accounts it has.

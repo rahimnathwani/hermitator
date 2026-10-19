@@ -1259,6 +1259,38 @@ func TestNotifyStartsATurn(t *testing.T) {
 	}
 }
 
+// A message stays pending, for the gateway to hand over after a restart,
+// until a turn takes it; commands and messages for nobody are done at once.
+func TestMessagesStayPendingUntilATurnTakesThem(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	pending := func() int {
+		in, _ := e.st.PendingInbound(ctx, e.acct.ID)
+		return len(in)
+	}
+	msg := e.msg(chat, "hello", true)
+	e.st.Receive(ctx, e.acct.ID, msg.ID, []byte("raw"))
+	if !e.m.HandleMessage(ctx, msg) {
+		t.Fatal("a message for the agent was not queued")
+	}
+	e.rec.wait(t, "text") // no token, but it was answered
+	e.idle(t)
+	if n := pending(); n != 0 {
+		t.Fatalf("%d messages pending after their turn", n)
+	}
+	for _, text := range []string{"/status", "/once hi"} {
+		if queued := e.m.HandleMessage(ctx, e.msg(chat, text, true)); queued != (text == "/once hi") {
+			t.Errorf("%s queued = %v", text, queued)
+		}
+	}
+	if e.m.HandleMessage(ctx, e.msg("stranger@s.whatsapp.net", "hi", false)) {
+		t.Error("a message for nobody was queued")
+	}
+	e.idle(t)
+}
+
 func TestBackgroundMessages(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
