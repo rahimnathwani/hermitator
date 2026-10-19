@@ -81,3 +81,20 @@ func TestStartFromRepo(t *testing.T) {
 	e.m.StartFromRepo(e.agent.ID, "file://"+src, "shop", false)
 	waitPrompt("shop already exists in the workspace")
 }
+
+func TestConsoleTurnThatCannotRunIsRecorded(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.Prompt(e.agent.ID, "set yourself up")
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if turns, _ := e.st.Turns(ctx, e.agent.ID, 5); len(turns) == 1 {
+			if turns[0].Status != store.TurnError || !strings.Contains(turns[0].Output, "no Claude token") || turns[0].Prompt != "set yourself up" {
+				t.Fatalf("turn = %+v", turns[0])
+			}
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("no turn recorded")
+}

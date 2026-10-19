@@ -89,6 +89,9 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		chat.send(text)
 		chat.react("❌")
 		m.hub.publish(a.id, UIEvent{Kind: "turn_end", TurnID: t.id, Status: store.TurnError, Output: text})
+		if !chat.ok() {
+			m.recordFailed(ctx, t.id, agent, batch, text)
+		}
 		return false
 	}
 
@@ -860,4 +863,20 @@ func (m *Manager) historyNote(ctx context.Context, spec *sandbox.Spec, ag *store
 		}
 	}
 	return b.String()
+}
+
+// recordFailed records a turn that could not run and had no chat to say
+// so in, so one nobody was watching (from the web console, or a new
+// agent's setup) still shows on the agent's page why it did not run.
+func (m *Manager) recordFailed(ctx context.Context, id string, agent *store.Agent, batch []Message, why string) {
+	var input []string
+	for _, msg := range batch {
+		input = append(input, msg.Text)
+	}
+	prompt := strings.Join(input, "\n")
+	rec := &store.Turn{ID: id, AgentID: agent.ID, Harness: agent.Harness, Input: clip(prompt, 4000), Prompt: prompt}
+	if m.store.CreateTurn(ctx, rec) == nil {
+		rec.Status, rec.Output = store.TurnError, why
+		m.store.FinishTurn(ctx, rec)
+	}
 }
