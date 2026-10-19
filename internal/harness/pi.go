@@ -25,7 +25,17 @@ type piEvent struct {
 	ToolName string         `json:"toolName"`
 	Args     map[string]any `json:"args"`
 	Aborted  bool           `json:"aborted"`
-	Message  *struct {
+	// Data is a command's answer; compact's has these.
+	Data *struct {
+		TokensBefore         int `json:"tokensBefore"`
+		EstimatedTokensAfter int `json:"estimatedTokensAfter"`
+		Usage                struct {
+			Cost struct {
+				Total float64 `json:"total"`
+			} `json:"cost"`
+		} `json:"usage"`
+	} `json:"data"`
+	Message *struct {
 		Role         string `json:"role"`
 		StopReason   string `json:"stopReason"`
 		ErrorMessage string `json:"errorMessage"`
@@ -35,7 +45,10 @@ type piEvent struct {
 			Text string `json:"text"`
 		} `json:"content"`
 		Usage struct {
-			Cost struct {
+			Input      int `json:"input"`
+			CacheRead  int `json:"cacheRead"`
+			CacheWrite int `json:"cacheWrite"`
+			Cost       struct {
 				Total float64 `json:"total"`
 			} `json:"cost"`
 		} `json:"usage"`
@@ -83,6 +96,9 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 		images = append(images, piImage{Type: "image", Data: data, MimeType: img.MIME})
 	}
 	prompt, _ := json.Marshal(map[string]any{"id": "turn", "type": "prompt", "message": req.Prompt, "images": images})
+	if req.Compact {
+		prompt = []byte(`{"id":"turn","type":"compact"}`)
+	}
 
 	cmd := exec.CommandContext(ctx, Getenv("HERMITATOR_PI_BIN", "pi"), args...)
 	cmd.Dir = workdir
@@ -118,6 +134,8 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 		modelUsed string
 		settled   bool
 		failed    string
+		context   int
+		compacted string
 	)
 	emit(turn.Event{Type: turn.EventStarted, SessionID: req.SessionID})
 	readLines(stdout, func(line []byte) {
@@ -129,6 +147,17 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 		case "response":
 			if ev.Command == "prompt" && ev.Success != nil && !*ev.Success {
 				failed = ev.Error
+				stdin.Close()
+			}
+			if ev.Command == "compact" && ev.Success != nil {
+				if *ev.Success && ev.Data != nil {
+					cost += ev.Data.Usage.Cost.Total
+					context = ev.Data.EstimatedTokensAfter
+					compacted = fmt.Sprintf("compacted %d tokens to about %d", ev.Data.TokensBefore, ev.Data.EstimatedTokensAfter)
+				} else {
+					failed = ev.Error
+				}
+				settled = true
 				stdin.Close()
 			}
 		case "extension_ui_request":
@@ -144,6 +173,9 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 				return
 			}
 			cost += m.Usage.Cost.Total
+			if u := m.Usage; u.Input+u.CacheRead+u.CacheWrite > 0 {
+				context = u.Input + u.CacheRead + u.CacheWrite
+			}
 			if m.Model != "" {
 				modelUsed = m.Model
 			}
@@ -169,6 +201,10 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 	waitErr := cmd.Wait()
 
 	switch {
+	case req.Compact && failed != "":
+		emit(turn.Event{Type: turn.EventError, Text: "pi did not compact: " + failed, SessionID: req.SessionID})
+	case req.Compact && compacted != "":
+		emit(turn.Event{Type: turn.EventResult, Text: compacted, SessionID: req.SessionID, CostUSD: cost, ContextTokens: context})
 	case failed != "":
 		emit(turn.Event{Type: turn.EventError, Text: "pi rejected the prompt: " + failed, SessionID: req.SessionID})
 	case !settled:
@@ -182,7 +218,7 @@ func runPi(ctx context.Context, req *turn.Request, workdir string, emit Emit) er
 		}
 		emit(turn.Event{Type: turn.EventError, Text: msg, SessionID: req.SessionID})
 	default:
-		ev := turn.Event{Type: turn.EventResult, Text: lastText, SessionID: req.SessionID, CostUSD: cost, Model: modelUsed}
+		ev := turn.Event{Type: turn.EventResult, Text: lastText, SessionID: req.SessionID, CostUSD: cost, Model: modelUsed, ContextTokens: context}
 		if lastText == "" && lastError != "" {
 			ev.Text, ev.IsError = lastError, true
 		}

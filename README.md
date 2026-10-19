@@ -56,6 +56,9 @@ keep hundreds of them.
   workspace (private GitHub ones with your token), and, if you like, sets
   it up: installs dependencies, runs the tests, notes how to run it, and
   reports back.
+- **Cheap to wake after days.** A long conversation is compacted just
+  before the agent sleeps, while its history is still cached, so the next
+  wake re-reads a summary instead of paying full price for all of it.
 - **Preview links.** With a preview domain set up, an agent running a dev
   server sends you a link (`/preview 3000`, or the agent asks for one) that
   opens it on your phone, waking the agent if it was asleep.

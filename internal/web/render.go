@@ -111,6 +111,16 @@ var funcs = template.FuncMap{
 	},
 	"seconds": func(d time.Duration) int { return int(d / time.Second) },
 	"minutes": func(d time.Duration) int { return int(d / time.Minute) },
+	// tokens rounds a token count for reading: 840, 12k, 1.2M.
+	"tokens": func(n int) string {
+		switch {
+		case n >= 1_000_000:
+			return fmt.Sprintf("%.1fM", float64(n)/1e6)
+		case n >= 1000:
+			return fmt.Sprintf("%dk", (n+500)/1000)
+		}
+		return fmt.Sprint(n)
+	},
 }
 
 func humanDuration(d time.Duration) string {

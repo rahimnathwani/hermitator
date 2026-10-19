@@ -46,6 +46,14 @@ func TestMain(m *testing.M) {
 const fakeClaude = `#!/usr/bin/env bash
 read -r line
 printf '%s\n' "$@" > "$HOME/last-args"
+if [ "$2" = "/compact" ]; then
+  echo "$4" >> "$HOME/compactions"
+  printf '%s\n' '{"type":"system","subtype":"status","status":"compacting"}' \
+    '{"type":"system","subtype":"status","status":null,"compact_result":"success"}' \
+    '{"type":"system","subtype":"compact_boundary","compact_metadata":{"trigger":"manual","pre_tokens":70000,"post_tokens":3000}}' \
+    '{"type":"result","subtype":"success","is_error":false,"result":"","total_cost_usd":0.5}'
+  exit 0
+fi
 sid=""
 while [ $# -gt 0 ]; do
   case "$1" in --session-id|--resume) sid="$2"; echo "$1" >> "$HOME/modes" ;; esac
@@ -63,6 +71,8 @@ case "$text" in
     echo '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"whatsapp-send report.txt"}}]}}'
     ;;
   *"sleep"*) sleep 30 ;;
+  *"fill up"*)
+    printf '%s\n' '{"type":"assistant","message":{"usage":{"input_tokens":5,"cache_read_input_tokens":60000,"cache_creation_input_tokens":9995},"content":[{"type":"text","text":"full"}]}}' ;;
   *"go quiet"*)
     printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}'
     sleep 4 ;;
@@ -1362,5 +1372,53 @@ func TestRequestsAnsweredBeforeAnyChat(t *testing.T) {
 	b, err := os.ReadFile(filepath.Join(dir, "1.answer.json"))
 	if err != nil || !strings.Contains(string(b), "8000-"+e.agent.ID+".preview.test") {
 		t.Fatalf("answer = %s, %v", b, err)
+	}
+}
+
+func TestCompactBeforeSleep(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "fill up", true))
+	e.rec.wait(t, "text")
+	e.idle(t)
+	ag, _ := e.st.Agent(ctx, e.agent.ID)
+	if turns, _ := e.st.Turns(ctx, ag.ID, 1); ag.ContextTokens != 70000 || turns[0].ContextTokens != 70000 {
+		t.Fatalf("conversation size = %d, turn's = %d", ag.ContextTokens, turns[0].ContextTokens)
+	}
+	ag.IdleTimeout = time.Second
+	e.st.UpdateAgentSettings(ctx, ag)
+	time.Sleep(1100 * time.Millisecond)
+	reap := func() { e.m.actor(ag.ID).call(func(a *actor) error { a.reap(); return nil }) }
+
+	reap() // compacts instead of sleeping
+	deadline := time.Now().Add(10 * time.Second)
+	var compaction *store.Turn
+	for compaction == nil && time.Now().Before(deadline) {
+		if turns, _ := e.st.Turns(ctx, ag.ID, 1); strings.Contains(turns[0].Input, "Compacting") && turns[0].Status != store.TurnRunning {
+			compaction = turns[0]
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if compaction == nil || compaction.Status != store.TurnOK || !strings.Contains(compaction.Output, "70000") {
+		t.Fatalf("compaction = %+v", compaction)
+	}
+	if ag, _ := e.st.Agent(ctx, ag.ID); ag.ContextTokens != 0 {
+		t.Fatalf("size after compacting = %d", ag.ContextTokens)
+	}
+	e.idle(t)
+	reap() // now it sleeps, without compacting again
+	if st := e.m.Status(ag.ID).State; st == sandbox.Running {
+		t.Fatalf("state after compacting = %s", st)
+	}
+	spec, _ := e.m.Spec(ag)
+	matches, _ := filepath.Glob(filepath.Join(spec.Dir, "*", "compactions"))
+	if len(matches) != 1 {
+		t.Fatal("no record of the fake's compaction")
+	}
+	if b, _ := os.ReadFile(matches[0]); strings.Count(string(b), "\n") != 1 {
+		t.Fatalf("compactions: %q", b)
 	}
 }

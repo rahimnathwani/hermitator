@@ -36,9 +36,12 @@ type Agent struct {
 	Effort string
 	// Vocabulary is words voice notes should get right.
 	Vocabulary string
-	PiProvider string
-	State      string
-	SessionID  string
+	// ContextTokens is the conversation's size as of its last turn; 0
+	// once compacted, or after /new.
+	ContextTokens int
+	PiProvider    string
+	State         string
+	SessionID     string
 	// SessionCost is the running total Claude Code last reported for the
 	// session, so the next turn can record only its own share.
 	SessionCost float64
@@ -49,7 +52,7 @@ type Agent struct {
 	CreatedAt   time.Time
 }
 
-const agentColumns = `id, user_id, name, image, harness, model, effort, vocabulary, pi_provider, state, session_id, session_cost, idle_timeout_sec, memory_mb, ip, last_active_at, created_at`
+const agentColumns = `id, user_id, name, image, harness, model, effort, vocabulary, pi_provider, state, session_id, session_cost, context_tokens, idle_timeout_sec, memory_mb, ip, last_active_at, created_at`
 
 func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	var a Agent
@@ -57,7 +60,7 @@ func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	var last sql.NullString
 	var created string
 	if err := row.Scan(&a.ID, &a.UserID, &a.Name, &a.Image, &a.Harness, &a.Model, &a.Effort, &a.Vocabulary, &a.PiProvider, &a.State,
-		&a.SessionID, &a.SessionCost, &idle, &a.MemoryMB, &a.IP, &last, &created); err != nil {
+		&a.SessionID, &a.SessionCost, &a.ContextTokens, &idle, &a.MemoryMB, &a.IP, &last, &created); err != nil {
 		return nil, one(err)
 	}
 	a.IdleTimeout = time.Duration(idle) * time.Second
@@ -92,8 +95,8 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent, subnet netip.Prefix) 
 	if a.MemoryMB == 0 {
 		a.MemoryMB = 4096
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO agents (`+agentColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.UserID, a.Name, a.Image, a.Harness, a.Model, a.Effort, a.Vocabulary, a.PiProvider, a.State, a.SessionID, a.SessionCost,
+	_, err = tx.ExecContext(ctx, `INSERT INTO agents (`+agentColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.UserID, a.Name, a.Image, a.Harness, a.Model, a.Effort, a.Vocabulary, a.PiProvider, a.State, a.SessionID, a.SessionCost, a.ContextTokens,
 		int(a.IdleTimeout/time.Second), a.MemoryMB, a.IP, nullTS(a.LastActive), ts(a.CreatedAt))
 	if isUnique(err) {
 		return ErrConflict
@@ -207,7 +210,7 @@ func (s *Store) SetAgentState(ctx context.Context, id, state string) error {
 // SetAgentSession records the harness session the agent continues. A new
 // session starts with no running cost.
 func (s *Store) SetAgentSession(ctx context.Context, id, sessionID string) error {
-	return affected(s.db.ExecContext(ctx, `UPDATE agents SET session_id = ?, session_cost = 0 WHERE id = ?`, sessionID, id))
+	return affected(s.db.ExecContext(ctx, `UPDATE agents SET session_id = ?, session_cost = 0, context_tokens = 0 WHERE id = ?`, sessionID, id))
 }
 
 // SetAgentSessionCost records the session and its running cost together.
@@ -238,4 +241,9 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 // AgentByIP returns the agent at a bridge address.
 func (s *Store) AgentByIP(ctx context.Context, ip string) (*Agent, error) {
 	return scanAgent(s.db.QueryRowContext(ctx, `SELECT `+agentColumns+` FROM agents WHERE ip = ?`, ip))
+}
+
+// SetAgentContext records the size of an agent's conversation.
+func (s *Store) SetAgentContext(ctx context.Context, id string, tokens int) error {
+	return affected(s.db.ExecContext(ctx, `UPDATE agents SET context_tokens = ? WHERE id = ?`, tokens, id))
 }

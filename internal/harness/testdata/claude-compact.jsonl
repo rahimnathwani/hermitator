@@ -1,0 +1,5 @@
+{"type":"system","subtype":"status","status":"compacting","session_id":"b2fbb8dd-be49-4d6c-925a-3437aa97b68d","uuid":"8cfb3452-9964-4c13-a1e7-59d966ca1c77"}
+{"type":"system","subtype":"status","status":null,"compact_result":"success","session_id":"b2fbb8dd-be49-4d6c-925a-3437aa97b68d","uuid":"188c2db0-8d15-4ef5-8f8a-3cf8ccb064a1"}
+{"type":"system","subtype":"init","cwd":"/workspace","session_id":"b2fbb8dd-be49-4d6c-925a-3437aa97b68d","tools":["Bash"],"model":"claude-haiku-4-5"}
+{"type":"system","subtype":"compact_boundary","session_id":"b2fbb8dd-be49-4d6c-925a-3437aa97b68d","uuid":"30c58bf0-f6a1-486c-ba13-dc767282959a","compact_metadata":{"trigger":"manual","pre_tokens":36641,"post_tokens":6621}}
+{"type":"result","subtype":"success","is_error":false,"duration_api_ms":0,"num_turns":0,"stop_reason":null,"session_id":"b2fbb8dd-be49-4d6c-925a-3437aa97b68d","total_cost_usd":0.0213,"usage":{"input_tokens":0}}

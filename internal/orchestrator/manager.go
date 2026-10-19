@@ -44,6 +44,9 @@ type Config struct {
 	EgressKey []byte
 	// PublicURL is the web UI's address, used in replies.
 	PublicURL string
+	// CompactAbove overrides the conversation size, in tokens, compacted
+	// before an agent sleeps.
+	CompactAbove int
 	// PreviewDomain is where preview links live; empty turns them off.
 	PreviewDomain string
 	// PreviewKey derives preview links' secrets.

@@ -22,6 +22,7 @@
         <dt>Model</dt><dd>{{if $a.Model}}{{$a.Model}}{{else}}<span class="muted">default</span>{{end}}</dd>
         <dt>Effort</dt><dd>{{if $a.Effort}}{{$a.Effort}}{{else}}<span class="muted">default</span>{{end}}</dd>
         <dt>Sleeps after</dt><dd>{{minutes $a.IdleTimeout}} min idle</dd>
+        <dt>Conversation</dt><dd>{{if $a.ContextTokens}}{{tokens $a.ContextTokens}} tokens, re-read on every wake{{else}}<span class="muted">small, or just compacted</span>{{end}}</dd>
         <dt>Memory</dt><dd>{{memory $a.MemoryMB}}</dd>
         <dt>Image</dt><dd><span class="mono">{{$a.Image}}</span>{{with $d.NewerImage}}<br><a class="small" href="/agents/{{$a.ID}}/settings">Update available</a>{{end}}{{with $d.OwnCopies}}<br><a class="small" href="/agents/{{$a.ID}}/settings">Runs its own {{range $i, $c := .}}{{if $i}} and {{end}}{{$c.Name}}{{end}}</a>{{end}}</dd>
         <dt>Address</dt><dd class="mono">{{$a.IP}}</dd>

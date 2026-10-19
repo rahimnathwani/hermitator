@@ -120,6 +120,33 @@ and multicast ranges, and all new inbound connections to agents. Outbound
 traffic to the internet is masqueraded. The table is rewritten at every
 start.
 
+### Compacting before sleep
+
+An agent stays in one conversation until `/new`, and each turn resumes it,
+so the harness sends the whole history again. Providers cache it for an
+hour at most (Claude Code asks for an hour), so the first turn after a
+longer sleep writes all of it back to the cache at full price: on
+Ferris1, the first live agent, a wake after ten hours re-sent 29k of its
+40k tokens, and only the system prompt and tools came from the cache. For
+an agent woken every few days, that is most of what it costs.
+
+Every turn records how many tokens its last model call read
+(`context_tokens`, also on the agent and on its page). When the reaper is
+about to suspend an idle agent whose conversation is 60k tokens or more,
+and it went idle under 45 minutes ago, it compacts first, while the
+history is still cached and cheap to read: Claude Code gets `/compact` as
+a print-mode prompt (stream-json input does not take slash commands), pi
+gets its `compact` RPC command. The compaction runs as a turn of its own,
+recorded with its cost, holding the turn slot so a message arriving
+meanwhile waits; the next reaper tick suspends the agent. Afterwards the
+agent's size is 0, or pi's estimate, so it is not compacted again until a
+turn measures it anew. Nothing is lost: transcripts keep everything, and
+agents are told where they are.
+
+Both harnesses also compact on their own near the model's context limit;
+that keeps them working, not cheap, and a mostly sleeping agent with a
+large-context model may never reach it.
+
 ### Starting from a repository
 
 A new agent can be given a repository. The host boots the sandbox and

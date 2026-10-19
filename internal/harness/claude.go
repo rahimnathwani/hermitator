@@ -33,7 +33,18 @@ type claudeEvent struct {
 			ResetsAt    int64   `json:"resetsAt"`
 		} `json:"unifiedWindows"`
 	} `json:"rate_limit_info"`
+	// CompactResult and CompactMetadata come with /compact.
+	CompactResult   string `json:"compact_result"`
+	CompactMetadata struct {
+		PreTokens  int `json:"pre_tokens"`
+		PostTokens int `json:"post_tokens"`
+	} `json:"compact_metadata"`
 	Message struct {
+		Usage struct {
+			Input       int `json:"input_tokens"`
+			CacheRead   int `json:"cache_read_input_tokens"`
+			CacheCreate int `json:"cache_creation_input_tokens"`
+		} `json:"usage"`
 		Content []struct {
 			Type  string         `json:"type"`
 			Text  string         `json:"text"`
@@ -64,6 +75,9 @@ func claudeSessionExists(id string) bool {
 }
 
 func runClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit) error {
+	if req.Compact {
+		return compactClaude(ctx, req, workdir, emit)
+	}
 	args := []string{"-p",
 		"--input-format", "stream-json",
 		"--output-format", "stream-json",
@@ -156,6 +170,7 @@ func runClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit
 
 	var result *turn.Event
 	sessionID := req.SessionID
+	contextTokens := 0
 	readLines(stdout, func(line []byte) {
 		var ev claudeEvent
 		if json.Unmarshal(line, &ev) != nil {
@@ -170,6 +185,9 @@ func runClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit
 				emit(turn.Event{Type: turn.EventStarted, SessionID: sessionID, Model: ev.Model})
 			}
 		case "assistant":
+			if u := ev.Message.Usage; u.Input+u.CacheRead+u.CacheCreate > 0 {
+				contextTokens = u.Input + u.CacheRead + u.CacheCreate
+			}
 			for _, c := range ev.Message.Content {
 				switch c.Type {
 				case "text":
@@ -208,7 +226,7 @@ func runClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit
 			if text == "" && ev.IsError {
 				text = "Claude Code stopped: " + ev.Subtype
 			}
-			result = &turn.Event{Type: turn.EventResult, Text: text, SessionID: sessionID, CostUSD: ev.CostUSD, IsError: ev.IsError}
+			result = &turn.Event{Type: turn.EventResult, Text: text, SessionID: sessionID, CostUSD: ev.CostUSD, IsError: ev.IsError, ContextTokens: contextTokens}
 		}
 	})
 	waitErr := cmd.Wait()
@@ -288,4 +306,70 @@ func steer(dir string, stdin io.Writer, emit Emit) (stop func()) {
 		}
 	}()
 	return func() { close(done); <-stopped }
+}
+
+// compactClaude runs /compact on a session. Claude Code takes slash
+// commands as the prompt of a print-mode run, not over stream-json input.
+func compactClaude(ctx context.Context, req *turn.Request, workdir string, emit Emit) error {
+	if req.SessionID == "" || !claudeSessionExists(req.SessionID) {
+		emit(turn.Event{Type: turn.EventError, Text: "no conversation to compact"})
+		return nil
+	}
+	args := []string{"-p", "/compact", "--resume", req.SessionID, "--output-format", "stream-json", "--verbose"}
+	if req.Model != "" {
+		args = append(args, "--model", req.Model)
+	}
+	env := map[string]string{"IS_SANDBOX": "1", "DISABLE_AUTOUPDATER": "1"}
+	for k, v := range req.Env {
+		env[k] = v
+	}
+	var drop []string
+	if env["CLAUDE_CODE_OAUTH_TOKEN"] != "" {
+		drop = append(drop, "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
+	}
+	cmd := exec.CommandContext(ctx, Getenv("HERMITATOR_CLAUDE_BIN", "claude"), args...)
+	cmd.Dir = workdir
+	cmd.Env = environ(env, drop...)
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 10 * time.Second
+	stderr := &tail{n: 4096}
+	cmd.Stderr = stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start claude: %w", err)
+	}
+	var outcome string
+	var before, after int
+	var cost float64
+	readLines(stdout, func(line []byte) {
+		var ev claudeEvent
+		if json.Unmarshal(line, &ev) != nil {
+			return
+		}
+		switch {
+		case ev.Type == "system" && ev.CompactResult != "":
+			outcome = ev.CompactResult
+		case ev.Type == "system" && ev.Subtype == "compact_boundary":
+			before, after = ev.CompactMetadata.PreTokens, ev.CompactMetadata.PostTokens
+		case ev.Type == "result":
+			cost = ev.CostUSD
+		}
+	})
+	cmd.Wait()
+	if outcome != "success" {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = "Claude Code did not compact the conversation"
+		}
+		emit(turn.Event{Type: turn.EventError, Text: msg, SessionID: req.SessionID, CostUSD: cost})
+		return nil
+	}
+	// post_tokens counts the summary, not the system prompt and tools
+	// every call also reads, so the size is unknown until the next turn.
+	emit(turn.Event{Type: turn.EventResult, Text: fmt.Sprintf("compacted %d tokens to a %d-token summary", before, after),
+		SessionID: req.SessionID, CostUSD: cost})
+	return nil
 }

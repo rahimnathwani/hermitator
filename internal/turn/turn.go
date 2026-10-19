@@ -52,6 +52,9 @@ type Request struct {
 	Effort string `json:"effort,omitempty"`
 	// Provider selects pi's model provider; ignored for Claude.
 	Provider string `json:"provider,omitempty"`
+	// Compact summarises the session's older history instead of running
+	// a prompt, so the next turn after a long sleep re-reads less.
+	Compact bool `json:"compact,omitempty"`
 	// Fork continues SessionID in a new session, leaving the old one as
 	// it was. Claude Code only.
 	Fork bool `json:"fork,omitempty"`
@@ -122,6 +125,10 @@ type Event struct {
 	Windows []UsageWindow `json:"windows,omitempty"`
 	// Todos is the agent's task list, in "todos" events.
 	Todos []Todo `json:"todos,omitempty"`
+	// ContextTokens is how many tokens the session's last model call read,
+	// in "result" events: what the next turn re-reads. After compacting,
+	// it is the harness's own estimate, or 0 when it has none.
+	ContextTokens int `json:"context_tokens,omitempty"`
 }
 
 // UsageWindow is how much of a subscription's allowance for a period is

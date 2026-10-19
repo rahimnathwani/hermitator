@@ -321,6 +321,10 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 
 	if result != nil && result.Type == turn.EventResult {
 		m.accountSession(ctx, agent, result, prompt)
+		if result.ContextTokens > 0 {
+			rec.ContextTokens = result.ContextTokens
+			m.store.SetAgentContext(ctx, agent.ID, result.ContextTokens)
+		}
 	}
 
 	switch {
@@ -361,6 +365,11 @@ func (m *Manager) accountSession(ctx context.Context, ag *store.Agent, result *t
 		sid = ag.SessionID
 	}
 	m.store.SessionTurn(ctx, ag.ID, sid, ag.Harness, clip(prompt, 200))
+	m.accountCost(ctx, ag, result, sid)
+}
+
+// accountCost turns the harness's cost figure into the run's own cost.
+func (m *Manager) accountCost(ctx context.Context, ag *store.Agent, result *turn.Event, sid string) {
 	if ag.Harness != store.HarnessClaude {
 		if sid != ag.SessionID {
 			m.store.SetAgentSession(ctx, ag.ID, sid)

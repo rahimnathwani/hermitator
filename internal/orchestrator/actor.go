@@ -168,6 +168,9 @@ func (a *actor) reap() {
 	if time.Since(a.lastActive) < ag.IdleTimeout || spec.Holding(time.Now()) {
 		return
 	}
+	if a.compactFirst(ag) {
+		return // suspended once it is done
+	}
 	if st, err := a.suspend(a.ctx); err != nil {
 		a.m.log.Error("suspend idle agent", "agent", a.id, "err", err)
 	} else {
