@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/rahimnathwani/hermitator/internal/turn"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/ids"
@@ -32,6 +33,8 @@ type actor struct {
 	// what the agent sends between turns.
 	outbox sync.Mutex
 	bgSent []time.Time
+	// inBackground keeps one background delivery at a time per agent.
+	inBackground atomic.Bool
 
 	// todos is the agent's own task list from its latest turn, for /plan.
 	todos   []turn.Todo
@@ -154,7 +157,14 @@ func (a *actor) reap() {
 	}
 	// Between turns, deliver what background jobs send, and answer their
 	// requests; outside the actor, since sending takes a while.
-	go a.m.background(spec, ag)
+	if a.m.ctx.Err() == nil && a.inBackground.CompareAndSwap(false, true) {
+		a.m.bg.Add(1)
+		go func() {
+			defer a.m.bg.Done()
+			defer a.inBackground.Store(false)
+			a.m.background(spec, ag)
+		}()
+	}
 	if time.Since(a.lastActive) < ag.IdleTimeout || spec.Holding(time.Now()) {
 		return
 	}

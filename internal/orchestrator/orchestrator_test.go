@@ -217,10 +217,11 @@ func setup(t *testing.T) *env {
 	st.CreateAccount(ctx, acct)
 
 	t.Cleanup(func() {
+		cancel()
+		m.Wait()
 		if spec, err := m.Spec(agent); err == nil {
 			rt.Stop(context.Background(), spec)
 		}
-		cancel()
 		st.Close()
 	})
 	return &env{m: m, st: st, rec: rec, user: user, agent: agent, acct: acct}

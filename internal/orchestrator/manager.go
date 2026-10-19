@@ -57,7 +57,9 @@ type Manager struct {
 
 	msgr   Messenger
 	egress egressCache
-	stt    Transcriber
+	// bg counts background deliveries in flight, for Wait.
+	bg  sync.WaitGroup
+	stt Transcriber
 
 	ctx    context.Context
 	mu     sync.Mutex
@@ -523,3 +525,7 @@ func (m *Manager) UpdateAgent(ctx context.Context, updated *store.Agent) error {
 		return nil
 	})
 }
+
+// Wait blocks until background work the manager started has finished;
+// call it after cancelling the context Start was given.
+func (m *Manager) Wait() { m.bg.Wait() }
