@@ -27,6 +27,8 @@ type HostRequest struct {
 	// Question and Options are for ask: a poll.
 	Question string   `json:"question,omitempty"`
 	Options  []string `json:"options,omitempty"`
+	// Port is for preview.
+	Port int `json:"port,omitempty"`
 }
 
 // HostAnswer is the host's answer, written next to the request.

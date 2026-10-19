@@ -51,6 +51,9 @@ keep hundreds of them.
   Background jobs report back with `whatsapp-send --text` after the turn
   has ended, and `/sh` runs a quick command without the model. Optional
   daily and monthly spending limits stop anything running away.
+- **Preview links.** With a preview domain set up, an agent running a dev
+  server sends you a link (`/preview 3000`, or the agent asks for one) that
+  opens it on your phone, waking the agent if it was asleep.
 - **A control panel.** Live activity per agent, a console for talking to it
   from the browser, a terminal inside the sandbox, users with an admin who can
   act as them, and an audit log.
@@ -196,6 +199,12 @@ want both. Then log in as yourself and:
    number. For more agents on the same number, make a group with the
    number per agent and `/link` each one.
 
+For preview links, point a wildcard DNS record (`*.preview.example.com`)
+at the server and set `DEPLOY_PREVIEW_DOMAIN=preview.example.com` (or run
+install.sh with `HERMITATOR_PREVIEW_DOMAIN`). Caddy gets a certificate for
+each preview hostname the first time it is visited, after asking hermitator
+whether it has a link.
+
 WhatsApp unlinks companion devices whose phone has been offline for about
 two weeks, so open WhatsApp on the agents' phone now and then.
 
@@ -217,6 +226,7 @@ hermitator answers itself:
 | `/sessions`, `/resume N` | Past conversations, and going back to one (`/new` keeps them) |
 | `/fork` | Branch the next message off this conversation (Claude Code) |
 | `/history on`, `/history off` | Keep this chat's messages, everyone's, in a file the agent can search |
+| `/preview PORT`, `/previews`, `/previews off` | A link to a web server the agent runs; list them; turn them all off |
 | `/timezone Europe/London` | The time zone schedules use (also in Settings) |
 | `/new` | Start a fresh conversation; files are kept (alias `/clear`) |
 | `/model`, `/model opus`, `/model default` | Show or change the model |
@@ -302,6 +312,12 @@ What it does not protect:
   your accounts, or turn on **Keep them out of the sandbox** (beta) in
   Settings: agents then hold placeholders, and a proxy on the host swaps
   in the real values only on the way to each credential's own service.
+- **A preview link is a key.** Anyone with one can see that port until you
+  turn the agent's links off (`/previews off`, or its Settings tab), and
+  opening it wakes the agent. Preview hostnames appear in public
+  certificate logs, so the secret is in the link, not the name. Pages are
+  served from their own subdomain, and the panel's cookies are `__Host-`
+  cookies, which a preview cannot set.
 - **Whatever reaches the agent reaches your model provider.** Other
   people's messages in a linked chat are passed on as context even when they
   do not wake the agent. If you let them wake it, they can drive it, and it

@@ -6,6 +6,9 @@
 #
 # Optional environment:
 #   HERMITATOR_DOMAIN   serve the panel on https://DOMAIN through Caddy
+#   HERMITATOR_PREVIEW_DOMAIN
+#                       serve preview links at https://PORT-AGENT.PREVIEW_DOMAIN;
+#                       needs DOMAIN and a wildcard DNS record for it
 #   GVISOR_RELEASE      gVisor release to install (default below)
 #   WITH_WHISPER=1      build whisper.cpp for voice note transcription
 #
@@ -14,6 +17,8 @@ set -eu
 
 GVISOR_RELEASE=${GVISOR_RELEASE:-20261012.0}
 DOMAIN=${HERMITATOR_DOMAIN:-}
+PREVIEW=${HERMITATOR_PREVIEW_DOMAIN:-}
+[ -n "$DOMAIN" ] || PREVIEW=""
 src=$(cd "$(dirname "$0")/.." && pwd)
 data=/var/lib/hermitator
 envfile=/etc/hermitator/hermitator.env
@@ -75,6 +80,14 @@ CONF
 	say "wrote $envfile with a new master key"
 fi
 
+if [ -n "$PREVIEW" ]; then
+	if grep -q '^HERMITATOR_PREVIEW_DOMAIN=' "$envfile"; then
+		sed -i "s|^HERMITATOR_PREVIEW_DOMAIN=.*|HERMITATOR_PREVIEW_DOMAIN=$PREVIEW|" "$envfile"
+	else
+		echo "HERMITATOR_PREVIEW_DOMAIN=$PREVIEW" >>"$envfile"
+	fi
+fi
+
 if [ -n "$DOMAIN" ]; then
 	# hermitator owns one file in conf.d and nothing else, so other sites
 	# on this server can live beside it in files of their own.
@@ -93,6 +106,18 @@ CADDY
 	elif ! grep -qxF "$import" "$main"; then
 		printf '\n%s\n' "$import" >>"$main"
 	fi
+	if [ -n "$PREVIEW" ] && ! grep -q on_demand_tls "$main"; then
+		# Preview hostnames get certificates as they are first visited,
+		# once hermitator says the hostname has a link. That is a global
+		# option, which an imported file cannot carry.
+		if grep -q '^{' "$main"; then
+			say "warning: add this to the global options at the top of $main, or preview links will not get certificates:"
+			say "	on_demand_tls { ask http://127.0.0.1:8080/preview-allowed }"
+		else
+			{ printf '{\n\ton_demand_tls {\n\t\task http://127.0.0.1:8080/preview-allowed\n\t}\n}\n\n'; cat "$main"; } >"$main.new"
+			mv "$main.new" "$main"
+		fi
+	fi
 	if grep -q "^$DOMAIN[ {]" "$main"; then
 		say "warning: $main serves $DOMAIN itself; not adding hermitator's site"
 	else
@@ -102,6 +127,18 @@ $DOMAIN {
 	reverse_proxy 127.0.0.1:8080
 }
 CADDY
+		if [ -n "$PREVIEW" ]; then
+			cat >>"$ours" <<CADDY
+
+# Preview links: agents' web servers, through hermitator.
+*.$PREVIEW {
+	tls {
+		on_demand
+	}
+	reverse_proxy 127.0.0.1:8080
+}
+CADDY
+		fi
 	fi
 	systemctl enable --now caddy >/dev/null 2>&1
 	if caddy validate --config "$main" --adapter caddyfile >/dev/null 2>&1; then

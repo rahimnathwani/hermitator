@@ -29,4 +29,4 @@ rsync -az --delete "$out/" "$host:/usr/local/src/hermitator/"
 echo "==> installing"
 sudo=""
 case "$host" in root@*) ;; *@*) sudo="sudo" ;; esac
-ssh "$host" "$sudo env HERMITATOR_DOMAIN='$domain' WITH_WHISPER='${WITH_WHISPER:-}' sh /usr/local/src/hermitator/deploy/install.sh"
+ssh "$host" "$sudo env HERMITATOR_DOMAIN='$domain' HERMITATOR_PREVIEW_DOMAIN='${PREVIEW_DOMAIN:-}' WITH_WHISPER='${WITH_WHISPER:-}' sh /usr/local/src/hermitator/deploy/install.sh"

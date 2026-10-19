@@ -284,6 +284,12 @@ func (m *Manager) answer(ctx context.Context, spec *sandbox.Spec, ag *store.Agen
 		return turn.HostAnswer{OK: true, Message: "Cancelled " + t.Name + "."}
 	case "poll":
 		return m.poll(ctx, chat, req)
+	case "preview":
+		link, err := m.NewPreview(ctx, ag.ID, req.Port)
+		if err != nil {
+			return turn.HostAnswer{Message: "No preview link: " + err.Error()}
+		}
+		return turn.HostAnswer{OK: true, Message: link}
 	}
 	return turn.HostAnswer{Message: "unknown request " + req.Op}
 }

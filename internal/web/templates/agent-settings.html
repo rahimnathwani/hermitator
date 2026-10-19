@@ -67,6 +67,25 @@
 </section>
 {{end}}
 
+{{with $d.Previews}}
+<section class="card">
+  <div class="card-head"><div><h2>Preview links</h2><p>Anyone with one of these links can see what {{$a.Name}} serves on that port, and opening it wakes the agent.</p></div></div>
+  <ul class="numbers">
+    {{range .}}<li><span><strong>Port {{.Port}}</strong> <span class="muted">since {{ago .Since}}</span></span> <a href="{{.URL}}" target="_blank" rel="noopener">{{icon "external"}}Open</a></li>{{end}}
+  </ul>
+  <form method="post" action="/agents/{{$a.ID}}/previews/delete" class="form-actions" data-confirm="Turn links off" data-confirm-title="Turn off {{$a.Name}}'s preview links?">
+    <template data-confirm-body>
+      <p>Every preview link to {{$a.Name}} stops working, for everyone who has it.</p>
+      <ul>
+        <li>Its servers keep running; only the links go.</li>
+        <li>To share again, ask for a new link (<code>/preview PORT</code>); it will be a different one.</li>
+      </ul>
+    </template>
+    <button class="danger">{{icon "trash"}}Turn links off…</button>
+  </form>
+</section>
+{{end}}
+
 <section class="card danger-zone">
   <div class="card-head"><div><h2>Delete agent</h2><p>Deletes the sandbox and every file in it. This cannot be undone.</p></div></div>
   <form method="post" action="/agents/{{$a.ID}}/delete" data-confirm="Delete agent" data-confirm-title="Delete {{$a.Name}}?"

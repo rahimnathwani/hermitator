@@ -199,6 +199,8 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		m.retry(ctx, agentID, msg, reply)
 	case "tasks":
 		m.tasksCommand(ctx, ag, cmd.Arg, reply)
+	case "preview", "previews":
+		m.previewCommand(ctx, agentID, cmd, reply)
 	case "history":
 		m.historyCommand(route, cmd.Arg, reply)
 	case "usage":

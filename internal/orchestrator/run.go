@@ -52,7 +52,11 @@ func (m *Manager) agentPrompt(spec *sandbox.Spec, loc *time.Location, last Messa
 	case last.SenderName != "" && !last.FromMe:
 		who = fmt.Sprintf("You are talking to %s over WhatsApp.", last.SenderName)
 	}
-	return fmt.Sprintf(systemPrompt, who, path.Join(m.rt.GuestShared(spec), turn.InboxDir), loc)
+	prompt := fmt.Sprintf(systemPrompt, who, path.Join(m.rt.GuestShared(spec), turn.InboxDir), loc)
+	if m.Previews() {
+		prompt += "\n- To let the user open a web server you run (a dev server, a demo), have it listen on 0.0.0.0 (vite --host, next dev -H 0.0.0.0) and run: hermitator-guest preview PORT. It prints a link to send them; it works from their phone, and opening it wakes this machine. Anyone with the link can see the page, so offer it for things meant to be seen."
+	}
+	return prompt
 }
 
 // runTurn runs one turn for a batch of messages and delivers the reply.

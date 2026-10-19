@@ -127,12 +127,15 @@ func serve() error {
 	}
 
 	mgr := orchestrator.New(orchestrator.Config{
-		AgentsDir: cfg.AgentsDir(),
-		Images:    images,
-		Tools:     tools,
-		Subnet:    cfg.Subnet,
-		PublicURL: cfg.PublicURL,
-		EgressKey: egressKey,
+		AgentsDir:       cfg.AgentsDir(),
+		Images:          images,
+		Tools:           tools,
+		Subnet:          cfg.Subnet,
+		PublicURL:       cfg.PublicURL,
+		EgressKey:       egressKey,
+		PreviewDomain:   cfg.Preview,
+		PreviewKey:      derive(key, "preview links"),
+		PreviewLoopback: cfg.Runtime == "unsafe-local",
 	}, st, box, rt, log)
 	if egressKey != nil {
 		gateway := netip.PrefixFrom(cfg.Subnet.Masked().Addr().Next(), 0).Addr()
@@ -165,7 +168,7 @@ func serve() error {
 		return err
 	}
 
-	srv := &web.Server{Store: st, Agents: mgr, Gateway: gw, Images: images, Log: log, PublicURL: cfg.PublicURL, Version: version}
+	srv := &web.Server{Store: st, Agents: mgr, Gateway: gw, Images: images, Log: log, PublicURL: cfg.PublicURL, PreviewDomain: cfg.Preview, Version: version}
 	handler, err := srv.Handler()
 	if err != nil {
 		return err

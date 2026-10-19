@@ -15,6 +15,9 @@ type Config struct {
 	DataDir   string // HERMITATOR_DATA_DIR
 	Listen    string // HERMITATOR_LISTEN
 	PublicURL string // HERMITATOR_PUBLIC_URL
+	// Preview is the domain preview links live under, PORT-AGENT.Preview;
+	// empty turns them off. HERMITATOR_PREVIEW_DOMAIN
+	Preview   string
 	MasterKey string // HERMITATOR_MASTER_KEY
 	Runtime   string // HERMITATOR_RUNTIME: runsc or unsafe-local
 	Runsc     string // HERMITATOR_RUNSC
@@ -90,6 +93,7 @@ func Load() (*Config, error) {
 	}
 	c.DataDir = abs
 	c.PublicURL = strings.TrimRight(env("HERMITATOR_PUBLIC_URL", "http://"+c.Listen), "/")
+	c.Preview = strings.Trim(strings.ToLower(env("HERMITATOR_PREVIEW_DOMAIN", "")), ".")
 	c.Model = env("HERMITATOR_WHISPER_MODEL", filepath.Join(c.DataDir, "whisper", "ggml-small.bin"))
 	// Not 10.88.0.0/16, which is podman's default network, nor any other
 	// range container tools or VPNs commonly claim.

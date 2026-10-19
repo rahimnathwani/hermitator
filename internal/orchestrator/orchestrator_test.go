@@ -1308,3 +1308,45 @@ func TestChatHistoryAndVocabulary(t *testing.T) {
 		t.Fatal("history kept a message after /history off")
 	}
 }
+
+func TestPreviewCommands(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	say := func(text string) string {
+		e.m.HandleMessage(ctx, e.msg(chat, text, true))
+		return e.rec.wait(t, "text").body
+	}
+	if got := say("/preview 3000"); !strings.Contains(got, "not set up") {
+		t.Fatalf("without a preview domain: %q", got)
+	}
+	e.m.cfg.PreviewDomain, e.m.cfg.PreviewKey = "preview.test", []byte("k")
+	got := say("/preview 3000")
+	want := "https://3000-" + e.agent.ID + ".preview.test/?" + PreviewParam + "="
+	if !strings.Contains(got, want) {
+		t.Fatalf("/preview 3000 = %q", got)
+	}
+	spec, _ := e.m.Spec(e.agent)
+	ans := e.m.answer(ctx, spec, e.agent, chatRef{m: e.m}, turn.HostRequest{Op: "preview", Port: 3000})
+	if !ans.OK || !strings.Contains(got, ans.Message) {
+		t.Fatalf("the agent's link %q differs from the owner's", ans.Message)
+	}
+	if ans := e.m.answer(ctx, spec, e.agent, chatRef{m: e.m}, turn.HostRequest{Op: "preview", Port: 70000}); ans.OK {
+		t.Fatal("a preview of port 70000")
+	}
+	if got := say("/previews"); !strings.Contains(got, "3000: "+want) {
+		t.Fatalf("/previews = %q", got)
+	}
+	if got := say("/previews off"); !strings.Contains(got, "1 port") {
+		t.Fatalf("/previews off = %q", got)
+	}
+	if id, port, ok := e.m.ParsePreviewHost("3000-" + e.agent.ID + ".PREVIEW.test"); !ok || id != e.agent.ID || port != 3000 {
+		t.Fatal("hostname not parsed")
+	}
+	for _, h := range []string{"preview.test", "x.3000-a.preview.test", "0-a.preview.test", "3000-.preview.test", "3000-a.preview.test.evil"} {
+		if _, _, ok := e.m.ParsePreviewHost(h); ok {
+			t.Errorf("%s parsed as a preview host", h)
+		}
+	}
+}

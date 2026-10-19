@@ -3,17 +3,21 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/auth"
@@ -25,6 +29,26 @@ import (
 )
 
 type noGateway struct{}
+
+// guestBinary is hermitator-guest, built once: preview links wake agents,
+// and waking runs it.
+var guestBinary string
+
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "hermitator-guest-")
+	if err != nil {
+		panic(err)
+	}
+	guestBinary = filepath.Join(dir, "hermitator-guest")
+	build := exec.Command("go", "build", "-o", guestBinary, "../../cmd/hermitator-guest")
+	build.Stdout, build.Stderr = os.Stderr, os.Stderr
+	if err := build.Run(); err != nil {
+		panic("building the guest: " + err.Error())
+	}
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
+}
 
 func (noGateway) Connected(string) bool { return false }
 func (noGateway) StartPairing(context.Context, string) (*gateway.Pairing, error) {
@@ -62,15 +86,24 @@ func setup(t *testing.T) *fixture {
 	os.Symlink("universal-test", filepath.Join(images, "universal"))
 	box, _ := secrets.New(make([]byte, secrets.KeySize))
 	log := slog.New(slog.DiscardHandler)
+	if os.Getenv("WEBTEST_LOG") != "" {
+		log = slog.Default()
+	}
+	tools, err := sandbox.InstallTools(filepath.Join(root, "tools"), guestBinary, fstest.MapFS{"pi-login.mjs": {Data: []byte("")}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	mgr := orchestrator.New(orchestrator.Config{
-		AgentsDir: filepath.Join(root, "agents"),
-		Images:    &sandbox.Images{Dir: images},
-		Subnet:    netip.MustParsePrefix("10.88.0.0/16"),
+		Tools:         tools,
+		AgentsDir:     filepath.Join(root, "agents"),
+		Images:        &sandbox.Images{Dir: images},
+		Subnet:        netip.MustParsePrefix("10.88.0.0/16"),
+		PreviewDomain: "preview.test", PreviewKey: []byte("preview test key"), PreviewLoopback: true,
 	}, st, box, &sandbox.Local{}, log)
 	if err := mgr.Start(ctx); err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{Store: st, Agents: mgr, Gateway: noGateway{}, Images: &sandbox.Images{Dir: images}, Log: log, PublicURL: "http://test",
+	s := &Server{Store: st, Agents: mgr, Gateway: noGateway{}, Images: &sandbox.Images{Dir: images}, Log: log, PublicURL: "http://test", PreviewDomain: "preview.test",
 		GitHub: func(_ context.Context, token string) (GitHubUser, error) {
 			if token != "gho_good_token_123" {
 				return GitHubUser{}, errors.New("GitHub said 401 Unauthorized")
@@ -637,5 +670,90 @@ func TestRouteHistorySwitch(t *testing.T) {
 	}
 	if _, body := alice.get("/agents/" + id + "/chats"); !strings.Contains(body, `name="history" value="on" checked`) {
 		t.Fatal("the Chats tab does not show history as on")
+	}
+}
+
+func TestPreviewLinks(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	alice := f.login(t, "alice@example.com")
+	bob := f.login(t, "bob@example.com")
+	id := alice.createAgent("bot")
+
+	var seen *http.Request
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Clone(context.Background())
+		fmt.Fprint(w, "hello from the dev server")
+	}))
+	defer upstream.Close()
+	port := upstream.Listener.Addr().(*net.TCPAddr).Port
+	host := fmt.Sprintf("%d-%s.preview.test", port, id)
+	link, err := f.server.Agents.NewPreview(ctx, id, port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, _ := url.Parse(link)
+	if u.Host != host || u.Query().Get(orchestrator.PreviewParam) == "" {
+		t.Fatalf("link = %s", link)
+	}
+
+	visitor := f.client(t)
+	get := func(c *client, target string, cookies ...string) (int, string, *http.Response) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, f.srv.URL+target, nil)
+		req.Host = host
+		for _, ck := range cookies {
+			req.Header.Add("Cookie", ck)
+		}
+		resp, err := c.http.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b), resp
+	}
+	if code, _, _ := get(visitor, "/"); code != http.StatusForbidden {
+		t.Fatalf("without the secret: %d", code)
+	}
+	if code, _, _ := get(visitor, "/?"+orchestrator.PreviewParam+"=wrong"); code != http.StatusForbidden {
+		t.Fatalf("with a wrong secret: %d", code)
+	}
+	code, _, resp := get(visitor, "/app?x=1&"+orchestrator.PreviewParam+"="+u.Query().Get(orchestrator.PreviewParam))
+	if code != http.StatusSeeOther || resp.Header.Get("Location") != "/app?x=1" {
+		t.Fatalf("opening the link: %d to %q", code, resp.Header.Get("Location"))
+	}
+	if code, body, _ := get(visitor, "/app?x=1", "theirs=kept"); code != http.StatusOK || body != "hello from the dev server" {
+		t.Fatalf("through the link: %d %q", code, body)
+	}
+	if seen.Host != fmt.Sprintf("localhost:%d", port) || strings.Contains(seen.Header.Get("Cookie"), "hermitator") || !strings.Contains(seen.Header.Get("Cookie"), "theirs=kept") {
+		t.Fatalf("the dev server saw host %q, cookies %q", seen.Host, seen.Header.Get("Cookie"))
+	}
+
+	allowed := func(domain string, fwd bool) int {
+		req, _ := http.NewRequest(http.MethodGet, f.srv.URL+"/preview-allowed?domain="+domain, nil)
+		if fwd {
+			req.Header.Set("X-Forwarded-For", "203.0.113.9")
+		}
+		resp, _ := http.DefaultClient.Do(req)
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if allowed(host, false) != http.StatusOK || allowed("1-"+id+".preview.test", false) != http.StatusNotFound || allowed(host, true) != http.StatusNotFound {
+		t.Fatal("Caddy's question is answered wrongly")
+	}
+	if _, body := alice.get("/agents/" + id + "/settings"); !strings.Contains(body, fmt.Sprintf("Port %d", port)) {
+		t.Fatal("settings do not list the link")
+	}
+	if code, _ := bob.post("/agents/"+id+"/previews/delete", nil); code != http.StatusNotFound {
+		t.Fatalf("bob turned off alice's links: %d", code)
+	}
+	alice.post("/agents/"+id+"/previews/delete", nil)
+	if code, _, _ := get(visitor, "/app"); code != http.StatusNotFound {
+		t.Fatalf("after turning links off: %d", code)
+	}
+	again, _ := f.server.Agents.NewPreview(ctx, id, port)
+	if again == link {
+		t.Fatal("a new link is the old one")
 	}
 }

@@ -120,6 +120,30 @@ and multicast ranges, and all new inbound connections to agents. Outbound
 traffic to the internet is masqueraded. The table is rewritten at every
 start.
 
+### Preview links
+
+`https://PORT-AGENT.<preview domain>/` reaches PORT in an agent's sandbox.
+Caddy serves the wildcard with on-demand certificates, asking
+`/preview-allowed` first, so only hostnames with a link get one. Those
+hostnames land in public certificate-transparency logs, so the secret is
+in the link instead: an HMAC of agent, port and a random nonce in the
+`previews` table, under a key derived from the master key. Opening the
+link swaps it for a cookie scoped to that one host, which the proxy strips
+before the request reaches the agent. Deleting the agent's rows revokes
+every link; new ones get new nonces.
+
+Each request wakes the agent if needed and counts as activity; a
+WebSocket (live reload) counts once, so a forgotten tab does not keep the
+sandbox awake. The proxy sets `Host: localhost:PORT`, since dev servers such
+as Vite only answer the hosts they expect, and the server has to listen on
+0.0.0.0, which agents are told. The host may open connections to agents;
+agents still cannot open any to the host.
+
+Pages from agents are served from subdomains of a domain the panel may
+share, and a subdomain can set cookies for its parents. The panel's
+cookies are therefore `__Host-` cookies over HTTPS, which browsers accept
+only from the panel's exact host.
+
 ## Turns
 
 ### From message to reply

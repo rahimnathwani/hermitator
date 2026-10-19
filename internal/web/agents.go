@@ -208,6 +208,14 @@ func (s *Server) agentData(r *http.Request, a *store.Agent, tab string) map[stri
 	case "settings":
 		d["Fields"] = newAgentFields(a)
 		d["Memory"] = memoryChoice(a.MemoryMB)
+		if s.Agents.Previews() {
+			ps, _ := s.Store.Previews(ctx, a.ID)
+			links := []previewView{}
+			for _, p := range ps {
+				links = append(links, previewView{Port: p.Port, URL: s.Agents.PreviewURL(p), Since: p.CreatedAt})
+			}
+			d["Previews"] = links
+		}
 	}
 	return d
 }
@@ -534,6 +542,27 @@ func (s *Server) routeHistory(w http.ResponseWriter, r *http.Request, v *viewer)
 	s.Store.SetRouteHistory(ctx, route.AccountID, route.ChatJID, on)
 	s.audit(r, v, "route.history", fmt.Sprintf("agent=%s chat=%s on=%v", a.ID, route.ChatJID, on))
 	s.back(w, r, "/agents/"+a.ID+"/chats", "Saved.")
+}
+
+type previewView struct {
+	Port  int
+	URL   string
+	Since time.Time
+}
+
+func (s *Server) deletePreviews(w http.ResponseWriter, r *http.Request, v *viewer) {
+	a, err := s.agentFor(r, v)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	n, err := s.Store.DeletePreviews(r.Context(), a.ID)
+	if err != nil {
+		s.fail(w, r, v, http.StatusInternalServerError, "Could not turn the links off.")
+		return
+	}
+	s.audit(r, v, "preview.delete", fmt.Sprintf("agent=%s ports=%d", a.ID, n))
+	s.back(w, r, "/agents/"+a.ID+"/settings", "Preview links turned off.")
 }
 
 func clipRunes(s string, n int) string {

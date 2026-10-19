@@ -57,7 +57,10 @@ type Server struct {
 	// PublicURL is where users reach the panel; it decides whether cookies
 	// are marked Secure.
 	PublicURL string
-	Version   string
+	// PreviewDomain is where preview links live; requests for its
+	// subdomains go to agents' sandboxes, not the panel.
+	PreviewDomain string
+	Version       string
 	// GitHub looks up who a token belongs to; nil asks api.github.com.
 	GitHub func(ctx context.Context, token string) (GitHubUser, error)
 
@@ -107,6 +110,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	tenant("GET /agents/{id}/chats", s.agentChatsPage)
 	tenant("POST /agents/{id}/use-image-harnesses", s.useImageHarnesses)
 	tenant("POST /agents/{id}/routes/history", s.routeHistory)
+	tenant("POST /agents/{id}/previews/delete", s.deletePreviews)
 	tenant("GET /agents/{id}/risk", s.workAtRisk)
 	tenant("POST /agents/{id}/tasks/{tid}/{action}", s.taskAction)
 	tenant("POST /settings/limits", s.saveLimits)
@@ -160,8 +164,21 @@ func (s *Server) Handler() (http.Handler, error) {
 	// Ending impersonation is checked against the real (acting) user.
 	mux.Handle("POST /admin/stop-impersonating", s.authed(s.stopImpersonating))
 
+	// Caddy asks before getting a certificate for a preview hostname.
+	mux.HandleFunc("GET /preview-allowed", s.previewAllowed)
+
 	csrf := http.NewCrossOriginProtection()
-	return s.headers(csrf.Handler(mux)), nil
+	panel := s.headers(csrf.Handler(mux))
+	if s.PreviewDomain == "" {
+		return panel, nil
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if agentID, port, ok := s.Agents.ParsePreviewHost(hostOnly(r.Host)); ok {
+			s.servePreview(w, r, agentID, port)
+			return
+		}
+		panel.ServeHTTP(w, r)
+	}), nil
 }
 
 // viewer is who is looking at a page.
@@ -192,7 +209,7 @@ func (s *Server) authed(h handler) http.Handler {
 }
 
 func (s *Server) loadViewer(r *http.Request) (*viewer, error) {
-	c, err := r.Cookie(sessionCookie)
+	c, err := r.Cookie(s.cookie(sessionCookie))
 	if err != nil {
 		return nil, err
 	}
@@ -250,17 +267,27 @@ func (s *Server) audit(r *http.Request, v *viewer, action, detail string) {
 
 func (s *Server) secureCookies() bool { return strings.HasPrefix(s.PublicURL, "https://") }
 
+// cookie names a cookie. Over HTTPS it gets the __Host- prefix, which
+// browsers only accept from this exact host: a preview link, which serves
+// an agent's pages from a subdomain, cannot plant a session on the panel.
+func (s *Server) cookie(name string) string {
+	if s.secureCookies() {
+		return "__Host-" + name
+	}
+	return name
+}
+
 func (s *Server) setFlash(w http.ResponseWriter, msg string) {
-	http.SetCookie(w, &http.Cookie{Name: flashCookie, Value: url.QueryEscape(msg), Path: "/", MaxAge: 60,
+	http.SetCookie(w, &http.Cookie{Name: s.cookie(flashCookie), Value: url.QueryEscape(msg), Path: "/", MaxAge: 60,
 		HttpOnly: true, Secure: s.secureCookies(), SameSite: http.SameSiteLaxMode})
 }
 
 func (s *Server) takeFlash(w http.ResponseWriter, r *http.Request) string {
-	c, err := r.Cookie(flashCookie)
+	c, err := r.Cookie(s.cookie(flashCookie))
 	if err != nil {
 		return ""
 	}
-	http.SetCookie(w, &http.Cookie{Name: flashCookie, Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: s.cookie(flashCookie), Path: "/", MaxAge: -1, Secure: s.secureCookies()})
 	msg, _ := url.QueryUnescape(c.Value)
 	return msg
 }

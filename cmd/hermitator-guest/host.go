@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,11 @@ func shared(parts ...string) string {
 // looks for requests at least every 15 seconds while the sandbox is awake,
 // and every second during a turn.
 func ask(req turn.HostRequest, wait time.Duration) int {
+	return askOr(req, wait, "Handed to hermitator, which has not answered yet; check with `hermitator-guest tasks` in a minute.")
+}
+
+// askOr is ask with what to say when hermitator has not answered in time.
+func askOr(req turn.HostRequest, wait time.Duration, pending string) int {
 	dir := shared(turn.RequestsDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -57,8 +63,21 @@ func ask(req turn.HostRequest, wait time.Duration) int {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	fmt.Println("Handed to hermitator, which has not answered yet; check with `hermitator-guest tasks` in a minute.")
+	fmt.Println(pending)
 	return 0
+}
+
+// preview asks for a link to a port, for the user to open.
+func preview(args []string) int {
+	port := 0
+	if len(args) == 1 {
+		port, _ = strconv.Atoi(args[0])
+	}
+	if port < 1 || port > 65535 {
+		fmt.Fprintln(os.Stderr, "usage: hermitator-guest preview PORT\n\nPrints a link the user can open to see what listens on PORT here.\nThe server must listen on 0.0.0.0, not localhost.")
+		return 2
+	}
+	return askOr(turn.HostRequest{Op: "preview", Port: port}, 20*time.Second, "hermitator has not answered; try again in a moment.")
 }
 
 const scheduleUsage = `usage: hermitator-guest schedule (--cron EXPR | --at TIME | --in DURATION) [--name NAME] PROMPT...

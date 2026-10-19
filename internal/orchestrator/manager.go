@@ -44,6 +44,13 @@ type Config struct {
 	EgressKey []byte
 	// PublicURL is the web UI's address, used in replies.
 	PublicURL string
+	// PreviewDomain is where preview links live; empty turns them off.
+	PreviewDomain string
+	// PreviewKey derives preview links' secrets.
+	PreviewKey []byte
+	// PreviewLoopback sends preview requests to 127.0.0.1, for the
+	// unsafe-local runtime, where agents' servers run on the host.
+	PreviewLoopback bool
 }
 
 // Manager is the orchestrator.

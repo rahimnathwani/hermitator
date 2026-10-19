@@ -58,7 +58,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: token, Path: "/", MaxAge: int(sessionTTL / time.Second),
+		Name: s.cookie(sessionCookie), Value: token, Path: "/", MaxAge: int(sessionTTL / time.Second),
 		HttpOnly: true, Secure: s.secureCookies(), SameSite: http.SameSiteLaxMode,
 	})
 	s.Store.Audit(ctx, user.ID, user.ID, "login", clientIP(r))
@@ -66,10 +66,10 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(sessionCookie); err == nil {
+	if c, err := r.Cookie(s.cookie(sessionCookie)); err == nil {
 		s.Store.DeleteSession(r.Context(), ids.Hash(c.Value))
 	}
-	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Path: "/", MaxAge: -1})
+	http.SetCookie(w, &http.Cookie{Name: s.cookie(sessionCookie), Path: "/", MaxAge: -1, Secure: s.secureCookies()})
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
@@ -97,7 +97,7 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, v *viewe
 	token := ids.Token()
 	s.Store.CreateSession(r.Context(), ids.Hash(token), v.Actor.ID, sessionTTL)
 	http.SetCookie(w, &http.Cookie{
-		Name: sessionCookie, Value: token, Path: "/", MaxAge: int(sessionTTL / time.Second),
+		Name: s.cookie(sessionCookie), Value: token, Path: "/", MaxAge: int(sessionTTL / time.Second),
 		HttpOnly: true, Secure: s.secureCookies(), SameSite: http.SameSiteLaxMode,
 	})
 	s.setFlash(w, "Password changed. Other browsers have been logged out.")
