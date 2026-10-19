@@ -56,6 +56,8 @@ func main() {
 		os.Exit(hold(os.Args[2:]))
 	case "notify":
 		os.Exit(notify(os.Args[2:]))
+	case "check":
+		os.Exit(check())
 	case "version":
 		fmt.Println(version)
 	default:

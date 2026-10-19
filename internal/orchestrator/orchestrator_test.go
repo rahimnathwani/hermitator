@@ -1027,6 +1027,96 @@ func TestQuietScheduledRuns(t *testing.T) {
 	}
 }
 
+// A task with a check runs its turn only when the check prints something,
+// leaves the agent as idle as it was, and reports a failing check once.
+func TestTaskChecks(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	e.m.PutSecret(ctx, e.user.ID, store.SecretEnvPrefix+"WATCH_TOKEN", "s3cret-value")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	task := func(name, check string) *store.Task {
+		tk := &store.Task{AgentID: e.agent.ID, AccountID: e.acct.ID, ChatJID: chat, Name: name, Prompt: "look into it",
+			Cron: "*/5 * * * *", NextRun: time.Now().Add(-time.Second), CreatedBy: store.TaskByAgent, Check: check}
+		e.st.CreateTask(ctx, tk)
+		return tk
+	}
+	settle := func() {
+		t.Helper()
+		for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+			e.m.mu.Lock()
+			n := len(e.m.checking)
+			e.m.mu.Unlock()
+			if n == 0 {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("checks never finished")
+			}
+		}
+		time.Sleep(100 * time.Millisecond)
+		e.idle(t)
+	}
+	runs := func() (n int) {
+		turns, _ := e.st.Turns(ctx, e.agent.ID, 20)
+		for _, tr := range turns {
+			if strings.Contains(tr.Input, "Scheduled task") {
+				n++
+			}
+		}
+		return n
+	}
+
+	quiet := task("quiet", "true")
+	e.m.runDueTasks(time.Now())
+	settle()
+	if n := runs(); n != 0 {
+		t.Fatalf("%d runs for a check that printed nothing", n)
+	}
+	if st := e.m.Status(e.agent.ID); time.Since(st.LastActive) < time.Hour {
+		t.Fatalf("a check counted as activity, keeping the agent awake: %+v", st)
+	}
+	e.st.DeleteTask(ctx, quiet.ID)
+
+	found := task("found", `test "$WATCH_TOKEN" = s3cret-value && printf 'build 41 failed'`)
+	e.m.runDueTasks(time.Now())
+	if got := e.rec.wait(t, "text"); !strings.HasPrefix(got.body, "⏰ *found*") {
+		t.Fatalf("run = %q", got.body)
+	}
+	settle()
+	turns, _ := e.st.Turns(ctx, e.agent.ID, 1)
+	if p := turns[0].Prompt; !strings.Contains(p, "printed:\n```\nbuild 41 failed\n```") {
+		t.Fatalf("prompt = %q", p)
+	}
+	e.st.DeleteTask(ctx, found.ID)
+
+	broken := task("broken", "echo oops >&2; echo s3cret-value; exit 4")
+	e.m.runDueTasks(time.Now())
+	got := e.rec.wait(t, "text")
+	if !strings.Contains(got.body, "check for scheduled task *broken* failed") || !strings.Contains(got.body, "exit code 4: oops") || strings.Contains(got.body, "s3cret") {
+		t.Fatalf("failure notice = %q", got.body)
+	}
+	settle()
+	e.st.SetTaskPaused(ctx, broken.ID, false, time.Now().Add(-time.Second))
+	e.m.runDueTasks(time.Now()) // fails again, quietly
+	settle()
+	e.rec.mu.Lock()
+	notices := 0
+	for _, s := range e.rec.log {
+		if strings.Contains(s.body, "*broken* failed") {
+			notices++
+		}
+	}
+	e.rec.mu.Unlock()
+	if notices != 1 {
+		t.Fatalf("%d failure notices, want 1", notices)
+	}
+	if n := runs(); n != 1 {
+		t.Fatalf("%d runs; only the check that found something should have run", n)
+	}
+}
+
 func TestScheduleValidation(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()

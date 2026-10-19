@@ -277,6 +277,16 @@ the agent, it pauses. A run that finds nothing worth saying answers
 `NO_REPLY` and nothing is sent; a run is skipped while the task's
 previous run is still queued or going.
 
+A task can have a check (`schedule --if 'COMMAND'`). At each time the host
+wakes the sandbox and runs the command there as a spool job
+(`hermitator-guest check`), with the owner's secrets and GitHub token but
+no model credentials. Only if it exits 0 and prints something does the
+task's turn start, with the output added to its prompt; a watcher that
+finds nothing costs a restore and a few seconds of memory, not a model
+call. The check's hold does not count as activity, so the agent sleeps
+again at the next reaper tick. A failing check is reported to the chat
+once, and again only when it works again.
+
 Before any turn starts, the owner's optional daily and monthly spending
 limits are checked against the API-equivalent cost of their turns; a turn
 that would start past one does not, and crossing 80% sends a warning. A

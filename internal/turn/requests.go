@@ -23,7 +23,10 @@ type HostRequest struct {
 	In     string `json:"in,omitempty"` // a duration such as 2h30m
 	Name   string `json:"name,omitempty"`
 	Prompt string `json:"prompt,omitempty"`
-	Task   string `json:"task,omitempty"` // for unschedule
+	// If is a schedule's check: a shell command whose output decides
+	// whether the task's turn starts.
+	If   string `json:"if,omitempty"`
+	Task string `json:"task,omitempty"` // for unschedule
 	// Question and Options are for ask: a poll.
 	Question string   `json:"question,omitempty"`
 	Options  []string `json:"options,omitempty"`
@@ -37,6 +40,19 @@ type HostAnswer struct {
 	Message string `json:"message"`
 }
 
+// CheckRequest asks hermitator-guest check to run a task's check.
+type CheckRequest struct {
+	Command string            `json:"command"`
+	Env     map[string]string `json:"env,omitempty"`
+}
+
+// CheckResult is what a check printed, and how it exited.
+type CheckResult struct {
+	Exit   int    `json:"exit"`
+	Stdout string `json:"stdout"`
+	Stderr string `json:"stderr"`
+}
+
 // TaskInfo is one entry in TasksFile.
 type TaskInfo struct {
 	ID       string `json:"id"`
@@ -46,6 +62,7 @@ type TaskInfo struct {
 	Paused   bool   `json:"paused,omitempty"`
 	By       string `json:"by"`
 	Prompt   string `json:"prompt"`
+	If       string `json:"if,omitempty"`
 }
 
 // ParseAt reads a time for a one-off task in loc: "2026-10-19 09:00",

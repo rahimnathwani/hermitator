@@ -91,6 +91,10 @@ Times are in the owner's time zone.
   --at "2026-10-19 09:00" or --at 09:00 or --at 9am   once
   --in 2h30m             once, after this long
   --name "CI check"      what the owner sees; defaults to the prompt
+  --if 'COMMAND'         run COMMAND here first, each time, and start the
+                         turn only if it prints something (it comes with
+                         PROMPT); no output, or a failure, starts nothing,
+                         so a check costs no model call
 
 Runs at most every 5 minutes. List with: hermitator-guest tasks.
 Cancel with: hermitator-guest unschedule ID.`
@@ -103,6 +107,7 @@ func schedule(args []string) int {
 	fs.StringVar(&req.At, "at", "", "")
 	fs.StringVar(&req.In, "in", "", "")
 	fs.StringVar(&req.Name, "name", "", "")
+	fs.StringVar(&req.If, "if", "", "")
 	if fs.Parse(args) != nil {
 		return 2
 	}
@@ -144,6 +149,9 @@ func tasks() int {
 			state = "paused"
 		}
 		fmt.Printf("%s  %s  [%s, %s, set by %s]\n    %s\n", t.ID, t.Name, t.Schedule, state, t.By, t.Prompt)
+		if t.If != "" {
+			fmt.Printf("    if: %s\n", t.If)
+		}
 	}
 	return 0
 }
@@ -259,6 +267,34 @@ func notify(args []string) int {
 		*name, took, code, output)
 	askOr(turn.HostRequest{Op: "wake", Name: *name, Prompt: report}, time.Minute, "hermitator has not answered; the report may not have reached you.")
 	return code
+}
+
+// checkOutput is how much of a check's output the host is given.
+const checkOutput = 4000
+
+// check runs a scheduled task's check for the host (the request on
+// stdin) and prints how it went.
+func check() int {
+	var req turn.CheckRequest
+	data, err := io.ReadAll(os.Stdin)
+	if err == nil {
+		err = json.Unmarshal(data, &req)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bad check request:", err)
+		return 2
+	}
+	stdout, stderr := &tailBuffer{max: checkOutput}, &tailBuffer{max: checkOutput}
+	cmd := exec.Command("sh", "-c", req.Command)
+	cmd.Dir = harness.Getenv("HERMITATOR_WORKSPACE", turn.Workspace)
+	cmd.Env = os.Environ()
+	for k, v := range req.Env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	cmd.Stdout, cmd.Stderr = stdout, stderr
+	code := exitCode("check", cmd.Run())
+	json.NewEncoder(os.Stdout).Encode(turn.CheckResult{Exit: code, Stdout: stdout.String(), Stderr: stderr.String()})
+	return 0
 }
 
 // tailBuffer keeps the last max bytes written to it.

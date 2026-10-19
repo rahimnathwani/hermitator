@@ -9,8 +9,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rahimnathwani/hermitator/internal/ids"
 	"github.com/rahimnathwani/hermitator/internal/sandbox"
 	"github.com/rahimnathwani/hermitator/internal/schedule"
+	"github.com/rahimnathwani/hermitator/internal/spool"
 	"github.com/rahimnathwani/hermitator/internal/store"
 	"github.com/rahimnathwani/hermitator/internal/turn"
 )
@@ -93,19 +95,113 @@ func (m *Manager) runDueTasks(now time.Time) {
 				t.Name, by, t.CreatedAt.In(loc).Format("2 Jan 2006"), when, noReply, t.Prompt),
 		}
 		m.log.Info("running scheduled task", "agent", t.AgentID, "task", t.ID)
-		m.actor(t.AgentID).do(func(a *actor) {
-			// A run still waiting, or still going, makes another pointless:
-			// a long turn would otherwise come out to a pile of them.
-			if a.hasTask(msg.TaskID) {
-				m.log.Info("skipped a scheduled run; the last one has not finished", "agent", a.id, "task", msg.TaskID)
-				return
-			}
-			a.enqueue(msg)
-		})
+		if t.Check != "" {
+			m.bg.Add(1)
+			go func() {
+				defer m.bg.Done()
+				m.runCheck(ag, t, msg)
+			}()
+		} else {
+			m.queueRun(t.AgentID, msg)
+		}
 		if spec, err := m.Spec(ag); err == nil {
 			m.writeTasks(m.ctx, spec, ag)
 		}
 	}
+}
+
+// queueRun queues a scheduled run for its agent's next turn.
+func (m *Manager) queueRun(agentID string, msg Message) {
+	m.actor(agentID).do(func(a *actor) {
+		// A run still waiting, or still going, makes another pointless:
+		// a long turn would otherwise come out to a pile of them.
+		if a.hasTask(msg.TaskID) {
+			m.log.Info("skipped a scheduled run; the last one has not finished", "agent", a.id, "task", msg.TaskID)
+			return
+		}
+		a.enqueue(msg)
+	})
+}
+
+// checkTimeout bounds a task's check.
+const checkTimeout = 2 * time.Minute
+
+// runCheck runs a task's check, and its turn only if the check printed
+// something. The check wakes the sandbox, but no model: a watcher that
+// finds nothing costs a restore and a few seconds of memory. A failing
+// check is reported once, until it works again.
+func (m *Manager) runCheck(ag *store.Agent, t *store.Task, msg Message) {
+	m.mu.Lock()
+	busy := m.checking[t.ID]
+	m.checking[t.ID] = true
+	m.mu.Unlock()
+	if busy {
+		return
+	}
+	defer func() {
+		m.mu.Lock()
+		delete(m.checking, t.ID)
+		m.mu.Unlock()
+	}()
+	ctx, cancel := context.WithTimeout(m.ctx, checkTimeout)
+	defer cancel()
+	res, red, err := m.check(ctx, ag, t.Check)
+	if err == nil && res.Exit != 0 {
+		detail := strings.TrimSpace(res.Stderr + "\n" + res.Stdout)
+		err = fmt.Errorf("exit code %d: %s", res.Exit, clip(detail, 500))
+	}
+	if err != nil {
+		m.log.Warn("task check failed", "agent", ag.ID, "task", t.ID, "err", err)
+		if !t.CheckFailing {
+			chat := chatRef{m: m, msg: Message{AccountID: t.AccountID, Chat: t.ChatJID}, redact: red}
+			chat.send(fmt.Sprintf("⚠️ The check for scheduled task *%s* failed, so it did not run: %s\n\nIt is tried again at the next time; you will hear once it works. /tasks lists it.",
+				t.Name, red.apply(err.Error())))
+			m.store.SetTaskCheckFailing(ctx, t.ID, true)
+		}
+		return
+	}
+	if t.CheckFailing {
+		m.store.SetTaskCheckFailing(ctx, t.ID, false)
+		chatRef{m: m, msg: Message{AccountID: t.AccountID, Chat: t.ChatJID}}.send("✅ The check for scheduled task *" + t.Name + "* works again.")
+	}
+	out := strings.TrimSpace(res.Stdout)
+	if out == "" {
+		return
+	}
+	msg.Prompt += "\n\nIts check (" + t.Check + ") printed:\n```\n" + out + "\n```"
+	m.queueRun(ag.ID, msg)
+}
+
+// check runs a task's check command in the agent's sandbox, with the
+// owner's secrets and GitHub token but no model credentials.
+func (m *Manager) check(ctx context.Context, ag *store.Agent, command string) (*turn.CheckResult, redactor, error) {
+	release, err := m.holdAwake(ctx, ag.ID, false)
+	if err != nil {
+		return nil, redactor{}, err
+	}
+	defer release()
+	spec, err := m.Spec(ag)
+	if err != nil {
+		return nil, redactor{}, err
+	}
+	creds := credentials{env: map[string]string{}}
+	m.extraCredentials(ctx, ag, &creds)
+	m.usePlaceholders(ctx, ag, spec, &creds)
+	red := newRedactor(creds.redact)
+	env := map[string]string{"TZ": m.location(ctx, ag).String()}
+	for k, v := range creds.env {
+		env[k] = v
+	}
+	stdin, _ := json.Marshal(turn.CheckRequest{Command: command, Env: env})
+	out, exit, err := spec.Spool().Run(ctx, spool.Job{ID: "check-" + ids.New(), Argv: []string{"hermitator-guest", "check"}, Stdin: stdin})
+	if err != nil {
+		return nil, red, err
+	}
+	var res turn.CheckResult
+	if json.Unmarshal(out, &res) != nil {
+		return nil, red, fmt.Errorf("it ended without a result (%s)", exit)
+	}
+	return &res, red, nil
 }
 
 // stillLinked reports whether the task's chat still reaches its agent.
@@ -172,6 +268,10 @@ func (m *Manager) newTask(ctx context.Context, ag *store.Agent, chat chatRef, re
 	if t.NextRun.Sub(now) > maxTaskAhead {
 		return nil, errors.New("that is more than a year away")
 	}
+	t.Check = strings.TrimSpace(req.If)
+	if len(t.Check) > 1000 {
+		return nil, errors.New("the --if command is over 1000 characters; put it in a script and run that")
+	}
 	t.Name = strings.TrimSpace(req.Name)
 	if t.Name == "" {
 		t.Name = clip(strings.Join(strings.Fields(prompt), " "), 60)
@@ -195,6 +295,9 @@ func describeTask(t *store.Task, loc *time.Location) string {
 	if !t.Paused {
 		next = "next " + t.NextRun.In(loc).Format("Mon 2 Jan 15:04")
 	}
+	if t.Check != "" {
+		next += ", only if its check finds something"
+	}
 	return fmt.Sprintf("%s (%s, %s)", t.Name, when, next)
 }
 
@@ -213,7 +316,7 @@ func (m *Manager) writeTasks(ctx context.Context, spec *sandbox.Spec, ag *store.
 			sched = t.Cron
 		}
 		out = append(out, turn.TaskInfo{ID: shortID(t.ID), Name: t.Name, Schedule: sched, Paused: t.Paused,
-			NextRun: t.NextRun.In(loc).Format("2006-01-02 15:04 MST"), By: t.CreatedBy, Prompt: clip(t.Prompt, 300)})
+			NextRun: t.NextRun.In(loc).Format("2006-01-02 15:04 MST"), By: t.CreatedBy, Prompt: clip(t.Prompt, 300), If: clip(t.Check, 300)})
 	}
 	data, _ := json.MarshalIndent(out, "", "  ")
 	writeShared(spec, turn.TasksFile, data)

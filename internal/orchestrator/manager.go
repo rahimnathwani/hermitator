@@ -78,6 +78,8 @@ type Manager struct {
 	mu     sync.Mutex
 	actors map[string]*actor
 	links  linkGuard
+	// checking holds the tasks whose checks are running.
+	checking map[string]bool
 }
 
 // New creates a Manager. Call Start before handing it messages.
@@ -103,7 +105,7 @@ func New(cfg Config, st *store.Store, box *secrets.Box, rt sandbox.Runtime, log 
 	if cfg.ResendInterval == 0 {
 		cfg.ResendInterval = 10 * time.Second
 	}
-	return &Manager{cfg: cfg, store: st, box: box, rt: rt, log: log, actors: map[string]*actor{}, msgr: nopMessenger{}}
+	return &Manager{cfg: cfg, store: st, box: box, rt: rt, log: log, actors: map[string]*actor{}, checking: map[string]bool{}, msgr: nopMessenger{}}
 }
 
 // SetMessenger connects the manager to the chat gateway.
@@ -222,6 +224,11 @@ func (m *Manager) actor(agentID string) *actor {
 	a := &actor{m: m, id: agentID, inbox: make(chan func(*actor), 256), cancel: cancel, lastActive: time.Now()}
 	if ag, err := m.store.Agent(ctx, agentID); err == nil {
 		a.state = ag.State
+		if a.state != sandbox.Running {
+			// Asleep, it was last active when it last did something: a
+			// check that wakes it for a moment must not count as activity.
+			a.lastActive = ag.LastActive
+		}
 	}
 	m.actors[agentID] = a
 	go a.loop(ctx)
@@ -398,6 +405,12 @@ func (m *Manager) NewSession(ctx context.Context, agentID string) error {
 // Hold wakes an agent and keeps it awake until release is called. The web
 // terminal and the Codex login hold their agent while they are open.
 func (m *Manager) Hold(ctx context.Context, agentID string) (release func(), err error) {
+	return m.holdAwake(ctx, agentID, true)
+}
+
+// holdAwake is Hold; with touch false, releasing it leaves the agent as idle
+// as it was, so a check that woke it lets it sleep again at once.
+func (m *Manager) holdAwake(ctx context.Context, agentID string, touch bool) (release func(), err error) {
 	ag, err := m.store.Agent(ctx, agentID)
 	if err != nil {
 		return nil, err
@@ -411,7 +424,9 @@ func (m *Manager) Hold(ctx context.Context, agentID string) (release func(), err
 	release = sync.OnceFunc(func() {
 		a.do(func(a *actor) {
 			a.holds--
-			a.lastActive = time.Now()
+			if touch {
+				a.lastActive = time.Now()
+			}
 		})
 	})
 	if _, err := m.rt.Wake(ctx, spec); err != nil {

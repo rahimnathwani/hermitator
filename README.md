@@ -49,7 +49,10 @@ keep hundreds of them.
   send a WhatsApp poll; your tap comes back to it as a message.
 - **Work that carries on without you.** Ask an agent to do something
   later ("every weekday at 9, check CI and tell me") and it schedules it;
-  the host keeps the timetable, so the agent still sleeps until then.
+  the host keeps the timetable, so the agent still sleeps until then. A
+  task can start with a shell check ("every 10 minutes, if the build is
+  red, look into it") that wakes the model only when it finds something,
+  and a run with nothing to report sends nothing.
   A long job the agent starts with `hermitator-guest notify` (a test
   suite, a build) wakes it when it ends, so it can tell you how it went;
   other background jobs report with `whatsapp-send --text`. `/sh` runs a
