@@ -70,9 +70,14 @@ type Manager struct {
 	msgr   Messenger
 	egress egressCache
 	codex  codexState
-	// bg counts background deliveries in flight, for Wait.
-	bg  sync.WaitGroup
-	stt Transcriber
+	// bg counts background deliveries in flight, and loops the goroutines
+	// that run until the context ends (actors, the reaper, the scheduler,
+	// the resender), for Wait. stopped, under mu, is set by Wait, after
+	// which no actor starts a loop.
+	bg      sync.WaitGroup
+	loops   sync.WaitGroup
+	stopped bool
+	stt     Transcriber
 
 	ctx    context.Context
 	mu     sync.Mutex
@@ -127,8 +132,8 @@ func (m *Manager) Start(ctx context.Context) error {
 		m.log.Warn("marked turns interrupted by restart", "count", len(cut))
 		go m.tellInterrupted(cut)
 	}
-	go m.scheduler()
-	go m.resender()
+	m.goLoop(m.scheduler)
+	m.goLoop(m.resender)
 	agents, err := m.store.Agents(ctx, "")
 	if err != nil {
 		return err
@@ -158,8 +163,18 @@ func (m *Manager) Start(ctx context.Context) error {
 	if m.cfg.Tools != "" {
 		sandbox.PruneTools(filepath.Dir(m.cfg.Tools), m.cfg.Tools, dirs)
 	}
-	go m.reapLoop(ctx)
+	m.goLoop(func() { m.reapLoop(ctx) })
 	return nil
+}
+
+// goLoop runs f, which returns when the manager's context ends, on its own
+// goroutine, for Wait to wait for.
+func (m *Manager) goLoop(f func()) {
+	m.loops.Add(1)
+	go func() {
+		defer m.loops.Done()
+		f()
+	}()
 }
 
 // renumber moves an agent whose address is outside the configured subnet,
@@ -231,7 +246,9 @@ func (m *Manager) actor(agentID string) *actor {
 		}
 	}
 	m.actors[agentID] = a
-	go a.loop(ctx)
+	if !m.stopped {
+		m.goLoop(func() { a.loop(ctx) })
+	}
 	return a
 }
 
@@ -560,4 +577,10 @@ func (m *Manager) UpdateAgent(ctx context.Context, updated *store.Agent) error {
 
 // Wait blocks until background work the manager started has finished;
 // call it after cancelling the context Start was given.
-func (m *Manager) Wait() { m.bg.Wait() }
+func (m *Manager) Wait() {
+	m.mu.Lock()
+	m.stopped = true
+	m.mu.Unlock()
+	m.bg.Wait()
+	m.loops.Wait()
+}
