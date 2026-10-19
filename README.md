@@ -66,6 +66,9 @@ keep hundreds of them.
 - **Cheap to wake after days.** A long conversation is compacted just
   before the agent sleeps, while its history is still cached, so the next
   wake re-reads a summary instead of paying full price for all of it.
+  Nothing is lost: `hermitator-guest recall` lets the agent search every
+  past conversation, and the chat's history if you keep one, without a
+  model call.
 - **Preview links.** With a preview domain set up, an agent running a dev
   server sends you a link (`/preview 3000`, or the agent asks for one) that
   opens it on your phone, waking the agent if it was asleep.

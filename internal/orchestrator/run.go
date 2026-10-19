@@ -902,13 +902,14 @@ func (m *Manager) historyNote(ctx context.Context, spec *sandbox.Spec, ag *store
 	b.WriteString("\n- A long conversation is summarised before you sleep, and the summary keeps little of what tools showed you. When you learn something that will matter later (a cause found, a value, where something lives), say it in a few words in your reply.")
 	switch ag.Harness {
 	case store.HarnessClaude:
-		b.WriteString("\n- Full transcripts of your conversations with this owner, including what was summarised and what came before a /new, are in ~/.claude/projects/ (one .jsonl per conversation); search them when someone refers to something from before.")
+		b.WriteString("\n- Full transcripts of your conversations with this owner, including what was summarised and what came before a /new, are in ~/.claude/projects/ (one .jsonl per conversation).")
 	case store.HarnessPi:
-		b.WriteString("\n- Full transcripts of your conversations with this owner, including what was summarised and what came before a /new, are in ~/.pi/agent/sessions/; search them when someone refers to something from before.")
+		b.WriteString("\n- Full transcripts of your conversations with this owner, including what was summarised and what came before a /new, are in ~/.pi/agent/sessions/.")
 	}
+	b.WriteString(" When someone refers to something from before, or you need a detail a summary dropped, look it up before guessing: hermitator-guest recall WORDS lists the newest messages containing all of WORDS, in your transcripts and in chat history files, and hermitator-guest recall --show REF reads the messages around one.")
 	if last.AccountID != "" {
 		if route, err := m.store.Route(ctx, last.AccountID, last.Chat); err == nil && route.History {
-			fmt.Fprintf(&b, "\n- Everything said in this chat since its history was turned on, other people's messages included, is in %s; grep it when someone refers to something said before.",
+			fmt.Fprintf(&b, "\n- Everything said in this chat since its history was turned on, other people's messages included, is in %s; hermitator-guest recall searches it too.",
 				path.Join(m.rt.GuestShared(spec), historyFile(route)))
 		}
 	}

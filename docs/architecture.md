@@ -249,6 +249,14 @@ while a `hermitator-guest hold` file in `/shared/holds` is fresh. A hold
 refreshes its file every 30 seconds and lapses after three minutes
 without, or after twelve hours.
 
+`hermitator-guest recall WORDS` searches the agent's past conversations
+where they lie, inside the sandbox: Claude Code's and pi's transcripts and
+the chat history files, newest match first, with a reference for
+`--show REF` to read the messages around it. A compacted conversation's
+transcript still holds what the summary dropped; this is how the agent
+gets it back without a model call or a host round trip. Agents are told
+to look things up this way before guessing.
+
 `hermitator-guest notify -- CMD` is a hold that reports back: when CMD
 exits, it asks the host (a `wake` request) to start a turn in the chat the
 agent last talked in, with CMD's exit code and the last 3,000 bytes of its
