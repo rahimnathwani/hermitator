@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"net/http"
 	"slices"
 	"strconv"
@@ -62,6 +63,7 @@ const otherModel = "+other"
 type agentFields struct {
 	Harness      segmented
 	Provider     segmented
+	Keys         []providerKey
 	Models       []modelSet
 	ClaudeEffort segmented
 	PiEffort     segmented
@@ -77,6 +79,16 @@ type modelSet struct {
 	Other             string // the free-text input's name
 	Custom            string // its value, for a model off the list
 	Default           string // what "default" runs, when hermitator decides
+}
+
+// providerKey says whether a pi provider has the login or key it needs.
+// Those are set on the account's Settings page, not the agent's, so the
+// form says which and links there before an agent fails its first turn.
+type providerKey struct {
+	Provider, Name string
+	Login          bool // a subscription connected by logging in, not a pasted key
+	Ready          bool
+	Hidden         bool
 }
 
 func modelKey(harness, provider string) string {
@@ -103,7 +115,9 @@ func providerOrCodex(p string) string {
 	return p
 }
 
-func newAgentFields(a *store.Agent) agentFields {
+// newAgentFields builds the controls for a; ready says which pi providers
+// the owner has a login or key for.
+func newAgentFields(a *store.Agent, ready map[string]bool) agentFields {
 	f := agentFields{
 		Harness: seg("harness", a.Harness,
 			option{Value: store.HarnessClaude, Label: "Claude Code"},
@@ -115,9 +129,23 @@ func newAgentFields(a *store.Agent) agentFields {
 	f.Provider = seg("provider", providerOrCodex(a.PiProvider))
 	for _, p := range orchestrator.PiProviders {
 		f.Provider.Options = append(f.Provider.Options, option{Value: p.ID, Label: p.Short, Title: p.Name})
+		f.Keys = append(f.Keys, providerKey{Provider: p.ID, Name: p.Short, Login: p.ID == orchestrator.ProviderCodex,
+			Ready: ready[p.ID], Hidden: p.ID != f.Provider.Current})
 		f.Models = append(f.Models, modelChoice(a, store.HarnessPi, p.ID, p.DefaultModel))
 	}
 	return f
+}
+
+// piReady says which pi providers a user has a login or key for.
+func (s *Server) piReady(ctx context.Context, userID string) map[string]bool {
+	times, _ := s.Store.SecretTimes(ctx, userID)
+	_, deepseek := times[store.SecretDeepSeekKey]
+	_, openrouter := times[store.SecretOpenRouterKey]
+	return map[string]bool{
+		orchestrator.ProviderCodex:      s.Agents.HasPiProvider(ctx, userID, orchestrator.ProviderCodex),
+		orchestrator.ProviderDeepSeek:   deepseek,
+		orchestrator.ProviderOpenRouter: openrouter,
+	}
 }
 
 func effortChoice(a *store.Agent, harness, name string) segmented {

@@ -87,6 +87,14 @@
 <fieldset class="field pi-only">
   <legend>Provider</legend>
   {{template "seg" .Provider}}
+  {{range .Keys}}
+  <p class="hint" data-provider-hint="{{.Provider}}"{{if .Hidden}} hidden{{end}}>
+    {{- if and .Ready .Login}}Uses your {{.Name}} subscription, connected in <a href="/settings#{{.Provider}}">Settings</a>.
+    {{- else if .Ready}}Uses your {{.Name}} key from <a href="/settings#{{.Provider}}">Settings</a>.
+    {{- else if .Login}}{{.Name}} is not connected yet: connect it in <a href="/settings#{{.Provider}}">Settings</a>, or this agent cannot answer.
+    {{- else}}No {{.Name}} key yet: add one in <a href="/settings#{{.Provider}}">Settings</a>, or this agent cannot answer.{{end -}}
+  </p>
+  {{end}}
 </fieldset>
 <fieldset class="field">
   <legend>Model</legend>

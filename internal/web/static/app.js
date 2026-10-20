@@ -48,12 +48,15 @@ document.addEventListener("htmx:afterRequest", (e) => {
 });
 
 // A form with model choices shows the set for the selected harness and
-// provider.
+// provider, and whether that provider has its key.
 function showModels(form) {
   const harness = form.querySelector('input[name="harness"]:checked')?.value;
   const provider = form.querySelector('input[name="provider"]:checked')?.value;
   for (const set of form.querySelectorAll(".model-set")) {
     set.hidden = set.dataset.harness !== harness || (harness === "pi" && set.dataset.provider !== provider);
+  }
+  for (const hint of form.querySelectorAll("[data-provider-hint]")) {
+    hint.hidden = hint.dataset.providerHint !== provider;
   }
 }
 

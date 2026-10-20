@@ -35,7 +35,7 @@
     </div>
   </div>
 
-  <div class="setting">
+  <div class="setting" id="openai-codex">
     <div class="about">
       <h3>ChatGPT {{if $d.Codex}}<span class="badge ok">Connected {{ago $d.CodexSince}}</span>{{else}}<span class="badge">Not connected</span>{{end}}</h3>
       <p>pi agents can use a ChatGPT Plus or Pro subscription, through OpenAI's Codex login.</p>
@@ -64,7 +64,7 @@
     </div>
   </div>
 
-  <div class="setting">
+  <div class="setting" id="deepseek">
     <div class="about">
       <h3>DeepSeek {{if $d.DeepSeek.IsZero}}<span class="badge">Not set</span>{{else}}<span class="badge ok">Saved {{ago $d.DeepSeek}}</span>{{end}}</h3>
       <p>An API key from platform.deepseek.com, for pi agents.</p>
@@ -89,7 +89,7 @@
     </div>
   </div>
 
-  <div class="setting">
+  <div class="setting" id="openrouter">
     <div class="about">
       <h3>OpenRouter {{if $d.OpenRouter.IsZero}}<span class="badge">Not set</span>{{else}}<span class="badge ok">Saved {{ago $d.OpenRouter}}</span>{{end}}</h3>
       <p>An API key from openrouter.ai, for pi agents. One key reaches many vendors' models.</p>

@@ -316,7 +316,7 @@ form.dirty .savebar { box-shadow: 0 -8px 20px rgb(16 24 40 / 7%); }
 .savebar .unsaved { margin-right: auto; }
 
 /* Setting rows: a label and its explanation beside the control. */
-.setting { display: grid; grid-template-columns: minmax(0, 240px) minmax(0, 1fr); gap: 10px 32px; padding: 20px 0; border-top: 1px solid var(--border); }
+.setting { display: grid; grid-template-columns: minmax(0, 240px) minmax(0, 1fr); gap: 10px 32px; padding: 20px 0; border-top: 1px solid var(--border); scroll-margin-top: 24px; }
 .setting:first-child { border-top: 0; padding-top: 0; }
 .setting:last-child { padding-bottom: 0; }
 .setting > .about h3 { font-size: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

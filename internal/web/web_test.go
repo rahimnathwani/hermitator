@@ -488,6 +488,40 @@ func TestNewAgentTakesModelAndEffort(t *testing.T) {
 	}
 }
 
+// Keys live on the account's Settings page, not the agent's, so the agent
+// forms say whether the chosen provider has one and link to its card.
+func TestProviderHintLinksToTheKey(t *testing.T) {
+	f := setup(t)
+	alice := f.login(t, "alice@example.com")
+	id := alice.createAgent("bot")
+	alice.post("/agents/"+id+"/settings", url.Values{"name": {"bot"}, "harness": {"pi"}, "provider": {"deepseek"}, "idle_minutes": {"5"}, "memory_mb": {"4096"}})
+
+	_, body := alice.get("/agents/" + id + "/settings")
+	for _, want := range []string{
+		`data-provider-hint="deepseek">No DeepSeek key yet: add one in <a href="/settings#deepseek">Settings</a>`,
+		`data-provider-hint="openai-codex" hidden>ChatGPT is not connected yet`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("agent settings lack %s", want)
+		}
+	}
+	_, settings := alice.get("/settings")
+	for _, p := range orchestrator.PiProviders {
+		if !strings.Contains(body, `href="/settings#`+p.ID+`"`) || !strings.Contains(settings, `id="`+p.ID+`"`) {
+			t.Fatalf("no link from the agent form to a Settings card with id %q", p.ID)
+		}
+	}
+
+	alice.post("/settings/secret", url.Values{"field": {"deepseek"}, "value": {"sk-test"}})
+	if _, body := alice.get("/agents/" + id + "/settings"); !strings.Contains(body, `data-provider-hint="deepseek">Uses your DeepSeek key from`) {
+		t.Fatal("the hint does not see the saved key")
+	}
+	if _, body := alice.get("/agents/new"); !strings.Contains(body, `data-provider-hint="deepseek" hidden>Uses your DeepSeek key from`) ||
+		!strings.Contains(body, `data-provider-hint="openai-codex">ChatGPT is not connected yet`) {
+		t.Fatal("the new-agent form lacks the hints, or shows the wrong one")
+	}
+}
+
 func TestAgentTabs(t *testing.T) {
 	f := setup(t)
 	alice := f.login(t, "alice@example.com")
