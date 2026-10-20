@@ -489,8 +489,9 @@ func TestNewAgentTakesModelAndEffort(t *testing.T) {
 }
 
 // Keys live on the account's Settings page, not the agent's, so the agent
-// forms say whether the chosen provider has one and link to its card.
-func TestProviderHintLinksToTheKey(t *testing.T) {
+// forms say whether the chosen harness or provider has one and link to its
+// card.
+func TestKeyHintsLinkToTheKey(t *testing.T) {
 	f := setup(t)
 	alice := f.login(t, "alice@example.com")
 	id := alice.createAgent("bot")
@@ -519,6 +520,15 @@ func TestProviderHintLinksToTheKey(t *testing.T) {
 	if _, body := alice.get("/agents/new"); !strings.Contains(body, `data-provider-hint="deepseek" hidden>Uses your DeepSeek key from`) ||
 		!strings.Contains(body, `data-provider-hint="openai-codex">ChatGPT is not connected yet`) {
 		t.Fatal("the new-agent form lacks the hints, or shows the wrong one")
+	}
+
+	claude := `No Claude token yet: add one in <a href="/settings#claude">Settings</a>`
+	if !strings.Contains(body, claude) || !strings.Contains(settings, `id="claude"`) {
+		t.Fatal("no Claude token hint linking to its card")
+	}
+	alice.post("/settings/secret", url.Values{"field": {"claude"}, "value": {"sk-ant-oat01-test"}})
+	if _, body := alice.get("/agents/new"); strings.Contains(body, claude) || !strings.Contains(body, `with the token saved in <a href="/settings#claude">`) {
+		t.Fatal("the Claude hint does not see the saved token")
 	}
 }
 

@@ -62,6 +62,7 @@ const otherModel = "+other"
 // the new-agent and settings forms share.
 type agentFields struct {
 	Harness      segmented
+	ClaudeReady  bool // the owner has a Claude token
 	Provider     segmented
 	Keys         []providerKey
 	Models       []modelSet
@@ -115,10 +116,11 @@ func providerOrCodex(p string) string {
 	return p
 }
 
-// newAgentFields builds the controls for a; ready says which pi providers
-// the owner has a login or key for.
+// newAgentFields builds the controls for a; ready is what the owner has a
+// login or key for.
 func newAgentFields(a *store.Agent, ready map[string]bool) agentFields {
 	f := agentFields{
+		ClaudeReady: ready[store.HarnessClaude],
 		Harness: seg("harness", a.Harness,
 			option{Value: store.HarnessClaude, Label: "Claude Code"},
 			option{Value: store.HarnessPi, Label: "pi"}),
@@ -136,12 +138,15 @@ func newAgentFields(a *store.Agent, ready map[string]bool) agentFields {
 	return f
 }
 
-// piReady says which pi providers a user has a login or key for.
-func (s *Server) piReady(ctx context.Context, userID string) map[string]bool {
+// ready says which of Claude Code and the pi providers a user has a login
+// or key for.
+func (s *Server) ready(ctx context.Context, userID string) map[string]bool {
 	times, _ := s.Store.SecretTimes(ctx, userID)
+	_, claude := times[store.SecretClaudeToken]
 	_, deepseek := times[store.SecretDeepSeekKey]
 	_, openrouter := times[store.SecretOpenRouterKey]
 	return map[string]bool{
+		store.HarnessClaude:             claude,
 		orchestrator.ProviderCodex:      s.Agents.HasPiProvider(ctx, userID, orchestrator.ProviderCodex),
 		orchestrator.ProviderDeepSeek:   deepseek,
 		orchestrator.ProviderOpenRouter: openrouter,

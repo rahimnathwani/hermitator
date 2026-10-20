@@ -10,7 +10,7 @@
 <section class="card">
   <div class="card-head"><div><h2>Model credentials</h2><p>What your agents think with. Each harness uses its own.</p></div></div>
 
-  <div class="setting">
+  <div class="setting" id="claude">
     <div class="about">
       <h3>Claude Code {{if $d.Claude.IsZero}}<span class="badge">Not set</span>{{else}}<span class="badge ok">Saved {{ago $d.Claude}}</span>{{end}}</h3>
       <p>Uses your Claude subscription. On your own computer, run <code class="copy">claude setup-token</code> and paste the token it prints.</p>

@@ -117,7 +117,7 @@ func (s *Server) newAgentPage(w http.ResponseWriter, r *http.Request, v *viewer)
 	agents, _ := s.Store.Agents(r.Context(), v.User.ID)
 	s.render(w, r, v, "new-agent.html", "New agent", "agents", map[string]any{
 		"Images":    s.Images.Families(),
-		"Fields":    newAgentFields(&store.Agent{Harness: store.HarnessClaude}, s.piReady(r.Context(), v.User.ID)),
+		"Fields":    newAgentFields(&store.Agent{Harness: store.HarnessClaude}, s.ready(r.Context(), v.User.ID)),
 		"CanCreate": len(agents) < v.User.MaxAgents,
 		"MaxAgents": v.User.MaxAgents,
 		"GitHub":    s.Agents.Secret(r.Context(), v.User.ID, store.SecretGitHubToken) != "",
@@ -225,7 +225,7 @@ func (s *Server) agentData(r *http.Request, a *store.Agent, tab string) map[stri
 		d["Turns"], _ = s.Store.Turns(ctx, a.ID, 30)
 		d["Tasks"] = s.taskViews(ctx, a)
 	case "settings":
-		d["Fields"] = newAgentFields(a, s.piReady(ctx, a.UserID))
+		d["Fields"] = newAgentFields(a, s.ready(ctx, a.UserID))
 		d["Memory"] = memoryChoice(a.MemoryMB)
 		if s.Agents.Previews() {
 			ps, _ := s.Store.Previews(ctx, a.ID)
