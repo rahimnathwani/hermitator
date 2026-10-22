@@ -22,6 +22,12 @@ import (
 	"github.com/rahimnathwani/hermitator/internal/wamd"
 )
 
+// waitedFor is how long a message may have waited before the agent is
+// told its age. WhatsApp keeps messages for a device that is offline and
+// delivers them all when it is back, so after an outage an instruction
+// can arrive hours after it was typed.
+const waitedFor = 10 * time.Minute
+
 // maxMessage is the longest single WhatsApp message hermitator sends.
 // WhatsApp allows far more, but long walls of text are unreadable on a
 // phone.
@@ -530,6 +536,12 @@ func (m *Manager) buildPrompt(ctx context.Context, spec *sandbox.Spec, batch []M
 			continue
 		}
 		body := strings.Join(lines, "\n")
+		// A message that waited, behind an outage or a long turn, is
+		// never dropped; the agent is told how old it is and judges
+		// whether it still wants doing.
+		if !msg.Time.IsZero() && time.Since(msg.Time) >= waitedFor {
+			body = "[Sent " + ago(msg.Time) + " ago] " + body
+		}
 		if labelled {
 			name := msg.SenderName
 			if name == "" {

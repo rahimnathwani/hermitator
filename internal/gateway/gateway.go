@@ -33,11 +33,6 @@ import (
 	hstore "github.com/rahimnathwani/hermitator/internal/store"
 )
 
-// staleAfter drops messages delivered late, such as the backlog that
-// arrives after hermitator has been offline, so agents do not wake up to
-// answer yesterday's chatter.
-const staleAfter = 15 * time.Minute
-
 // Handler receives incoming messages. It reports whether the message is
 // queued for a turn, which marks it done when it starts; any other
 // message is done when the handler returns.
@@ -292,8 +287,8 @@ func (g *Gateway) dispatch(a *account, msg orchestrator.Message) {
 }
 
 // replay hands over again the messages no turn took before hermitator
-// last stopped. One that has gone stale meanwhile is dropped, as it would
-// have been on arrival.
+// last stopped, however old they are by now: a message is never dropped
+// for being late, only labelled with its age when the agent reads it.
 func (g *Gateway) replay(a *account) {
 	pending, err := g.store.PendingInbound(g.ctx, a.id)
 	if err != nil {

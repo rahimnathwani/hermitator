@@ -35,8 +35,6 @@ func (g *Gateway) convert(ctx context.Context, a *account, e *events.Message) (o
 		return orchestrator.Message{}, false // status updates and channels
 	case g.sent.has(info.ID):
 		return orchestrator.Message{}, false
-	case !info.Timestamp.IsZero() && time.Since(info.Timestamp) > staleAfter:
-		return orchestrator.Message{}, false
 	}
 	m := e.Message
 	cli := a.client

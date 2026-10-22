@@ -49,8 +49,8 @@ func TestStoredEventsRoundTrip(t *testing.T) {
 	}
 }
 
-// After a restart, messages no turn took are handed over again; stale
-// ones are dropped, and both end up done.
+// After a restart, messages no turn took are handed over again, however
+// old, and end up done.
 func TestReplay(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -83,18 +83,20 @@ func TestReplay(t *testing.T) {
 	g.attach("acct", client)
 	a := g.accounts["acct"]
 
-	for _, e := range []*events.Message{textEvent("FRESH", "still wanted", time.Now().Add(-time.Minute)), textEvent("STALE", "too late", time.Now().Add(-time.Hour))} {
+	for _, e := range []*events.Message{textEvent("FRESH", "still wanted", time.Now().Add(-time.Minute)), textEvent("OLD", "from before the outage", time.Now().Add(-time.Hour))} {
 		raw, _ := encodeEvent(e)
 		st.Receive(ctx, "acct", e.Info.ID, raw)
 	}
 	g.replay(a)
-	select {
-	case msg := <-got:
-		if msg.ID != "FRESH" || msg.Text != "still wanted" || msg.SenderName != "Sam" {
-			t.Fatalf("replayed %+v", msg)
+	for _, want := range []string{"FRESH", "OLD"} {
+		select {
+		case msg := <-got:
+			if msg.ID != want || msg.SenderName != "Sam" {
+				t.Fatalf("replayed %+v, want %s", msg, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s was not handed over", want)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("nothing was handed over")
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -109,7 +111,7 @@ func TestReplay(t *testing.T) {
 	}
 	select {
 	case msg := <-got:
-		t.Fatalf("a stale message was handed over: %+v", msg)
+		t.Fatalf("handed over twice: %+v", msg)
 	default:
 	}
 }

@@ -693,6 +693,21 @@ func TestQuotedMediaIsLabelled(t *testing.T) {
 	}
 }
 
+// A message that waited (behind an outage, or a long turn) reaches the
+// agent with its age, so it can tell whether the request still stands.
+func TestLateMessagesCarryTheirAge(t *testing.T) {
+	e := setup(t)
+	spec, _ := e.m.Spec(e.agent)
+	late := e.msg("self@s.whatsapp.net", "deploy the fix", true)
+	late.Owner, late.Time = true, time.Now().Add(-3*time.Hour)
+	fresh := e.msg("self@s.whatsapp.net", "and tell me when it is live", true)
+	fresh.Owner, fresh.Time = true, time.Now()
+	prompt, _ := e.m.buildPrompt(context.Background(), spec, []Message{late, fresh})
+	if want := "[Sent 3 h ago] deploy the fix\n\nand tell me when it is live"; prompt != want {
+		t.Fatalf("prompt = %q, want %q", prompt, want)
+	}
+}
+
 func TestMentionsName(t *testing.T) {
 	for text, want := range map[string]bool{
 		"@bot hi":         true,

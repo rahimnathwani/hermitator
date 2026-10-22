@@ -215,15 +215,19 @@ only from the panel's exact host.
 ### From message to reply
 
 1. The gateway decrypts an incoming message and hands it to the orchestrator,
-   preserving order per account. Status updates, channels, hermitator's own
-   echoes and anything more than 15 minutes old are dropped. First it writes
-   the message to the `inbound` table, and only then is WhatsApp told it
+   preserving order per account. Status updates, channels and hermitator's
+   own echoes are dropped; nothing is dropped for being old. WhatsApp
+   holds messages for a device that is offline and delivers them when it
+   is back, so after an outage they all arrive at once, and an
+   instruction typed during it is still an instruction: one that waited
+   over ten minutes reaches the agent headed with its age, and the agent
+   judges whether it still wants doing. First the gateway writes the
+   message to the `inbound` table, and only then is WhatsApp told it
    arrived (whatsmeow's `SynchronousAck`; by default it is told at once).
    A message stays pending until a turn takes it (or it turns out to be a
    command, held, or for nobody), so one a restart caught in a queue is
-   handed over again when the account reconnects, unless it has gone
-   stale; one WhatsApp delivers twice is recognised by its ID, which is
-   remembered for three days.
+   handed over again when the account reconnects; one WhatsApp delivers
+   twice is recognised by its ID, which is remembered for three days.
 2. Routing: a linked chat goes to its agent. An unlinked direct message from
    the owner goes to the account's fallback agent, if there is one. Anything
    else is ignored. "The owner" means the linked account itself, when it is
