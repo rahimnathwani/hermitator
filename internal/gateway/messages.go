@@ -80,6 +80,25 @@ func (g *Gateway) convert(ctx context.Context, a *account, e *events.Message) (o
 		d := m.GetDocumentMessage()
 		msg.Text, ctxInfo = d.GetCaption(), d.GetContextInfo()
 		msg.Media = &orchestrator.Media{Kind: "document", MIME: d.GetMimetype(), FileName: d.GetFileName(), Size: int64(d.GetFileLength()), Fetch: download(d, d.GetFileLength())}
+	case m.GetLocationMessage() != nil:
+		l := m.GetLocationMessage()
+		msg.Text, ctxInfo = locationText("Location", l.GetDegreesLatitude(), l.GetDegreesLongitude(), l.GetName(), l.GetAddress(), l.GetComment()), l.GetContextInfo()
+	case m.GetLiveLocationMessage() != nil:
+		l := m.GetLiveLocationMessage()
+		msg.Text, ctxInfo = locationText("Live location", l.GetDegreesLatitude(), l.GetDegreesLongitude(), "", "", l.GetCaption()), l.GetContextInfo()
+	case m.GetContactMessage() != nil:
+		c := m.GetContactMessage()
+		msg.Text, ctxInfo = "[Contact card: "+c.GetDisplayName()+"]", c.GetContextInfo()
+		msg.Media = vcardMedia(c.GetDisplayName(), c.GetVcard())
+	case m.GetContactsArrayMessage() != nil:
+		cs := m.GetContactsArrayMessage()
+		var names, cards []string
+		for _, c := range cs.GetContacts() {
+			names = append(names, c.GetDisplayName())
+			cards = append(cards, strings.TrimSpace(c.GetVcard()))
+		}
+		msg.Text, ctxInfo = "[Contact cards: "+strings.Join(names, ", ")+"]", cs.GetContextInfo()
+		msg.Media = vcardMedia(cs.GetDisplayName(), strings.Join(cards, "\n"))
 	case m.GetPollUpdateMessage() != nil:
 		text, ok := g.pollAnswer(ctx, cli, e)
 		if !ok {
@@ -120,6 +139,45 @@ func (g *Gateway) convert(ctx context.Context, a *account, e *events.Message) (o
 	}
 	msg.ChatName, msg.GroupSize = g.chatName(ctx, cli, info)
 	return msg, true
+}
+
+// locationText describes a shared location: coordinates the agent can
+// use, the place's name and address when WhatsApp sent them, and a map
+// link, so "find a pharmacy near here" works from a pin.
+func locationText(kind string, lat, lon float64, name, address, comment string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "[%s: %.5f, %.5f", kind, lat, lon)
+	if place := strings.TrimSpace(strings.Join(compact(name, address), ", ")); place != "" {
+		b.WriteString(" (" + place + ")")
+	}
+	fmt.Fprintf(&b, " https://maps.google.com/?q=%.5f,%.5f]", lat, lon)
+	if comment = strings.TrimSpace(comment); comment != "" {
+		b.WriteString(" " + comment)
+	}
+	return b.String()
+}
+
+func compact(ss ...string) []string {
+	var out []string
+	for _, s := range ss {
+		if s = strings.TrimSpace(s); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// vcardMedia is a shared contact as a .vcf file for the agent's inbox.
+func vcardMedia(name, vcard string) *orchestrator.Media {
+	if strings.TrimSpace(vcard) == "" {
+		return nil
+	}
+	if name = strings.TrimSpace(name); name == "" {
+		name = "contact"
+	}
+	data := []byte(vcard)
+	return &orchestrator.Media{Kind: "document", MIME: "text/vcard", FileName: name + ".vcf", Size: int64(len(data)),
+		Fetch: func(context.Context) ([]byte, error) { return data, nil }}
 }
 
 // phoneOf returns the phone number behind a user JID, which WhatsApp may
@@ -192,6 +250,11 @@ func quotedText(q *waE2E.Message) string {
 		return "[image] " + q.GetImageMessage().GetCaption()
 	case q.GetDocumentMessage() != nil:
 		return "[file " + q.GetDocumentMessage().GetFileName() + "]"
+	case q.GetLocationMessage() != nil:
+		l := q.GetLocationMessage()
+		return locationText("Location", l.GetDegreesLatitude(), l.GetDegreesLongitude(), l.GetName(), l.GetAddress(), l.GetComment())
+	case q.GetContactMessage() != nil:
+		return "[contact card: " + q.GetContactMessage().GetDisplayName() + "]"
 	}
 	return ""
 }

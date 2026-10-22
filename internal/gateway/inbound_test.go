@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,5 +114,26 @@ func TestReplay(t *testing.T) {
 	case msg := <-got:
 		t.Fatalf("handed over twice: %+v", msg)
 	default:
+	}
+
+	// A shared location becomes text the agent can use; a contact card
+	// becomes a note and a .vcf in its inbox.
+	pin := textEvent("PIN", "", time.Now())
+	pin.Message = &waE2E.Message{LocationMessage: &waE2E.LocationMessage{DegreesLatitude: proto.Float64(51.507351), DegreesLongitude: proto.Float64(-0.127758), Name: proto.String("Trafalgar Square"), Comment: proto.String("meet here?")}}
+	card := textEvent("CARD", "", time.Now())
+	card.Message = &waE2E.Message{ContactMessage: &waE2E.ContactMessage{DisplayName: proto.String("Ada Lovelace"), Vcard: proto.String("BEGIN:VCARD\nFN:Ada Lovelace\nEND:VCARD")}}
+	for _, e := range []*events.Message{pin, card} {
+		raw, _ := encodeEvent(e)
+		st.Receive(ctx, "acct", e.Info.ID, raw)
+	}
+	g.replay(a)
+	msg := <-got
+	if msg.Text != "[Location: 51.50735, -0.12776 (Trafalgar Square) https://maps.google.com/?q=51.50735,-0.12776] meet here?" {
+		t.Fatalf("pin = %q", msg.Text)
+	}
+	msg = <-got
+	data, _ := msg.Media.Fetch(ctx)
+	if msg.Text != "[Contact card: Ada Lovelace]" || msg.Media.FileName != "Ada Lovelace.vcf" || msg.Media.MIME != "text/vcard" || !strings.Contains(string(data), "FN:Ada") {
+		t.Fatalf("card = %+v", msg)
 	}
 }
