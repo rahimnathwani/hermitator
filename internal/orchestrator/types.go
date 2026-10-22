@@ -90,6 +90,10 @@ type Messenger interface {
 	SendText(ctx context.Context, accountID, chat, text string) error
 	// SendReply sends text quoting an earlier message of the chat.
 	SendReply(ctx context.Context, accountID, chat, text string, q Quote) error
+	// SendNote sends text and returns the message's ID, for Edit.
+	SendNote(ctx context.Context, accountID, chat, text string) (string, error)
+	// Edit replaces the text of a message this account sent recently.
+	Edit(ctx context.Context, accountID, chat, messageID, text string) error
 	SendFile(ctx context.Context, accountID, chat, name string, data []byte, caption string) error
 	// SendPoll sends a single-choice poll; votes come back as messages.
 	SendPoll(ctx context.Context, accountID, chat, question string, options []string) error

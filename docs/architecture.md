@@ -268,7 +268,13 @@ only from the panel's exact host.
    WhatsApp formatting and split into messages, and the reaction becomes ✅.
    In a group, after a message that waited behind another turn, or when
    the turn took over a minute, the reply quotes the message it answers,
-   so the phone shows what it is about.
+   so the phone shows what it is about. A turn that runs past a minute
+   also gets one progress note in the chat ("🔧 Working for 3m: Bash npm
+   test"), edited in place every 30 seconds as the step or the time
+   changes, since edits do not notify; a fresh note is sent once it is
+   15 minutes old, as WhatsApp stops allowing edits after about 20. When
+   the turn ends the note becomes one line saying how it went and how
+   long it took. Scheduled runs get no note.
 
 Agents talk to the host through `/shared` only. Besides the outbox,
 guest commands such as `hermitator-guest schedule` drop requests into

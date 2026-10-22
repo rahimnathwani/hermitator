@@ -39,6 +39,11 @@ type Config struct {
 	// StallAfter is how long a turn may go without any sign of progress
 	// before the chat is told, once.
 	StallAfter time.Duration
+	// ProgressAfter is how long a turn runs before the chat gets a
+	// progress note, and ProgressEvery how often the note is brought up
+	// to date.
+	ProgressAfter time.Duration
+	ProgressEvery time.Duration
 	// ResendInterval is how often texts that failed to send are retried.
 	ResendInterval time.Duration
 	// EgressKey derives credential placeholders; set when the egress
@@ -106,6 +111,12 @@ func New(cfg Config, st *store.Store, box *secrets.Box, rt sandbox.Runtime, log 
 	}
 	if cfg.StallAfter == 0 {
 		cfg.StallAfter = 10 * time.Minute
+	}
+	if cfg.ProgressAfter == 0 {
+		cfg.ProgressAfter = time.Minute
+	}
+	if cfg.ProgressEvery == 0 {
+		cfg.ProgressEvery = 30 * time.Second
 	}
 	if cfg.ResendInterval == 0 {
 		cfg.ResendInterval = 10 * time.Second
@@ -471,6 +482,10 @@ func (nopMessenger) SendText(context.Context, string, string, string) error { re
 func (nopMessenger) SendReply(context.Context, string, string, string, Quote) error {
 	return nil
 }
+func (nopMessenger) SendNote(context.Context, string, string, string) (string, error) {
+	return "", nil
+}
+func (nopMessenger) Edit(context.Context, string, string, string, string) error { return nil }
 func (nopMessenger) SendFile(context.Context, string, string, string, []byte, string) error {
 	return nil
 }

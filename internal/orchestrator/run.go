@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -288,6 +289,15 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		}
 	}()
 
+	// A turn that runs on for a while gets one progress note in the chat,
+	// edited in place as the work moves on: edits make no sound on the
+	// phone, so the owner can glance without being nagged.
+	note := &progressNote{}
+	chat.note = note
+	if chat.ok() && !chat.quiet {
+		go m.keepProgressNote(followCtx, chat, t, note)
+	}
+
 	// A quiet turn may be a slow build, so this only ever warns, once.
 	progress := &t.progress
 	progress.Store(&stallState{at: time.Now()})
@@ -483,6 +493,9 @@ func (m *Manager) finish(ctx context.Context, chat chatRef, rec *store.Turn, res
 	}
 	if !rec.StartedAt.IsZero() && chat.quote == nil && time.Since(rec.StartedAt) >= quoteAfter {
 		chat.quote = quoteOf(chat.msg)
+	}
+	if chat.note != nil {
+		chat.note.finish(chat, rec)
 	}
 	if !rec.StartedAt.IsZero() {
 		m.store.FinishTurn(ctx, rec)
@@ -761,6 +774,94 @@ type chatRef struct {
 	redact redactor
 	// quote, when set, is the message the next text sent attaches to.
 	quote *Quote
+	// note is the turn's progress message, if it has one yet.
+	note *progressNote
+}
+
+// progressRenew is how old a progress note may get before a fresh one
+// is sent: WhatsApp only lets a message be edited for so long.
+const progressRenew = 15 * time.Minute
+
+// progressNote is the one message in the chat that says how a long turn
+// is going.
+type progressNote struct {
+	mu   sync.Mutex
+	id   string
+	at   time.Time
+	last string
+}
+
+// keepProgressNote sends the turn's progress note once the turn has run
+// for ProgressAfter, then edits it whenever its step or its age changes.
+func (m *Manager) keepProgressNote(ctx context.Context, chat chatRef, t *activeTurn, note *progressNote) {
+	tick := time.NewTicker(m.cfg.ProgressEvery)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+		elapsed := time.Since(t.started)
+		if elapsed < m.cfg.ProgressAfter {
+			continue
+		}
+		text := "🔧 Working for " + humanize(elapsed)
+		if p := t.progress.Load(); p != nil && p.doing != "" {
+			text += ": " + clip(p.doing, 120)
+		}
+		note.update(chat, text)
+	}
+}
+
+// update sends the note, or edits it, so that it says text.
+func (n *progressNote) update(chat chatRef, text string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if text == n.last {
+		return
+	}
+	ctx := chat.m.ctx
+	if n.id != "" && time.Since(n.at) < progressRenew {
+		if err := chat.m.msgr.Edit(ctx, chat.msg.AccountID, chat.msg.Chat, n.id, text); err != nil {
+			chat.m.log.Debug("edit progress note", "err", err)
+			return
+		}
+		n.last = text
+		return
+	}
+	id, err := chat.m.msgr.SendNote(ctx, chat.msg.AccountID, chat.msg.Chat, text)
+	if err != nil || id == "" {
+		chat.m.log.Debug("send progress note", "err", err)
+		return
+	}
+	n.id, n.at, n.last = id, time.Now(), text
+}
+
+// finish turns the note into a one-line record of how the turn ended,
+// if there is a note; the reaction on the message says the rest.
+func (n *progressNote) finish(chat chatRef, rec *store.Turn) {
+	n.mu.Lock()
+	has := n.id != ""
+	n.mu.Unlock()
+	if !has {
+		return
+	}
+	took := humanize(rec.Duration())
+	steps := fmt.Sprintf("%d steps", rec.Tools)
+	if rec.Tools == 1 {
+		steps = "1 step"
+	}
+	var text string
+	switch rec.Status {
+	case store.TurnOK:
+		text = "✅ Done in " + took + ", " + steps
+	case store.TurnAborted:
+		text = "⏹ Stopped after " + took + ", " + steps
+	default:
+		text = "❌ Failed after " + took + ", " + steps
+	}
+	n.update(chat, text)
 }
 
 // quoteOf is the quote for a reply to msg, or nil for a message that

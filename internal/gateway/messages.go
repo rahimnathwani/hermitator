@@ -347,6 +347,35 @@ func (g *Gateway) SendReply(ctx context.Context, accountID, chat, text string, q
 	return err
 }
 
+// SendNote implements orchestrator.Messenger: a text whose ID comes
+// back, so it can be edited.
+func (g *Gateway) SendNote(ctx context.Context, accountID, chat, text string) (string, error) {
+	cli, jid, err := g.target(accountID, chat)
+	if err != nil {
+		return "", err
+	}
+	resp, err := cli.SendMessage(ctx, jid, &waE2E.Message{Conversation: proto.String(text)})
+	if err != nil {
+		return "", err
+	}
+	g.sent.add(resp.ID)
+	return resp.ID, nil
+}
+
+// Edit implements orchestrator.Messenger. WhatsApp lets a message be
+// edited for about twenty minutes after it was sent.
+func (g *Gateway) Edit(ctx context.Context, accountID, chat, messageID, text string) error {
+	cli, jid, err := g.target(accountID, chat)
+	if err != nil {
+		return err
+	}
+	resp, err := cli.SendMessage(ctx, jid, cli.BuildEdit(jid, messageID, &waE2E.Message{Conversation: proto.String(text)}))
+	if err == nil {
+		g.sent.add(resp.ID)
+	}
+	return err
+}
+
 // SendPoll implements orchestrator.Messenger: a single-choice poll,
 // remembered so its votes can be read back.
 func (g *Gateway) SendPoll(ctx context.Context, accountID, chat, question string, options []string) error {

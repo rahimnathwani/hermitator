@@ -159,6 +159,7 @@ type recorder struct {
 	// failTexts makes that many SendText calls fail, as when WhatsApp is
 	// not connected.
 	failTexts atomic.Int32
+	notes     atomic.Int32
 }
 
 func (r *recorder) add(s sent) {
@@ -177,6 +178,15 @@ func (r *recorder) SendText(_ context.Context, _, chat, text string) error {
 }
 func (r *recorder) SendReply(_ context.Context, _, chat, text string, q Quote) error {
 	r.add(sent{"text", chat, text, q.MessageID})
+	return nil
+}
+func (r *recorder) SendNote(_ context.Context, _, chat, text string) (string, error) {
+	id := fmt.Sprintf("note-%d", r.notes.Add(1))
+	r.add(sent{"note", chat, id + "|" + text, ""})
+	return id, nil
+}
+func (r *recorder) Edit(_ context.Context, _, chat, id, text string) error {
+	r.add(sent{"edit", chat, id + "|" + text, ""})
 	return nil
 }
 func (r *recorder) SendFile(_ context.Context, _, chat, name string, data []byte, caption string) error {
@@ -256,6 +266,8 @@ func setup(t *testing.T) *env {
 		Subnet:         netip.MustParsePrefix("10.88.0.0/16"),
 		Debounce:       50 * time.Millisecond,
 		ReapInterval:   100 * time.Millisecond,
+		ProgressAfter:  time.Second,
+		ProgressEvery:  100 * time.Millisecond,
 		ResendInterval: 100 * time.Millisecond,
 		PublicURL:      "https://hermitator.example.com",
 	}, st, box, rt, log)
@@ -845,6 +857,41 @@ func TestRepliesQuoteWhenUnclear(t *testing.T) {
 		t.Fatalf("queued reply = %+v, want a quote of %s", got, waited.ID)
 	}
 	e.idle(t)
+}
+
+// A turn that runs on gets one progress note, edited as it goes and
+// finished with how the turn ended; a quick turn gets none.
+func TestProgressNote(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "quick one", true))
+	e.rec.wait(t, "text")
+	e.idle(t)
+
+	e.m.HandleMessage(ctx, e.msg(chat, "go quiet", true))
+	note := e.rec.wait(t, "note")
+	if !strings.HasPrefix(note.body, "note-1|🔧 Working for ") || !strings.Contains(note.body, ": Bash npm test") {
+		t.Fatalf("note = %q", note.body)
+	}
+	final := e.rec.wait(t, "edit")
+	for strings.Contains(final.body, "Working") {
+		final = e.rec.wait(t, "edit")
+	}
+	if !strings.HasPrefix(final.body, "note-1|✅ Done in ") || !strings.HasSuffix(final.body, ", 1 step") {
+		t.Fatalf("final edit = %q", final.body)
+	}
+	e.rec.wait(t, "text")
+	e.idle(t)
+	e.rec.mu.Lock()
+	defer e.rec.mu.Unlock()
+	for _, s := range e.rec.log {
+		if s.kind == "note" && s.body != note.body {
+			t.Fatalf("a second note was sent: %q", s.body)
+		}
+	}
 }
 
 func TestMentionsName(t *testing.T) {

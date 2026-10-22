@@ -45,7 +45,10 @@ keep hundreds of them.
   and documents go in; replying to a photo or file sends it along again.
   Files come back when the agent runs `whatsapp-send`.
   Read receipts and a ⏳ reaction say it is working, ✅ says it is done,
-  and 📥 says a message is waiting for the turn in progress.
+  and 📥 says a message is waiting for the turn in progress. A turn that
+  runs past a minute gets one progress line in the chat, edited in place
+  as the work moves on (edits make no sound), and finished with how long
+  it took.
   When an agent needs you to choose ("Deploy to production?"), it can
   send a WhatsApp poll; your tap comes back to it as a message.
 - **Work that carries on without you.** Ask an agent to do something
