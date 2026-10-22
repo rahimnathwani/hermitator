@@ -27,7 +27,7 @@ dev: build ## run the panel locally with the unsandboxed runtime (no gVisor)
 
 deploy: ## build for Linux and install on $(DEPLOY_HOST), served at $(DEPLOY_DOMAIN)
 	@test -n "$(DEPLOY_HOST)" || { echo "set DEPLOY_HOST (and DEPLOY_DOMAIN) in .env"; exit 1; }
-	WITH_WHISPER=$(WITH_WHISPER) PREVIEW_DOMAIN=$(DEPLOY_PREVIEW_DOMAIN) deploy/deploy.sh $(DEPLOY_HOST) $(DEPLOY_DOMAIN)
+	WITH_WHISPER=$(WITH_WHISPER) WITH_TTS=$(WITH_TTS) PREVIEW_DOMAIN=$(DEPLOY_PREVIEW_DOMAIN) deploy/deploy.sh $(DEPLOY_HOST) $(DEPLOY_DOMAIN)
 
 image-bump: ## pin image/Containerfile to the newest Claude Code, pi and Playwright a week old
 	deploy/bump-image.sh
