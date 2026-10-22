@@ -186,8 +186,9 @@ choose it. To move to the newest, run `make image-bump` (it rewrites the
 pins in `image/Containerfile`; review and commit the diff), then
 `make image`, which deploys and builds the image on the server. New agents
 get it; existing ones offer an upgrade, one at a time on their Settings tab
-or all at once from the agents page, and keep all their files. To also
-build whisper.cpp for voice notes, prefix the build with `WITH_WHISPER=1`.
+or all at once from the agents page, and keep all their files. The
+install also builds whisper.cpp, so voice notes are transcribed on the
+host; `WITH_WHISPER=0` skips that.
 
 Agents are told not to update Claude Code or pi themselves: a copy they
 install lands in their own layer and hides every later image version. If

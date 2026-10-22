@@ -10,7 +10,8 @@
 #                       serve preview links at https://PORT-AGENT.PREVIEW_DOMAIN;
 #                       needs DOMAIN and a wildcard DNS record for it
 #   GVISOR_RELEASE      gVisor release to install (default below)
-#   WITH_WHISPER=1      build whisper.cpp for voice note transcription
+#   WITH_WHISPER=0      skip building whisper.cpp; voice notes then reach
+#                       agents as audio files, untranscribed
 #
 # Safe to run again: it only changes what is missing or out of date.
 set -eu
@@ -149,7 +150,7 @@ CADDY
 	fi
 fi
 
-if [ "${WITH_WHISPER:-}" = 1 ] && [ ! -x /usr/local/bin/whisper-cli ]; then
+if [ "${WITH_WHISPER:-1}" != 0 ] && [ ! -x /usr/local/bin/whisper-cli ]; then
 	say "whisper.cpp"
 	command -v cmake >/dev/null 2>&1 || { command -v pacman >/dev/null 2>&1 && pacman -S --needed --noconfirm cmake base-devel git >/dev/null; } || apt-get install -y -qq cmake build-essential git >/dev/null
 	mkdir -p /usr/local/src && cd /usr/local/src
