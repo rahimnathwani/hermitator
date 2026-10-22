@@ -37,6 +37,12 @@ type Message struct {
 	// Queued is set by the actor when the message had to wait for a turn
 	// in progress, so its answer will come a while after it.
 	Queued bool
+	// ReactsTo and Reaction say this is a reaction (an emoji, or nothing
+	// when one was taken back) to the message with that ID.
+	ReactsTo string
+	Reaction string
+	// Edits says this is the new text of the message with that ID.
+	Edits string
 	// GroupSize is the number of participants, for groups.
 	GroupSize int
 	Text      string

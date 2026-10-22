@@ -11,6 +11,7 @@ import (
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waAdv"
+	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -135,5 +136,25 @@ func TestReplay(t *testing.T) {
 	data, _ := msg.Media.Fetch(ctx)
 	if msg.Text != "[Contact card: Ada Lovelace]" || msg.Media.FileName != "Ada Lovelace.vcf" || msg.Media.MIME != "text/vcard" || !strings.Contains(string(data), "FN:Ada") {
 		t.Fatalf("card = %+v", msg)
+	}
+
+	// A reaction and an edit name the message they are about, and an
+	// edit keeps being one through storage.
+	react := textEvent("REACT", "", time.Now())
+	react.Message = &waE2E.Message{ReactionMessage: &waE2E.ReactionMessage{Key: &waCommon.MessageKey{ID: proto.String("ORIG")}, Text: proto.String("❌")}}
+	edit := textEvent("EDIT", "", time.Now())
+	edit.IsEdit = true
+	edit.Message = &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{Type: waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+		Key: &waCommon.MessageKey{ID: proto.String("ORIG")}, EditedMessage: &waE2E.Message{Conversation: proto.String("deploy to staging, not prod")}}}
+	for _, e := range []*events.Message{react, edit} {
+		raw, _ := encodeEvent(e)
+		st.Receive(ctx, "acct", e.Info.ID, raw)
+	}
+	g.replay(a)
+	if msg = <-got; msg.ReactsTo != "ORIG" || msg.Reaction != "❌" || msg.Text != "" {
+		t.Fatalf("reaction = %+v", msg)
+	}
+	if msg = <-got; msg.Edits != "ORIG" || msg.Text != "deploy to staging, not prod" || msg.ID != "EDIT" {
+		t.Fatalf("edit = %+v", msg)
 	}
 }

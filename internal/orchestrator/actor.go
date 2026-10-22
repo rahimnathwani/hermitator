@@ -95,6 +95,9 @@ func (a *actor) call(f func(*actor) error) error {
 
 func (a *actor) enqueue(msg Message) {
 	if t := a.turn; t != nil && t.steerTo != "" && t.steerTo == chatKey(msg) && msg.steerable() {
+		if msg.ID != "" {
+			t.messages = append(t.messages, msg.ID)
+		}
 		t.steerSeq++
 		t.steering.Add(1)
 		seq := t.steerSeq
@@ -141,6 +144,9 @@ func (a *actor) startTurn() {
 	for _, msg := range batch {
 		if msg.TaskID != "" {
 			t.tasks = append(t.tasks, msg.TaskID)
+		}
+		if msg.ID != "" {
+			t.messages = append(t.messages, msg.ID)
 		}
 	}
 	a.turn = t
@@ -252,6 +258,9 @@ type activeTurn struct {
 	// life and the step it was on, for the stall warning and /status.
 	started  time.Time
 	progress atomic.Pointer[stallState]
+	// messages are the IDs of the chat messages the turn answers, those
+	// that joined it included; a ❌ on one of them stops it.
+	messages []string
 
 	mu      sync.Mutex
 	client  *spool.Client

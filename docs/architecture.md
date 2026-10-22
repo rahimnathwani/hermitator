@@ -215,8 +215,14 @@ only from the panel's exact host.
 ### From message to reply
 
 1. The gateway decrypts an incoming message and hands it to the orchestrator,
-   preserving order per account. Status updates, channels and hermitator's
-   own echoes are dropped; nothing is dropped for being old. WhatsApp
+   preserving order per account. Status updates, channels, stickers and
+   hermitator's own echoes are dropped; nothing is dropped for being old.
+   Reactions and edits come through naming the message they are about:
+   a stop emoji (❌, 🛑, ⛔, 🚫, ✋) from the owner on a message the
+   running turn answers aborts the turn, and on one still queued
+   withdraws it; an edit replaces the text of a queued or held message,
+   and reaches a turn already working on the original as a message of
+   its own. WhatsApp
    holds messages for a device that is offline and delivers them when it
    is back, so after an outage they all arrive at once, and an
    instruction typed during it is still an instruction: one that waited

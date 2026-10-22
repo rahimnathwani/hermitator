@@ -894,6 +894,100 @@ func TestProgressNote(t *testing.T) {
 	}
 }
 
+// A ❌ from the owner on the message a turn is working on stops the
+// turn; on a message still waiting its turn, it withdraws the message.
+func TestStopReaction(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat, other := "self@s.whatsapp.net", "other@s.whatsapp.net"
+	e.link(t, chat)
+	e.link(t, other)
+	busy := e.msg(chat, "go quiet", true)
+	e.m.HandleMessage(ctx, busy)
+	for e.m.Status(e.agent.ID).Doing == "" {
+		time.Sleep(10 * time.Millisecond)
+	}
+	reactIn := func(chat string) string {
+		for {
+			if got := e.rec.wait(t, "react"); got.chat == chat {
+				return got.body
+			}
+		}
+	}
+	waiting := e.msg(other, "later", true)
+	e.m.HandleMessage(ctx, waiting)
+	if got := reactIn(other); got != queuedReaction {
+		t.Fatalf("reaction on the waiting message = %q", got)
+	}
+	cancel := e.msg(other, "", true)
+	cancel.ReactsTo, cancel.Reaction = waiting.ID, "❌"
+	e.m.HandleMessage(ctx, cancel)
+	if got := reactIn(other); got != "⏹" {
+		t.Fatalf("after withdrawing = %q", got)
+	}
+	stop := e.msg(chat, "", true)
+	stop.ReactsTo, stop.Reaction = busy.ID, "🛑\ufe0f"
+	e.m.HandleMessage(ctx, stop)
+	if got := reactIn(chat); got != "⏹" {
+		t.Fatalf("after stopping = %q", got)
+	}
+	e.idle(t)
+	if turns, _ := e.st.Turns(ctx, e.agent.ID, 1); turns[0].Status != store.TurnAborted {
+		t.Fatalf("turn = %+v", turns[0])
+	}
+	e.rec.mu.Lock()
+	defer e.rec.mu.Unlock()
+	for _, s := range e.rec.log {
+		if s.kind == "text" && strings.Contains(s.body, "later") {
+			t.Fatalf("the withdrawn message was answered: %q", s.body)
+		}
+	}
+	// A thumbs-up means nothing.
+	e.m.HandleMessage(ctx, Message{AccountID: e.acct.ID, Chat: chat, Sender: "1@s.whatsapp.net", ID: "r", FromMe: true, ReactsTo: busy.ID, Reaction: "👍", Time: time.Now()})
+	if e.m.Status(e.agent.ID).Busy {
+		t.Fatal("a thumbs-up started something")
+	}
+}
+
+// Editing a message that is still waiting for a turn, or held as
+// context, changes what the agent will read.
+func TestEditedMessages(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat, other := "self@s.whatsapp.net", "other@s.whatsapp.net"
+	e.link(t, chat)
+	e.link(t, other)
+	e.m.HandleMessage(ctx, e.msg(chat, "go quiet", true))
+	for e.m.Status(e.agent.ID).Doing == "" {
+		time.Sleep(10 * time.Millisecond)
+	}
+	waiting := e.msg(other, "deploy to prod", true)
+	e.m.HandleMessage(ctx, waiting)
+	e.rec.wait(t, "react")
+	fix := e.msg(other, "deploy to staging", true)
+	fix.Edits = waiting.ID
+	e.m.HandleMessage(ctx, fix)
+	e.rec.wait(t, "text") // the answer to "go quiet"
+	if got := e.rec.wait(t, "text"); got.chat != other || !strings.Contains(got.body, "deploy to staging") || strings.Contains(got.body, "prod") {
+		t.Fatalf("answer to the edited message = %+v", got)
+	}
+	e.idle(t)
+
+	// Held: someone else's message, kept as context, edited.
+	theirs := e.msg(chat, "lunch at 1?", false)
+	theirs.SenderName = "Sam"
+	e.m.HandleMessage(ctx, theirs)
+	theirFix := e.msg(chat, "lunch at 2?", false)
+	theirFix.Edits = theirs.ID
+	e.m.HandleMessage(ctx, theirFix)
+	held, _ := e.st.Held(ctx, e.acct.ID, chat)
+	if len(held) != 1 || held[0].Text != "lunch at 2?" {
+		t.Fatalf("held = %+v", held)
+	}
+}
+
 func TestMentionsName(t *testing.T) {
 	for text, want := range map[string]bool{
 		"@bot hi":         true,

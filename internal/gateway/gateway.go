@@ -313,6 +313,7 @@ func (g *Gateway) replay(a *account) {
 type storedEvent struct {
 	Info    types.MessageInfo `json:"info"`
 	Message []byte            `json:"message"`
+	IsEdit  bool              `json:"is_edit,omitempty"`
 }
 
 func encodeEvent(e *events.Message) ([]byte, error) {
@@ -320,7 +321,7 @@ func encodeEvent(e *events.Message) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return json.Marshal(storedEvent{Info: e.Info, Message: m})
+	return json.Marshal(storedEvent{Info: e.Info, Message: m, IsEdit: e.IsEdit})
 }
 
 func decodeEvent(raw []byte) (*events.Message, error) {
@@ -332,7 +333,7 @@ func decodeEvent(raw []byte) (*events.Message, error) {
 	if err := proto.Unmarshal(s.Message, &m); err != nil {
 		return nil, err
 	}
-	return &events.Message{Info: s.Info, Message: &m}, nil
+	return &events.Message{Info: s.Info, Message: &m, IsEdit: s.IsEdit}, nil
 }
 
 // recent remembers IDs of messages hermitator sent, so their echoes are

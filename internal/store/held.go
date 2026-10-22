@@ -55,6 +55,17 @@ func (s *Store) Hold(ctx context.Context, m *HeldMessage) error {
 	return tx.Commit()
 }
 
+// UpdateHeldText replaces a held message's text after the user edited
+// it; it reports whether the message was held.
+func (s *Store) UpdateHeldText(ctx context.Context, accountID, messageID, text string) (bool, error) {
+	res, err := s.db.ExecContext(ctx, `UPDATE held_messages SET text = ? WHERE account_id = ? AND message_id = ?`, text, accountID, messageID)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
 // Held returns a chat's held messages, oldest first.
 func (s *Store) Held(ctx context.Context, accountID, chatJID string) ([]*HeldMessage, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, account_id, chat_jid, message_id, sender, sender_name, from_owner, text, media_kind, media_mime, media_file, voice, sent_at

@@ -82,6 +82,16 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) (queued bool) 
 	}
 	msg.Owner = owner
 
+	switch {
+	case msg.ReactsTo != "":
+		if owner {
+			m.reaction(ctx, agentID, msg)
+		}
+		return false
+	case msg.Edits != "":
+		m.edited(ctx, agentID, msg)
+		return false
+	}
 	if isCmd && owner {
 		return m.command(ctx, acct, agentID, route, msg, cmd, reply)
 	}

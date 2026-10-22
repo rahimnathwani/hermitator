@@ -48,7 +48,9 @@ keep hundreds of them.
   and 📥 says a message is waiting for the turn in progress. A turn that
   runs past a minute gets one progress line in the chat, edited in place
   as the work moves on (edits make no sound), and finished with how long
-  it took.
+  it took. React ❌ to a message it is working on to stop it, or to one
+  still queued to withdraw it; edit a message that has not been read yet
+  and the agent gets the edited version.
   When an agent needs you to choose ("Deploy to production?"), it can
   send a WhatsApp poll; your tap comes back to it as a message.
 - **Work that carries on without you.** Ask an agent to do something

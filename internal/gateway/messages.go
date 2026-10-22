@@ -29,7 +29,7 @@ const maxDownload = 100 << 20
 func (g *Gateway) convert(ctx context.Context, a *account, e *events.Message) (orchestrator.Message, bool) {
 	info := e.Info
 	switch {
-	case e.Message == nil, e.IsEdit:
+	case e.Message == nil:
 		return orchestrator.Message{}, false
 	case info.Chat.Server == types.BroadcastServer, info.Chat.Server == types.NewsletterServer:
 		return orchestrator.Message{}, false // status updates and channels
@@ -48,6 +48,17 @@ func (g *Gateway) convert(ctx context.Context, a *account, e *events.Message) (o
 		ID:          info.ID,
 		FromMe:      info.IsFromMe,
 		Time:        info.Timestamp,
+	}
+	if e.IsEdit {
+		// An edit: the new content of an earlier message, which may be
+		// waiting for a turn still.
+		pm := m.GetProtocolMessage()
+		if pm.GetType() != waE2E.ProtocolMessage_MESSAGE_EDIT || pm.GetEditedMessage() == nil || pm.GetKey().GetID() == "" {
+			return orchestrator.Message{}, false
+		}
+		msg.Edits, msg.Text = pm.GetKey().GetID(), editedText(pm.GetEditedMessage())
+		msg.ChatName, msg.GroupSize = g.chatName(ctx, cli, info)
+		return msg, true
 	}
 	var ctxInfo *waE2E.ContextInfo
 	download := func(d whatsmeow.DownloadableMessage, size uint64) func(context.Context) ([]byte, error) {
@@ -99,6 +110,14 @@ func (g *Gateway) convert(ctx context.Context, a *account, e *events.Message) (o
 		}
 		msg.Text, ctxInfo = "[Contact cards: "+strings.Join(names, ", ")+"]", cs.GetContextInfo()
 		msg.Media = vcardMedia(cs.GetDisplayName(), strings.Join(cards, "\n"))
+	case m.GetReactionMessage() != nil:
+		r := m.GetReactionMessage()
+		if r.GetKey().GetID() == "" {
+			return orchestrator.Message{}, false
+		}
+		msg.Reaction, msg.ReactsTo = r.GetText(), r.GetKey().GetID()
+		msg.ChatName, msg.GroupSize = g.chatName(ctx, cli, info)
+		return msg, true
 	case m.GetPollUpdateMessage() != nil:
 		text, ok := g.pollAnswer(ctx, cli, e)
 		if !ok {
@@ -238,6 +257,24 @@ func quotedMedia(q *waE2E.Message, download func(whatsmeow.DownloadableMessage, 
 	}
 	md.Quoted = true
 	return md
+}
+
+// editedText is the text of a message as edited: its body, or the new
+// caption of a photo or file.
+func editedText(m *waE2E.Message) string {
+	switch {
+	case m.GetConversation() != "":
+		return m.GetConversation()
+	case m.GetExtendedTextMessage() != nil:
+		return m.GetExtendedTextMessage().GetText()
+	case m.GetImageMessage() != nil:
+		return m.GetImageMessage().GetCaption()
+	case m.GetVideoMessage() != nil:
+		return m.GetVideoMessage().GetCaption()
+	case m.GetDocumentMessage() != nil:
+		return m.GetDocumentMessage().GetCaption()
+	}
+	return ""
 }
 
 func quotedText(q *waE2E.Message) string {
