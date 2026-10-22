@@ -43,7 +43,9 @@ keep hundreds of them.
   conversation of its own; they share its files. Photos, voice notes (transcribed locally with whisper.cpp, with a word list per
   agent for names and jargon)
   and documents go in; replying to a photo or file sends it along again.
-  Files come back when the agent runs `whatsapp-send`.
+  Files come back when the agent runs `whatsapp-send`, and with piper
+  installed on the host, `whatsapp-send --voice` answers with a voice
+  note, for when you are away from a screen.
   Read receipts and a ⏳ reaction say it is working, ✅ says it is done,
   and 📥 says a message is waiting for the turn in progress. A turn that
   runs past a minute gets one progress line in the chat, edited in place
@@ -188,7 +190,9 @@ pins in `image/Containerfile`; review and commit the diff), then
 get it; existing ones offer an upgrade, one at a time on their Settings tab
 or all at once from the agents page, and keep all their files. The
 install also builds whisper.cpp, so voice notes are transcribed on the
-host; `WITH_WHISPER=0` skips that.
+host; `WITH_WHISPER=0` skips that. `WITH_TTS=1` installs
+[piper](https://github.com/rhasspy/piper), after which agents can answer
+in voice.
 
 Agents are told not to update Claude Code or pi themselves: a copy they
 install lands in their own layer and hides every later image version. If

@@ -117,6 +117,12 @@ type Quote struct {
 	Text      string
 }
 
+// Speaker turns text into a voice note: Opus audio in an Ogg container.
+type Speaker interface {
+	Available() bool
+	Speak(ctx context.Context, text string) ([]byte, error)
+}
+
 // Transcriber turns a voice note into text.
 type Transcriber interface {
 	Available() bool

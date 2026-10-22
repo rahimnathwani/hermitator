@@ -13,6 +13,8 @@ type OutboxMeta struct {
 	File    string `json:"file,omitempty"`
 	Caption string `json:"caption,omitempty"`
 	Text    string `json:"text,omitempty"`
+	// Voice is text to be spoken and sent as a voice note.
+	Voice string `json:"voice,omitempty"`
 	// Turn is the turn that queued it, or whose background job did: the
 	// host sends it to that turn's chat.
 	Turn string `json:"turn,omitempty"`

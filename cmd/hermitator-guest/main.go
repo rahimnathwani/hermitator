@@ -124,11 +124,14 @@ const maxSendBytes = 100 << 20 // WhatsApp's own limit for documents
 
 func send(args []string) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
-		fmt.Fprintln(os.Stderr, "usage: whatsapp-send FILE [CAPTION...]\n       whatsapp-send --text MESSAGE...\n\nSends FILE, or a text message, to the WhatsApp chat you are talking to.\nImages are sent as photos, anything else as a document. It works from\nbackground jobs too, after your turn has ended.")
+		fmt.Fprintln(os.Stderr, "usage: whatsapp-send FILE [CAPTION...]\n       whatsapp-send --text MESSAGE...\n       whatsapp-send --voice WORDS...\n\nSends FILE, a text message, or WORDS spoken as a voice note, to the\nWhatsApp chat you are talking to. Images are sent as photos, .ogg files\nas voice notes, anything else as a document. It works from background\njobs too, after your turn has ended.")
 		return 2
 	}
-	if args[0] == "--text" {
-		return sendText(strings.Join(args[1:], " "))
+	switch args[0] {
+	case "--text":
+		return sendText(turn.OutboxMeta{Text: strings.Join(args[1:], " ")})
+	case "--voice":
+		return sendText(turn.OutboxMeta{Voice: strings.Join(args[1:], " ")})
 	}
 	src := args[0]
 	caption := strings.Join(args[1:], " ")
@@ -187,10 +190,11 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-func sendText(text string) int {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		fmt.Fprintln(os.Stderr, "usage: whatsapp-send --text MESSAGE...")
+// sendText queues a text message, or words to be spoken.
+func sendText(m turn.OutboxMeta) int {
+	m.Text, m.Voice = strings.TrimSpace(m.Text), strings.TrimSpace(m.Voice)
+	if m.Text == "" && m.Voice == "" {
+		fmt.Fprintln(os.Stderr, "usage: whatsapp-send --text MESSAGE...\n       whatsapp-send --voice WORDS...")
 		return 2
 	}
 	outbox := filepath.Join(harness.Getenv("HERMITATOR_SHARED", turn.SharedDir), turn.OutboxDir)
@@ -199,7 +203,8 @@ func sendText(text string) int {
 		return 1
 	}
 	name := fmt.Sprintf("%d-text", time.Now().UnixNano())
-	meta, _ := json.Marshal(turn.OutboxMeta{Text: text, Turn: os.Getenv(turn.EnvTurn)})
+	m.Turn = os.Getenv(turn.EnvTurn)
+	meta, _ := json.Marshal(m)
 	tmp := filepath.Join(outbox, "."+name+".meta.json")
 	err := os.WriteFile(tmp, meta, 0o644)
 	if err == nil {
@@ -209,6 +214,10 @@ func sendText(text string) int {
 		fmt.Fprintln(os.Stderr, "whatsapp-send:", err)
 		return 1
 	}
-	fmt.Println("Queued the message for WhatsApp.")
+	if m.Voice != "" {
+		fmt.Println("Queued the voice note for WhatsApp.")
+	} else {
+		fmt.Println("Queued the message for WhatsApp.")
+	}
 	return 0
 }

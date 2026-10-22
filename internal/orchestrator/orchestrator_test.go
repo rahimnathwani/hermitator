@@ -105,6 +105,8 @@ case "$text" in
   *"go quiet"*)
     printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"npm test"}}]}}'
     sleep 4 ;;
+  *"say it"*)
+    whatsapp-send --voice "all green, go home" >/dev/null ;;
   *"ask me"*)
     hermitator-guest ask "Deploy to production?" Yes No "Staging first" >> "$HOME/ask.out" 2>&1 ;;
   *"leak it"*)
@@ -985,6 +987,43 @@ func TestEditedMessages(t *testing.T) {
 	held, _ := e.st.Held(ctx, e.acct.ID, chat)
 	if len(held) != 1 || held[0].Text != "lunch at 2?" {
 		t.Fatalf("held = %+v", held)
+	}
+}
+
+// fakeSpeaker stands in for piper.
+type fakeSpeaker struct{}
+
+func (fakeSpeaker) Available() bool { return true }
+func (fakeSpeaker) Speak(_ context.Context, text string) ([]byte, error) {
+	return []byte("OGG:" + text), nil
+}
+
+// With a speaker, whatsapp-send --voice arrives as a voice note, and the
+// agent is told it can; without one, the words arrive as text.
+func TestVoiceReplies(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "say it", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "all green, go home") {
+		t.Fatalf("without a speaker, got %q", got.body)
+	}
+	e.idle(t)
+	spec, _ := e.m.Spec(e.agent)
+	if args, _ := os.ReadFile(filepath.Join(spec.Dir, "home", "last-args")); strings.Contains(string(args), "--voice") {
+		t.Fatal("the agent was offered voice replies without a speaker")
+	}
+
+	e.m.SetSpeaker(fakeSpeaker{})
+	e.m.HandleMessage(ctx, e.msg(chat, "say it", true))
+	if got := e.rec.wait(t, "file"); got.body != "|OGG:all green, go home" {
+		t.Fatalf("voice note = %q", got.body)
+	}
+	e.idle(t)
+	if args, _ := os.ReadFile(filepath.Join(spec.Dir, "home", "last-args")); !strings.Contains(string(args), "whatsapp-send --voice") {
+		t.Fatal("the agent was not told it can answer in voice")
 	}
 }
 

@@ -51,6 +51,17 @@ func TestStoredEventsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestOutboundKind(t *testing.T) {
+	for mime, want := range map[string]string{
+		"image/png": "image", "video/mp4": "video", "audio/ogg": "voice", "audio/opus": "voice",
+		"audio/mpeg": "audio", "application/pdf": "document", "image/svg+xml": "document",
+	} {
+		if got := outboundKind(mime); got != want {
+			t.Errorf("outboundKind(%q) = %q, want %q", mime, got, want)
+		}
+	}
+}
+
 // After a restart, messages no turn took are handed over again, however
 // old, and end up done.
 func TestReplay(t *testing.T) {

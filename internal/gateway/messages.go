@@ -19,6 +19,7 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/rahimnathwani/hermitator/internal/media"
 	"github.com/rahimnathwani/hermitator/internal/orchestrator"
 )
 
@@ -447,8 +448,25 @@ func (g *Gateway) pollAnswer(ctx context.Context, cli *whatsmeow.Client, e *even
 	return fmt.Sprintf("[Answer to your poll %q: %s]", poll.Question, strings.Join(chosen, ", ")), true
 }
 
-// SendFile implements orchestrator.Messenger. Photos go as images and
-// everything else as a document, which WhatsApp delivers unrecompressed.
+// outboundKind says how a file goes out: photos as images, mp4 as video,
+// Ogg Opus as a voice note, other common audio as a playable audio
+// message, and everything else as a document, which WhatsApp delivers
+// unrecompressed.
+func outboundKind(mimeBase string) string {
+	switch mimeBase {
+	case "image/jpeg", "image/png", "image/webp":
+		return "image"
+	case "video/mp4":
+		return "video"
+	case "audio/ogg", "audio/opus":
+		return "voice"
+	case "audio/mpeg", "audio/mp4", "audio/aac", "audio/x-m4a":
+		return "audio"
+	}
+	return "document"
+}
+
+// SendFile implements orchestrator.Messenger.
 func (g *Gateway) SendFile(ctx context.Context, accountID, chat, name string, data []byte, caption string) error {
 	cli, jid, err := g.target(accountID, chat)
 	if err != nil {
@@ -461,8 +479,25 @@ func (g *Gateway) SendFile(ctx context.Context, accountID, chat, name string, da
 	base, _, _ := strings.Cut(mimeType, ";")
 
 	var msg *waE2E.Message
-	switch base {
-	case "image/jpeg", "image/png", "image/webp":
+	switch kind := outboundKind(base); kind {
+	case "voice", "audio":
+		up, err := cli.Upload(ctx, data, whatsmeow.MediaAudio)
+		if err != nil {
+			return err
+		}
+		au := &waE2E.AudioMessage{
+			Mimetype: proto.String(base), PTT: proto.Bool(kind == "voice"),
+			URL: &up.URL, DirectPath: &up.DirectPath, MediaKey: up.MediaKey,
+			FileEncSHA256: up.FileEncSHA256, FileSHA256: up.FileSHA256, FileLength: &up.FileLength,
+		}
+		if kind == "voice" {
+			au.Mimetype = proto.String("audio/ogg; codecs=opus")
+		}
+		if seconds := media.AudioSeconds(ctx, data, filepath.Ext(name)); seconds > 0 {
+			au.Seconds = proto.Uint32(uint32(seconds))
+		}
+		msg = &waE2E.Message{AudioMessage: au}
+	case "image":
 		up, err := cli.Upload(ctx, data, whatsmeow.MediaImage)
 		if err != nil {
 			return err
@@ -472,7 +507,7 @@ func (g *Gateway) SendFile(ctx context.Context, accountID, chat, name string, da
 			URL: &up.URL, DirectPath: &up.DirectPath, MediaKey: up.MediaKey,
 			FileEncSHA256: up.FileEncSHA256, FileSHA256: up.FileSHA256, FileLength: &up.FileLength,
 		}}
-	case "video/mp4":
+	case "video":
 		up, err := cli.Upload(ctx, data, whatsmeow.MediaVideo)
 		if err != nil {
 			return err

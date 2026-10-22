@@ -12,11 +12,14 @@
 #   GVISOR_RELEASE      gVisor release to install (default below)
 #   WITH_WHISPER=0      skip building whisper.cpp; voice notes then reach
 #                       agents as audio files, untranscribed
+#   WITH_TTS=1          install piper, so agents can answer in voice
+#   PIPER_RELEASE       piper release to install (default below)
 #
 # Safe to run again: it only changes what is missing or out of date.
 set -eu
 
 GVISOR_RELEASE=${GVISOR_RELEASE:-20261012.0}
+PIPER_RELEASE=${PIPER_RELEASE:-2023.11.14-2}
 DOMAIN=${HERMITATOR_DOMAIN:-}
 PREVIEW=${HERMITATOR_PREVIEW_DOMAIN:-}
 [ -n "$DOMAIN" ] || PREVIEW=""
@@ -160,6 +163,25 @@ if [ "${WITH_WHISPER:-1}" != 0 ] && [ ! -x /usr/local/bin/whisper-cli ]; then
 	install -m 0755 whisper.cpp/build/bin/whisper-cli /usr/local/bin/whisper-cli
 	mkdir -p "$data/whisper"
 	[ -f "$data/whisper/ggml-small.bin" ] || sh whisper.cpp/models/download-ggml-model.sh small "$data/whisper" >/dev/null
+fi
+
+if [ "${WITH_TTS:-}" = 1 ]; then
+	# piper's release tarball unpacks to piper/ with its libraries and
+	# espeak-ng data beside the binary, which finds them by its own path,
+	# so it stays there and a wrapper puts it on PATH.
+	if [ ! -x /usr/local/lib/piper/piper ]; then
+		say "piper (text to speech)"
+		mkdir -p /usr/local/lib && cd /usr/local/lib
+		curl -fsSL "https://github.com/rhasspy/piper/releases/download/$PIPER_RELEASE/piper_linux_$(uname -m).tar.gz" | tar xz
+		printf '#!/bin/sh\nexec /usr/local/lib/piper/piper "$@"\n' >/usr/local/bin/piper
+		chmod 0755 /usr/local/bin/piper
+	fi
+	voice=en_US-lessac-medium
+	voices=https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium
+	mkdir -p "$data/piper"
+	for f in "$voice.onnx" "$voice.onnx.json"; do
+		[ -f "$data/piper/$f" ] || curl -fsSL -o "$data/piper/$f" "$voices/$f"
+	done
 fi
 
 if [ ! -e "$data/images/universal" ]; then

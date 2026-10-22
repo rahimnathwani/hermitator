@@ -148,6 +148,84 @@ func (w *Whisper) Transcribe(ctx context.Context, path, prompt string) (string, 
 	return strings.Join(strings.Fields(string(text)), " "), nil
 }
 
+// Piper speaks text with piper, a local text-to-speech engine, and
+// encodes it the way WhatsApp voice notes are: Opus in an Ogg container.
+type Piper struct {
+	Binary string // piper
+	Voice  string // a .onnx voice, with its .json beside it
+	FFmpeg string
+}
+
+// Available reports whether the binary, the voice and ffmpeg are present.
+func (p *Piper) Available() bool {
+	if p == nil || p.Binary == "" || p.Voice == "" {
+		return false
+	}
+	if _, err := exec.LookPath(p.Binary); err != nil {
+		return false
+	}
+	if _, err := exec.LookPath(p.ffmpeg()); err != nil {
+		return false
+	}
+	_, err := os.Stat(p.Voice)
+	return err == nil
+}
+
+func (p *Piper) ffmpeg() string {
+	if p.FFmpeg != "" {
+		return p.FFmpeg
+	}
+	return "ffmpeg"
+}
+
+// Speak returns text spoken aloud as an Ogg Opus file.
+func (p *Piper) Speak(ctx context.Context, text string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	tmp, err := os.MkdirTemp("", "hermitator-piper-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(tmp)
+	wav := filepath.Join(tmp, "voice.wav")
+	cmd := exec.CommandContext(ctx, p.Binary, "--model", p.Voice, "--output_file", wav)
+	cmd.Stdin = strings.NewReader(strings.TrimSpace(text) + "\n")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("piper: %w: %s", err, strings.TrimSpace(stderr.String()))
+	}
+	ogg := filepath.Join(tmp, "voice.ogg")
+	if err := run(ctx, p.ffmpeg(), "-nostdin", "-loglevel", "error", "-i", wav, "-c:a", "libopus", "-b:a", "24k", "-ar", "48000", "-ac", "1", "-application", "voip", ogg); err != nil {
+		return nil, err
+	}
+	return os.ReadFile(ogg)
+}
+
+// AudioSeconds is the length of an audio file in whole seconds, for the
+// duration WhatsApp shows on a voice note; 0 when ffprobe cannot say.
+func AudioSeconds(ctx context.Context, data []byte, ext string) int {
+	f, err := os.CreateTemp("", "hermitator-audio-*"+ext)
+	if err != nil {
+		return 0
+	}
+	defer os.Remove(f.Name())
+	if _, err := f.Write(data); err != nil {
+		f.Close()
+		return 0
+	}
+	f.Close()
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", f.Name()).Output()
+	if err != nil {
+		return 0
+	}
+	var seconds float64
+	fmt.Sscanf(strings.TrimSpace(string(out)), "%g", &seconds)
+	return int(seconds + 0.5)
+}
+
 func run(ctx context.Context, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	var stderr bytes.Buffer

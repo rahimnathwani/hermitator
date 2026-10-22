@@ -73,6 +73,9 @@ func (m *Manager) agentPrompt(spec *sandbox.Spec, loc *time.Location, last Messa
 		notify = ` For a long one whose result you should look at (a test suite, a build, a deploy), start it as: nohup hermitator-guest notify --name "test suite" -- CMD > /tmp/job.log 2>&1 & and end your turn: it keeps the machine awake while CMD runs, then starts a new turn for you with its exit code and the end of its output, so you can tell the user how it went. Never wait or poll for it.`
 	}
 	prompt := fmt.Sprintf(systemPrompt, who, path.Join(m.rt.GuestShared(spec), turn.InboxDir), loc, watch, notify)
+	if m.canSpeak() {
+		prompt += "\n- To answer out loud, run: whatsapp-send --voice \"what to say\". It arrives as a voice note. Do that when the user sent a voice note and asked for voice back, or is plainly away from a screen; keep it short and plain, with nothing that only makes sense written down, and send anything they will need to read as text. An .ogg file sent with whatsapp-send also arrives as a voice note."
+	}
 	if m.Previews() {
 		prompt += "\n- To let the user open a web server you run (a dev server, a demo), have it listen on 0.0.0.0 (vite --host, next dev -H 0.0.0.0) and run: hermitator-guest preview PORT. It prints a link to send them; it works from their phone, and opening it wakes this machine. Anyone with the link can see the page, so offer it for things meant to be seen."
 	}
@@ -690,6 +693,12 @@ func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat ch
 			err = json.Unmarshal(raw, &meta)
 		}
 		chat := m.originChat(ctx, spec.ID, meta.Turn, chat)
+		if err == nil && meta.File == "" && strings.TrimSpace(meta.Voice) != "" {
+			m.speak(ctx, chat, clip(meta.Voice, maxMessage))
+			sentFiles++
+			root.Rename(in(name), sent(name))
+			continue
+		}
 		if err == nil && meta.File == "" && strings.TrimSpace(meta.Text) != "" {
 			chat.sendAgent(clip(meta.Text, maxMessage))
 			sentFiles++
@@ -716,6 +725,26 @@ func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat ch
 		m.hub.publish(spec.ID, UIEvent{Kind: "event", Event: &turn.Event{Type: "sent", Text: file}})
 	}
 	return sentFiles
+}
+
+// speak sends text as a voice note, or as text when it cannot be spoken:
+// a reply the user cannot hear is still better than none.
+func (m *Manager) speak(ctx context.Context, chat chatRef, text string) {
+	text = chat.redact.apply(strings.TrimSpace(text))
+	if m.canSpeak() {
+		data, err := m.tts.Speak(ctx, text)
+		if err == nil {
+			err = chat.sendFile("voice.ogg", data, "")
+		}
+		if err == nil {
+			if chat.ok() {
+				m.recordHistory(chat.msg.AccountID, chat.msg.Chat, "you (the agent)", "[voice note] "+text, time.Now())
+			}
+			return
+		}
+		m.log.Warn("voice reply; sending it as text", "err", err)
+	}
+	chat.sendAgent(text)
 }
 
 // originChat is the chat of the turn that something in the sandbox came

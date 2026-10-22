@@ -83,6 +83,7 @@ type Manager struct {
 	loops   sync.WaitGroup
 	stopped bool
 	stt     Transcriber
+	tts     Speaker
 
 	ctx    context.Context
 	mu     sync.Mutex
@@ -129,6 +130,11 @@ func (m *Manager) SetMessenger(msgr Messenger) { m.msgr = msgr }
 
 // SetTranscriber enables voice note transcription.
 func (m *Manager) SetTranscriber(t Transcriber) { m.stt = t }
+
+// SetSpeaker lets agents answer in voice.
+func (m *Manager) SetSpeaker(s Speaker) { m.tts = s }
+
+func (m *Manager) canSpeak() bool { return m.tts != nil && m.tts.Available() }
 
 // Start reconciles stored agent state with the runtime and starts the
 // reaper. Sandboxes that were running before a restart keep running and

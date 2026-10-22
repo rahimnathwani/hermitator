@@ -28,6 +28,8 @@ type Config struct {
 	Subnet    netip.Prefix
 	Whisper   string // HERMITATOR_WHISPER
 	Model     string // HERMITATOR_WHISPER_MODEL
+	Piper     string // HERMITATOR_PIPER
+	Voice     string // HERMITATOR_PIPER_VOICE
 	LogLevel  string // HERMITATOR_LOG
 }
 
@@ -83,6 +85,7 @@ func Load() (*Config, error) {
 		RunscRoot: env("HERMITATOR_RUNSC_ROOT", "/run/hermitator/runsc"),
 		Bridge:    env("HERMITATOR_BRIDGE", "hermitator0"),
 		Whisper:   env("HERMITATOR_WHISPER", "whisper-cli"),
+		Piper:     env("HERMITATOR_PIPER", "piper"),
 		LogLevel:  env("HERMITATOR_LOG", "info"),
 	}
 	// Paths derived from the data directory end up as mount sources and
@@ -95,6 +98,7 @@ func Load() (*Config, error) {
 	c.PublicURL = strings.TrimRight(env("HERMITATOR_PUBLIC_URL", "http://"+c.Listen), "/")
 	c.Preview = strings.Trim(strings.ToLower(env("HERMITATOR_PREVIEW_DOMAIN", "")), ".")
 	c.Model = env("HERMITATOR_WHISPER_MODEL", filepath.Join(c.DataDir, "whisper", "ggml-small.bin"))
+	c.Voice = env("HERMITATOR_PIPER_VOICE", filepath.Join(c.DataDir, "piper", "en_US-lessac-medium.onnx"))
 	// Not 10.88.0.0/16, which is podman's default network, nor any other
 	// range container tools or VPNs commonly claim.
 	subnet, err := netip.ParsePrefix(env("HERMITATOR_SUBNET", DefaultSubnet))

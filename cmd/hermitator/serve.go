@@ -153,6 +153,12 @@ func serve() error {
 	} else {
 		log.Info("voice notes will not be transcribed (whisper-cli or model not found)", "model", cfg.Model)
 	}
+	piper := &media.Piper{Binary: cfg.Piper, Voice: cfg.Voice}
+	if piper.Available() {
+		mgr.SetSpeaker(piper)
+	} else {
+		log.Info("agents cannot answer in voice (piper or voice not found)", "voice", cfg.Voice)
+	}
 
 	gw, err := gateway.Open(ctx, cfg.WhatsAppDB(), st, log)
 	if err != nil {

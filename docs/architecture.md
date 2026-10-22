@@ -36,6 +36,7 @@ agents/<id>/
   checkpoint/            memory image while checkpointed
   guest.log              PID 1's output
 whisper/                 speech model
+piper/                   voice for spoken replies, when installed
 ```
 
 ## Sandboxes
@@ -270,7 +271,11 @@ only from the panel's exact host.
 6. The guest runs the harness and translates its output into a small event
    stream: `started`, `text`, `tool`, `file`, `result`, `error`.
 7. Files the agent queues with `whatsapp-send` are delivered while the turn is
-   still running. When it ends, the reply is converted from Markdown to
+   still running: photos as images, `.mp4` as video, `.ogg` as a voice
+   note, other audio as a playable audio message, the rest as documents.
+   `whatsapp-send --voice WORDS` has the host speak WORDS with piper and
+   send the result as a voice note; without piper, the words go as text,
+   and agents are only told about `--voice` when it works. When it ends, the reply is converted from Markdown to
    WhatsApp formatting and split into messages, and the reaction becomes ✅.
    In a group, after a message that waited behind another turn, or when
    the turn took over a minute, the reply quotes the message it answers,
