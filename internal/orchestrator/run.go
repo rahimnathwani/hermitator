@@ -603,12 +603,18 @@ func (m *Manager) saveMedia(ctx context.Context, spec *sandbox.Spec, msg Message
 	case md.Kind == "image" && media.InlineImage(md.MIME):
 		return "[Image attached, also saved at " + guest + "]", &turn.Image{Path: path.Join(turn.InboxDir, name), MIME: md.MIME}
 	case md.Kind == "audio" && m.stt != nil && m.stt.Available():
+		// A note the user dictated and a recording they forwarded read
+		// differently: the first speaks to the agent, the second is material.
+		what := "Audio file"
+		if md.Voice {
+			what = "Voice note"
+		}
 		text, err := m.transcribe(ctx, spec.ID, data, name)
 		if err != nil {
 			m.log.Warn("transcription failed", "err", err)
-			return fmt.Sprintf("[Voice note saved at %s (%s); transcription failed]", guest, size), nil
+			return fmt.Sprintf("[%s saved at %s (%s); transcription failed]", what, guest, size), nil
 		}
-		return fmt.Sprintf("[Voice note, transcribed: %q. Audio saved at %s]", text, guest), nil
+		return fmt.Sprintf("[%s, transcribed: %q. Audio saved at %s]", what, text, guest), nil
 	case md.Kind == "audio":
 		return fmt.Sprintf("[Audio saved at %s (%s, %s)]", guest, md.MIME, size), nil
 	default:

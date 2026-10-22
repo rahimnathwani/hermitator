@@ -2365,3 +2365,30 @@ func TestCompactWithoutCredentialsSleeps(t *testing.T) {
 		t.Fatalf("recorded a compaction that never ran: %+v", turns[0])
 	}
 }
+
+// A dictated note and a forwarded recording are both transcribed, but the
+// agent is told which it got: a voice note speaks to it, a file is material.
+func TestTranscriptsSayWhatWasSent(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	e.m.SetTranscriber(fakeSTT{prompt: make(chan string, 4)})
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+
+	for _, tc := range []struct {
+		mime, want string
+		voice      bool
+	}{
+		{"audio/ogg; codecs=opus", "[Voice note, transcribed:", true},
+		{"audio/mpeg", "[Audio file, transcribed:", false},
+	} {
+		msg := e.msg(chat, "", true)
+		msg.Media = &Media{Kind: "audio", MIME: tc.mime, Voice: tc.voice, Fetch: func(context.Context) ([]byte, error) { return []byte("audio"), nil }}
+		e.m.HandleMessage(ctx, msg)
+		if got := e.rec.wait(t, "text"); !strings.Contains(got.body, tc.want) {
+			t.Errorf("%s: agent was told %q, want %q", tc.mime, got.body, tc.want)
+		}
+		e.idle(t)
+	}
+}
