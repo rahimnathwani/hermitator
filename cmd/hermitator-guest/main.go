@@ -155,7 +155,7 @@ func send(args []string) int {
 		fmt.Fprintln(os.Stderr, "whatsapp-send:", err)
 		return 1
 	}
-	meta, _ := json.Marshal(turn.OutboxMeta{File: name, Caption: caption})
+	meta, _ := json.Marshal(turn.OutboxMeta{File: name, Caption: caption, Turn: os.Getenv(turn.EnvTurn)})
 	// The host acts on the sidecar, so it appears atomically and last.
 	tmp := filepath.Join(outbox, "."+name+".meta.json")
 	err = os.WriteFile(tmp, meta, 0o644)
@@ -199,7 +199,7 @@ func sendText(text string) int {
 		return 1
 	}
 	name := fmt.Sprintf("%d-text", time.Now().UnixNano())
-	meta, _ := json.Marshal(turn.OutboxMeta{Text: text})
+	meta, _ := json.Marshal(turn.OutboxMeta{Text: text, Turn: os.Getenv(turn.EnvTurn)})
 	tmp := filepath.Join(outbox, "."+name+".meta.json")
 	err := os.WriteFile(tmp, meta, 0o644)
 	if err == nil {

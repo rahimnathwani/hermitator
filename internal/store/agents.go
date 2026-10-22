@@ -24,7 +24,8 @@ const (
 	StateCheckpointed = "checkpointed"
 )
 
-// Agent is one sandbox, its workspace and its conversation.
+// Agent is one sandbox and its workspace. Its conversations, one per chat,
+// are Threads.
 type Agent struct {
 	ID      string
 	UserID  string
@@ -35,19 +36,9 @@ type Agent struct {
 	// Effort is the harness's thinking effort; empty for its default.
 	Effort string
 	// Vocabulary is words voice notes should get right.
-	Vocabulary string
-	// ContextTokens is the conversation's size as of its last turn; 0
-	// once compacted, or after /new.
-	ContextTokens int
-	// ReviewTurns counts turns with a user message since the conversation
-	// was last reviewed for things to remember.
-	ReviewTurns int
+	Vocabulary  string
 	PiProvider  string
 	State       string
-	SessionID   string
-	// SessionCost is the running total Claude Code last reported for the
-	// session, so the next turn can record only its own share.
-	SessionCost float64
 	IdleTimeout time.Duration
 	MemoryMB    int
 	IP          string
@@ -55,7 +46,7 @@ type Agent struct {
 	CreatedAt   time.Time
 }
 
-const agentColumns = `id, user_id, name, image, harness, model, effort, vocabulary, pi_provider, state, session_id, session_cost, context_tokens, idle_timeout_sec, memory_mb, ip, last_active_at, created_at, review_turns`
+const agentColumns = `id, user_id, name, image, harness, model, effort, vocabulary, pi_provider, state, idle_timeout_sec, memory_mb, ip, last_active_at, created_at`
 
 func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	var a Agent
@@ -63,7 +54,7 @@ func scanAgent(row interface{ Scan(...any) error }) (*Agent, error) {
 	var last sql.NullString
 	var created string
 	if err := row.Scan(&a.ID, &a.UserID, &a.Name, &a.Image, &a.Harness, &a.Model, &a.Effort, &a.Vocabulary, &a.PiProvider, &a.State,
-		&a.SessionID, &a.SessionCost, &a.ContextTokens, &idle, &a.MemoryMB, &a.IP, &last, &created, &a.ReviewTurns); err != nil {
+		&idle, &a.MemoryMB, &a.IP, &last, &created); err != nil {
 		return nil, one(err)
 	}
 	a.IdleTimeout = time.Duration(idle) * time.Second
@@ -98,9 +89,9 @@ func (s *Store) CreateAgent(ctx context.Context, a *Agent, subnet netip.Prefix) 
 	if a.MemoryMB == 0 {
 		a.MemoryMB = 4096
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO agents (`+agentColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		a.ID, a.UserID, a.Name, a.Image, a.Harness, a.Model, a.Effort, a.Vocabulary, a.PiProvider, a.State, a.SessionID, a.SessionCost, a.ContextTokens,
-		int(a.IdleTimeout/time.Second), a.MemoryMB, a.IP, nullTS(a.LastActive), ts(a.CreatedAt), a.ReviewTurns)
+	_, err = tx.ExecContext(ctx, `INSERT INTO agents (`+agentColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		a.ID, a.UserID, a.Name, a.Image, a.Harness, a.Model, a.Effort, a.Vocabulary, a.PiProvider, a.State,
+		int(a.IdleTimeout/time.Second), a.MemoryMB, a.IP, nullTS(a.LastActive), ts(a.CreatedAt))
 	if isUnique(err) {
 		return ErrConflict
 	}
@@ -194,8 +185,8 @@ func (s *Store) CountAgents(ctx context.Context, userID string) (int, error) {
 	return n, err
 }
 
-// UpdateAgentSettings saves the user-editable fields of a. The session is
-// left alone; see SetAgentSession.
+// UpdateAgentSettings saves the user-editable fields of a. Its
+// conversations are left alone; see ClearThreads.
 func (s *Store) UpdateAgentSettings(ctx context.Context, a *Agent) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE agents SET name = ?, harness = ?, model = ?, effort = ?, vocabulary = ?, pi_provider = ?, idle_timeout_sec = ?, memory_mb = ? WHERE id = ?`,
 		a.Name, a.Harness, a.Model, a.Effort, a.Vocabulary, a.PiProvider, int(a.IdleTimeout/time.Second), a.MemoryMB, a.ID)
@@ -208,17 +199,6 @@ func (s *Store) UpdateAgentSettings(ctx context.Context, a *Agent) error {
 // SetAgentState records the sandbox state.
 func (s *Store) SetAgentState(ctx context.Context, id, state string) error {
 	return affected(s.db.ExecContext(ctx, `UPDATE agents SET state = ? WHERE id = ?`, state, id))
-}
-
-// SetAgentSession records the harness session the agent continues. A new
-// session starts with no running cost.
-func (s *Store) SetAgentSession(ctx context.Context, id, sessionID string) error {
-	return affected(s.db.ExecContext(ctx, `UPDATE agents SET session_id = ?, session_cost = 0, context_tokens = 0 WHERE id = ?`, sessionID, id))
-}
-
-// SetAgentSessionCost records the session and its running cost together.
-func (s *Store) SetAgentSessionCost(ctx context.Context, id, sessionID string, cost float64) error {
-	return affected(s.db.ExecContext(ctx, `UPDATE agents SET session_id = ?, session_cost = ? WHERE id = ?`, sessionID, cost, id))
 }
 
 // SetAgentModel sets the model and effort the agent's turns use.
@@ -244,19 +224,4 @@ func (s *Store) DeleteAgent(ctx context.Context, id string) error {
 // AgentByIP returns the agent at a bridge address.
 func (s *Store) AgentByIP(ctx context.Context, ip string) (*Agent, error) {
 	return scanAgent(s.db.QueryRowContext(ctx, `SELECT `+agentColumns+` FROM agents WHERE ip = ?`, ip))
-}
-
-// SetAgentContext records the size of an agent's conversation.
-func (s *Store) SetAgentContext(ctx context.Context, id string, tokens int) error {
-	return affected(s.db.ExecContext(ctx, `UPDATE agents SET context_tokens = ? WHERE id = ?`, tokens, id))
-}
-
-// CountReviewTurn counts a turn with a user message towards the next review.
-func (s *Store) CountReviewTurn(ctx context.Context, id string) error {
-	return affected(s.db.ExecContext(ctx, `UPDATE agents SET review_turns = review_turns + 1 WHERE id = ?`, id))
-}
-
-// ResetReviewTurns starts the count again, once a review has run.
-func (s *Store) ResetReviewTurns(ctx context.Context, id string) error {
-	return affected(s.db.ExecContext(ctx, `UPDATE agents SET review_turns = 0 WHERE id = ?`, id))
 }

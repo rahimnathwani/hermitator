@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/rahimnathwani/hermitator/internal/turn"
 )
 
 // recall searches the agent's past conversations where they lie: Claude
@@ -23,17 +25,19 @@ import (
 // keeps. No model is involved. A search lists the newest matches with a
 // reference each; --show REF reads the messages around one. A compacted
 // conversation's transcript still holds everything the summary dropped,
-// and this is how the agent gets it back.
+// and this is how the agent gets it back. Each chat has conversations of
+// its own; from a turn, recall looks in that chat's unless given --all.
 
 const recallUsage = `usage: hermitator-guest recall WORDS...            search past conversations
        hermitator-guest recall --show REF [--around N]  read the messages around a match
        hermitator-guest recall                          list the conversations
 
-Searches your transcripts (Claude Code's and pi's) and the chats'
-history files for messages containing every one of WORDS, ignoring case,
+Searches your transcripts (Claude Code's and pi's) and the chat's
+history file for messages containing every one of WORDS, ignoring case,
 newest first. Each match has a reference, such as 3f9a1c:120, to read it
 in context with --show.
 
+  --all        search your other chats' conversations too
   --limit N    how many matches to list (default 10)
   --around N   how many messages before and after to show (default 5)`
 
@@ -58,19 +62,65 @@ func recall(args []string, out io.Writer) int {
 	show := fs.String("show", "", "")
 	around := fs.Int("around", 5, "")
 	limit := fs.Int("limit", 10, "")
+	all := fs.Bool("all", false, "")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintln(os.Stderr, recallUsage)
 		return 2
 	}
 	sources := recallSources()
-	switch {
-	case *show != "":
+	if *show != "" {
+		// A reference comes from a search already made, in whatever scope.
 		return recallShow(out, sources, *show, max(*around, 0))
-	case fs.NArg() == 0:
-		return recallList(out, sources)
-	default:
-		return recallSearch(out, sources, fs.Args(), max(*limit, 1))
 	}
+	scoped := false
+	if !*all {
+		sources, scoped = thisChat(sources)
+	}
+	if fs.NArg() == 0 {
+		return recallList(out, sources)
+	}
+	code := recallSearch(out, sources, fs.Args(), max(*limit, 1))
+	if code != 0 && scoped {
+		fmt.Fprintln(out, "That was this chat's conversations; --all searches your other chats too.")
+	}
+	return code
+}
+
+// thisChat keeps the sources of the chat whose turn recall runs in: its
+// conversations and its history file. Outside a turn, as in the web
+// terminal, there is no chat, and all of them stay.
+func thisChat(sources []source) ([]source, bool) {
+	list, ok := os.LookupEnv(turn.EnvSessions)
+	if !ok {
+		return sources, false
+	}
+	sessions := map[string]bool{}
+	for _, id := range strings.Split(list, ",") {
+		if id != "" {
+			sessions[id] = true
+		}
+	}
+	history := os.Getenv(turn.EnvHistory)
+	var out []source
+	for _, s := range sources {
+		name := filepath.Base(s.path)
+		switch s.kind {
+		case "chat":
+			if history != "" && name == filepath.Base(history) {
+				out = append(out, s)
+			}
+		default:
+			// Claude Code names a transcript SESSION.jsonl, pi TIME_SESSION.jsonl.
+			id := strings.TrimSuffix(name, ".jsonl")
+			if i := strings.LastIndexByte(id, '_'); i >= 0 {
+				id = id[i+1:]
+			}
+			if sessions[id] {
+				out = append(out, s)
+			}
+		}
+	}
+	return out, true
 }
 
 // recallSources finds every conversation file, newest first.

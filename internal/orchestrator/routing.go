@@ -209,13 +209,13 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 	case "usage":
 		reply(m.usageText(ctx, ag))
 	case "plan":
-		reply(m.planText(ag))
+		reply(m.planText(ag, msg.thread(agentID)))
 	case "sessions":
-		m.sessionsCommand(ctx, ag, reply)
+		m.sessionsCommand(ctx, ag, msg.thread(agentID), reply)
 	case "resume":
-		m.resumeCommand(ctx, ag, cmd.Arg, reply)
+		m.resumeCommand(ctx, ag, msg.thread(agentID), cmd.Arg, reply)
 	case "fork":
-		m.forkCommand(ctx, ag, reply)
+		m.forkCommand(ctx, ag, msg.thread(agentID), reply)
 	case "timezone":
 		m.timezoneCommand(ctx, ag, cmd.Arg, reply)
 	case "sh":
@@ -247,7 +247,7 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 			reply("Nothing is running.")
 		}
 	case "new":
-		if err := m.NewSession(ctx, agentID); err != nil {
+		if err := m.NewSession(ctx, msg.thread(agentID)); err != nil {
 			reply("*" + ag.Name + "* is busy. Send /stop first, or wait for it to finish.")
 			return
 		}
@@ -291,7 +291,8 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 			if err := m.store.UpdateAgentSettings(ctx, ag); err != nil {
 				return err
 			}
-			return m.store.SetAgentSession(ctx, ag.ID, "")
+			a.forgetThreads()
+			return m.store.ClearThreads(ctx, ag.ID)
 		})
 		if err != nil {
 			reply("Could not switch: " + err.Error())

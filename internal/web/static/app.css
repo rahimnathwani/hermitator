@@ -519,6 +519,14 @@ tr.suspended td { color: var(--muted); }
 .triggers .seg { justify-self: start; }
 .triggers .form-actions { grid-column: 2; margin: 2px 0 0; }
 @media (max-width: 520px) { .triggers { grid-template-columns: minmax(0, 1fr); gap: 6px; } .triggers .form-actions { grid-column: 1; } .triggers > .label:not(:first-of-type) { margin-top: 6px; } }
+.thread-pick { display: flex; align-items: center; gap: 8px; flex-shrink: 0; max-width: 50%; }
+.thread-pick select { min-width: 0; width: auto; }
+.conversations { list-style: none; padding: 0; margin: 0; }
+.conversations li { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+.conversations li:first-child { border-top: 0; padding-top: 0; }
+.conversations strong { display: block; font-weight: 550; }
+.conversations .sub { display: block; color: var(--muted); font-size: 12.5px; }
+.conversations form { margin: 0; }
 .mini-routes { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
 .mini-routes li { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
 .mini-routes .tile { width: 30px; height: 30px; }

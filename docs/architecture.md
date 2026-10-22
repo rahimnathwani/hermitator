@@ -122,8 +122,8 @@ start.
 
 ### Compacting before sleep
 
-An agent stays in one conversation until `/new`, and each turn resumes it,
-so the harness sends the whole history again. Providers cache it for an
+Each chat stays in one conversation until `/new`, and each turn resumes
+it, so the harness sends the whole history again. Providers cache it for an
 hour at most (Claude Code asks for an hour), so the first turn after a
 longer sleep writes all of it back to the cache at full price: on
 Ferris1, the first live agent, a wake after ten hours re-sent 29k of its
@@ -131,9 +131,10 @@ Ferris1, the first live agent, a wake after ten hours re-sent 29k of its
 an agent woken every few days, that is most of what it costs.
 
 Every turn records how many tokens its last model call read
-(`context_tokens`, also on the agent and on its page). When the reaper is
-about to suspend an idle agent whose conversation is 60k tokens or more,
-and it went idle under 45 minutes ago, it compacts first, while the
+(`context_tokens`, also on the chat's conversation and on the agent's
+page). When the reaper is about to suspend an idle agent with a
+conversation of 60k tokens or more whose last turn ended under 45 minutes
+ago, it compacts that conversation first, one per tick, while the
 history is still cached and cheap to read: Claude Code gets `/compact` as
 a print-mode prompt (stream-json input does not take slash commands), pi
 gets its `compact` RPC command. Both take instructions for the summary
@@ -144,7 +145,8 @@ Agents are also told that summaries keep little of tool output, so they
 say in their replies what they learned that will matter later. The
 compaction runs as a turn of its own, recorded with its cost, holding the
 turn slot so a message arriving meanwhile waits; the next reaper tick
-suspends the agent. Afterwards the agent's size is 0, or pi's estimate, so
+suspends the agent, or compacts the next. Afterwards the conversation's
+size is 0, or pi's estimate, so
 it is not compacted again until a turn measures it anew; that holds for a
 compaction that fails or cannot start (no credentials) too, which would
 otherwise be retried on every tick and keep the agent awake. Nothing is
@@ -152,11 +154,12 @@ lost: transcripts keep everything, and agents are told where they are.
 
 ### Reviewing before sleep
 
-After ten turns with a person's message (scheduled runs and job reports
-do not count), an agent about to sleep first looks back over its
-conversation for lasting facts, in the same warm window as compaction and
+After ten turns in a conversation with a person's message (scheduled runs
+and job reports do not count), an agent about to sleep first looks back
+over it for lasting facts, in the same warm window as compaction and
 before it. The review runs in a fork of the session (Claude Code's
-`--fork-session`, pi's `--fork`) with the last turn's system prompt, so
+`--fork-session`, pi's `--fork`) with that conversation's last system
+prompt, so
 it reads the history from the cache, and the fork's transcript is
 deleted afterwards (`Request.Discard`): the review never becomes part of
 the conversation. The model adds dated one-line facts under
@@ -267,23 +270,32 @@ host keeps `/shared/tasks.json` current for `hermitator-guest tasks`. All
 of it is read through `os.Root`, like the rest of `/shared`.
 
 Between turns, the reaper's tick also looks at awake agents: it delivers
-what background jobs queued (to the chat the agent last talked in, at most
-20 messages an hour), answers their requests, and leaves the agent awake
+what background jobs queued (at most 20 messages an hour), answers their
+requests, and leaves the agent awake
 while a `hermitator-guest hold` file in `/shared/holds` is fresh. A hold
 refreshes its file every 30 seconds and lapses after three minutes
 without, or after twelve hours.
 
+Output and requests go to the chat whose turn they came from. Each turn
+sets `HERMITATOR_TURN` in the environment its commands and background
+jobs inherit, `whatsapp-send` and every request carry it, and the host
+sends to that turn's chat, if the turn is the agent's and the chat is
+still linked to it; otherwise to the chat the agent last talked in.
+
 `hermitator-guest recall WORDS` searches the agent's past conversations
 where they lie, inside the sandbox: Claude Code's and pi's transcripts and
 the chat history files, newest match first, with a reference for
-`--show REF` to read the messages around it. A compacted conversation's
+`--show REF` to read the messages around it. From a turn it keeps to that
+chat's conversations and history file, which the turn names in
+`HERMITATOR_SESSIONS` and `HERMITATOR_HISTORY`; `--all` searches every
+chat's, and agents are told to use it only when the owner asks. A compacted conversation's
 transcript still holds what the summary dropped; this is how the agent
 gets it back without a model call or a host round trip. Agents are told
 to look things up this way before guessing.
 
 `hermitator-guest notify -- CMD` is a hold that reports back: when CMD
-exits, it asks the host (a `wake` request) to start a turn in the chat the
-agent last talked in, with CMD's exit code and the last 3,000 bytes of its
+exits, it asks the host (a `wake` request) to start a turn in the chat
+whose turn started it, with CMD's exit code and the last 3,000 bytes of its
 output, headed 🔔 with the job's name. It asks before letting go of its
 hold, so the sandbox cannot sleep between the job ending and the host
 reading the request. Background jobs may start at most six turns an hour.
@@ -370,10 +382,26 @@ pi), so changing them needs no restart and the session simply continues;
 `/once` overrides them for a single turn. Each turn records the model the
 harness reports it ran on.
 
+### One conversation per chat
+
+Each chat an agent is in has a conversation of its own (`chat_threads`:
+its session, running cost, size and review count), and the web console
+has one more; the workspace and the memory file are shared by all of
+them. A turn answers one chat in that chat's conversation, so switching
+between chats neither mixes their histories nor invalidates each other's
+prompt cache. `/new`, `/sessions`, `/resume` and `/fork` act on the chat
+they are sent in, and `/plan` shows only that chat's task list. The web
+console can continue any chat's conversation; its reply is shown only in
+the console. Separation is of context, not a security boundary: the agent
+is root in a sandbox shared by all its chats, and `recall --all` and the
+memory file reach across them. Chats that must not share anything need
+separate agents.
+
 Session IDs are chosen by hermitator, so they are known before the first
-turn, and survive switching between WhatsApp and the web console. `/new`
-clears it; switching harness clears it too, since the transcripts are not
-compatible.
+turn. `/new` clears a chat's; switching harness clears every chat's,
+since the transcripts are not compatible. Before migration 19 an agent
+had one conversation; it carries on in the chat whose message it last
+answered.
 
 ## Credentials
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/rahimnathwani/hermitator/internal/ids"
 	"github.com/rahimnathwani/hermitator/internal/spool"
+	"github.com/rahimnathwani/hermitator/internal/store"
 )
 
 // Starting an agent from a repository: the host clones it into the
@@ -68,9 +69,9 @@ func (m *Manager) StartFromRepo(agentID, cloneURL, dir string, setup bool) {
 		switch {
 		case err != nil:
 			m.log.Warn("clone", "agent", agentID, "repo", cloneURL, "err", err)
-			m.Prompt(agentID, fmt.Sprintf("hermitator tried to clone %s into %s for you and failed: %v\nTry cloning it yourself, then tell me what happened.", cloneURL, path.Join("/workspace", dir), err))
+			m.Prompt(store.ThreadKey{AgentID: agentID}, fmt.Sprintf("hermitator tried to clone %s into %s for you and failed: %v\nTry cloning it yourself, then tell me what happened.", cloneURL, path.Join("/workspace", dir), err))
 		case setup:
-			m.Prompt(agentID, setupPrompt(cloneURL, dir))
+			m.Prompt(store.ThreadKey{AgentID: agentID}, setupPrompt(cloneURL, dir))
 		}
 	}()
 }

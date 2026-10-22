@@ -12,6 +12,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/rahimnathwani/hermitator/internal/store"
 	"github.com/rahimnathwani/hermitator/internal/turn"
 )
 
@@ -53,6 +54,20 @@ type Message struct {
 	// JobName is set when a background job the agent started with
 	// hermitator-guest notify reports back; the reply is headed with it.
 	JobName string
+	// ThreadAccount and ThreadChat, on a message typed in the web console,
+	// name the chat whose conversation it continues. The reply is shown
+	// only in the console. Empty, it continues the console's own.
+	ThreadAccount string
+	ThreadChat    string
+}
+
+// thread is the conversation a message belongs to: its chat's, or for a
+// console message, the one picked in the console.
+func (m Message) thread(agentID string) store.ThreadKey {
+	if m.AccountID == "" {
+		return store.ThreadKey{AgentID: agentID, AccountID: m.ThreadAccount, ChatJID: m.ThreadChat}
+	}
+	return store.ThreadKey{AgentID: agentID, AccountID: m.AccountID, ChatJID: m.Chat}
 }
 
 // Media is an attachment. It is only downloaded if the chat is routed.

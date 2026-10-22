@@ -99,6 +99,13 @@ document.addEventListener("input", (e) => {
   if (e.target.form?.matches("[data-track]")) track(e.target.form);
 });
 
+// A select marked data-keep holds its choice when its form is reset, as
+// the console's conversation picker does each time a message is sent.
+document.addEventListener("change", (e) => {
+  if (!e.target.matches("select[data-keep]")) return;
+  for (const o of e.target.options) o.defaultSelected = o.selected;
+});
+
 // "reset" fires before the fields go back, so look once they have.
 document.addEventListener("reset", (e) => {
   const form = e.target;

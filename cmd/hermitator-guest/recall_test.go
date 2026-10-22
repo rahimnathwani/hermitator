@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/rahimnathwani/hermitator/internal/turn"
 )
 
 func TestRecall(t *testing.T) {
@@ -88,5 +90,53 @@ func TestSnippet(t *testing.T) {
 	s := snippet(text, regexp.MustCompile("(?i)NEEDLE"), 60)
 	if !strings.Contains(s, "needle é") || !strings.HasPrefix(s, "…") || !strings.HasSuffix(s, "…") || len([]rune(s)) > 70 {
 		t.Fatalf("snippet = %q", s)
+	}
+}
+
+// From a turn, recall keeps to that chat's conversations and history
+// file; --all reaches every chat's.
+func TestRecallKeepsToTheChat(t *testing.T) {
+	home, sharedDir := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("HERMITATOR_SHARED", sharedDir)
+	write := func(path, body string) {
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claude := func(text string) string {
+		return `{"type":"user","timestamp":"2026-10-01T09:00:00Z","message":{"role":"user","content":"` + text + `"}}` + "\n"
+	}
+	write(filepath.Join(home, ".claude", "projects", "-workspace", "sa.jsonl"), claude("plan in this chat"))
+	write(filepath.Join(home, ".claude", "projects", "-workspace", "sb.jsonl"), claude("plan in the other chat"))
+	write(filepath.Join(home, ".pi", "agent", "sessions", "--workspace--", "2026-10-05T10-00-00-000Z_sp.jsonl"),
+		`{"type":"message","timestamp":"2026-10-05T10:00:01Z","message":{"role":"user","content":[{"type":"text","text":"older plan in this chat"}]}}`+"\n")
+	write(filepath.Join(sharedDir, "chats", "this-1.md"), "2026-10-07 18:30 Sam: plan in this chat's history\n")
+	write(filepath.Join(sharedDir, "chats", "other-2.md"), "2026-10-07 18:30 Kim: plan in the other chat's history\n")
+	t.Setenv(turn.EnvSessions, "sa,sp")
+	t.Setenv(turn.EnvHistory, "/shared/chats/this-1.md")
+
+	run := func(args ...string) string {
+		f, _ := os.CreateTemp(t.TempDir(), "out")
+		recall(args, f)
+		f.Close()
+		b, _ := os.ReadFile(f.Name())
+		return string(b)
+	}
+	out := run("plan")
+	for _, want := range []string{"plan in this chat", "older plan in this chat", "plan in this chat's history"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "other chat") {
+		t.Errorf("reached another chat:\n%s", out)
+	}
+	if out := run("--all", "plan", "other"); !strings.Contains(out, "plan in the other chat") || !strings.Contains(out, "other chat's history") {
+		t.Errorf("--all did not reach the other chat:\n%s", out)
+	}
+	if out := run("Kim"); !strings.Contains(out, "--all searches your other chats") {
+		t.Errorf("a miss in this chat does not point at --all:\n%s", out)
 	}
 }

@@ -48,6 +48,7 @@ func TestMain(m *testing.M) {
 const fakeClaude = `#!/usr/bin/env bash
 read -r line
 printf '%s\n' "$@" > "$HOME/last-args"
+env | grep '^HERMITATOR_' > "$HOME/last-env"
 printf '%s\n' "$line" >> "$HOME/prompts"
 if [ "${2%% *}" = "/compact" ]; then
   echo "$4: $2" >> "$HOME/compactions"
@@ -280,6 +281,12 @@ func (e *env) msg(chat, text string, fromMe bool) Message {
 	return Message{AccountID: e.acct.ID, Chat: chat, Sender: "1@s.whatsapp.net", ID: fmt.Sprint(time.Now().UnixNano()), FromMe: fromMe, Text: text, Time: time.Now()}
 }
 
+// thread is where a chat's conversation with the agent stands.
+func (e *env) thread(chat string) *store.Thread {
+	th, _ := e.st.Thread(context.Background(), store.ThreadKey{AgentID: e.agent.ID, AccountID: e.acct.ID, ChatJID: chat})
+	return th
+}
+
 // idle waits until the agent has wrapped up its turn.
 func (e *env) idle(t *testing.T) {
 	t.Helper()
@@ -350,7 +357,7 @@ func TestTurnEndToEnd(t *testing.T) {
 		}
 	}
 	ag, _ := e.st.Agent(ctx, e.agent.ID)
-	if ag.SessionID == "" || ag.State != sandbox.Running {
+	if e.thread(chat).SessionID == "" || ag.State != sandbox.Running {
 		t.Fatalf("agent after turns = %+v", ag)
 	}
 
@@ -1375,8 +1382,7 @@ func TestSessionsResumeFork(t *testing.T) {
 	}
 	say("first topic")
 	e.idle(t)
-	ag, _ := e.st.Agent(ctx, e.agent.ID)
-	first := ag.SessionID
+	first := e.thread(chat).SessionID
 	say("/new")
 	say("second topic")
 	e.idle(t)
@@ -1386,8 +1392,8 @@ func TestSessionsResumeFork(t *testing.T) {
 	if got := say("/resume 2"); !strings.Contains(got, "Back to: first topic") {
 		t.Fatalf("/resume = %q", got)
 	}
-	if ag, _ := e.st.Agent(ctx, e.agent.ID); ag.SessionID != first {
-		t.Fatalf("session after /resume = %s, want %s", ag.SessionID, first)
+	if got := e.thread(chat).SessionID; got != first {
+		t.Fatalf("session after /resume = %s, want %s", got, first)
 	}
 	if got := say("/fork"); !strings.Contains(got, "branches off") {
 		t.Fatalf("/fork = %q", got)
@@ -1700,6 +1706,113 @@ func TestPreviewCommands(t *testing.T) {
 	}
 }
 
+// Each chat an agent is in has its own conversation: a turn resumes its
+// chat's, /new and /sessions see only theirs, and the web console can
+// continue any of them without replying in the chat.
+func TestChatsHaveSeparateConversations(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	a, b := "self@s.whatsapp.net", "other@s.whatsapp.net"
+	e.link(t, a)
+	e.link(t, b)
+	say := func(chat, text string) string {
+		t.Helper()
+		e.m.HandleMessage(ctx, e.msg(chat, text, true))
+		got := e.rec.wait(t, "text")
+		if got.chat != chat {
+			t.Fatalf("%q was answered in %s", text, got.chat)
+		}
+		e.idle(t)
+		return got.body
+	}
+	say(a, "first in a")
+	say(b, "first in b")
+	sa, sb := e.thread(a).SessionID, e.thread(b).SessionID
+	if sa == "" || sb == "" || sa == sb {
+		t.Fatalf("sessions: a %q, b %q", sa, sb)
+	}
+	say(a, "again in a")
+	if args := e.lastArgs(t); !strings.Contains(args, "--resume\n"+sa) {
+		t.Fatalf("a's second turn did not resume a's conversation:\n%s", args)
+	}
+	spec, _ := e.m.Spec(e.agent)
+	env, _ := os.ReadFile(filepath.Join(spec.Dir, "home", "last-env"))
+	turns, _ := e.st.Turns(ctx, e.agent.ID, 1)
+	if !strings.Contains(string(env), turn.EnvTurn+"="+turns[0].ID+"\n") || !strings.Contains(string(env), turn.EnvSessions+"="+sa+"\n") {
+		t.Fatalf("the turn's environment:\n%s", env)
+	}
+
+	say(b, "/new")
+	if e.thread(b).SessionID != "" || e.thread(a).SessionID != sa {
+		t.Fatalf("/new in b: a %q, b %q", e.thread(a).SessionID, e.thread(b).SessionID)
+	}
+	if got := say(a, "/sessions"); strings.Contains(got, "first in b") || !strings.Contains(got, "first in a") {
+		t.Fatalf("/sessions in a = %q", got)
+	}
+
+	// The console continues b's conversation; the reply stays in the console.
+	say(b, "second in b")
+	sb = e.thread(b).SessionID
+	e.rec.mu.Lock()
+	sent := len(e.rec.log)
+	e.rec.mu.Unlock()
+	e.m.Prompt(store.ThreadKey{AgentID: e.agent.ID, AccountID: e.acct.ID, ChatJID: b}, "from the console")
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if turns, _ := e.st.Turns(ctx, e.agent.ID, 1); turns[0].Prompt == "from the console" && turns[0].Status != store.TurnRunning {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the console's turn never finished")
+		}
+	}
+	e.idle(t)
+	if args := e.lastArgs(t); !strings.Contains(args, "--resume\n"+sb) {
+		t.Fatalf("the console did not continue b's conversation:\n%s", args)
+	}
+	e.rec.mu.Lock()
+	defer e.rec.mu.Unlock()
+	for _, s := range e.rec.log[sent:] {
+		if s.kind == "text" {
+			t.Fatalf("the console's turn sent %q to %s", s.body, s.chat)
+		}
+	}
+}
+
+// What a background job sends goes to the chat whose turn started it,
+// even after another chat has spoken; a turn ID the sandbox made up
+// changes nothing.
+func TestBackgroundOutputGoesToItsChat(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	a, b := "self@s.whatsapp.net", "other@s.whatsapp.net"
+	e.link(t, a)
+	e.link(t, b)
+	e.m.HandleMessage(ctx, e.msg(a, "hello a", true))
+	e.rec.wait(t, "text")
+	e.idle(t)
+	turns, _ := e.st.Turns(ctx, e.agent.ID, 1)
+	fromA := turns[0].ID
+	e.m.HandleMessage(ctx, e.msg(b, "hello b", true))
+	e.rec.wait(t, "text")
+	e.idle(t)
+
+	spec, _ := e.m.Spec(e.agent)
+	outbox := filepath.Join(spec.SharedDir(), turn.OutboxDir)
+	os.MkdirAll(outbox, 0o755)
+	os.WriteFile(filepath.Join(outbox, "1-text.meta.json"), []byte(`{"text":"done, from a's job","turn":"`+fromA+`"}`), 0o644)
+	os.WriteFile(filepath.Join(outbox, "2-text.meta.json"), []byte(`{"text":"made up","turn":"not-a-turn"}`), 0o644)
+	e.m.background(spec, e.agent)
+	want := map[string]string{"done, from a's job": a, "made up": b}
+	for range want {
+		got := e.rec.wait(t, "text")
+		if want[got.body] != got.chat {
+			t.Fatalf("%q went to %s", got.body, got.chat)
+		}
+	}
+}
+
 func TestRequestsAnsweredBeforeAnyChat(t *testing.T) {
 	e := setup(t)
 	e.m.cfg.PreviewDomain, e.m.cfg.PreviewKey = "preview.test", []byte("k")
@@ -1724,8 +1837,8 @@ func TestCompactBeforeSleep(t *testing.T) {
 	e.rec.wait(t, "text")
 	e.idle(t)
 	ag, _ := e.st.Agent(ctx, e.agent.ID)
-	if turns, _ := e.st.Turns(ctx, ag.ID, 1); ag.ContextTokens != 70000 || turns[0].ContextTokens != 70000 {
-		t.Fatalf("conversation size = %d, turn's = %d", ag.ContextTokens, turns[0].ContextTokens)
+	if turns, _ := e.st.Turns(ctx, ag.ID, 1); e.thread(chat).ContextTokens != 70000 || turns[0].ContextTokens != 70000 {
+		t.Fatalf("conversation size = %d, turn's = %d", e.thread(chat).ContextTokens, turns[0].ContextTokens)
 	}
 	ag.IdleTimeout = time.Second
 	e.st.UpdateAgentSettings(ctx, ag)
@@ -1744,8 +1857,8 @@ func TestCompactBeforeSleep(t *testing.T) {
 	if compaction == nil || compaction.Status != store.TurnOK || !strings.Contains(compaction.Output, "70000") {
 		t.Fatalf("compaction = %+v", compaction)
 	}
-	if ag, _ := e.st.Agent(ctx, ag.ID); ag.ContextTokens != 0 {
-		t.Fatalf("size after compacting = %d", ag.ContextTokens)
+	if got := e.thread(chat).ContextTokens; got != 0 {
+		t.Fatalf("size after compacting = %d", got)
 	}
 	e.idle(t)
 	reap() // now it sleeps, without compacting again
@@ -1790,7 +1903,7 @@ func TestReviewBeforeSleep(t *testing.T) {
 	review := func() *store.Turn {
 		t.Helper()
 		for range reviewAfter - 1 {
-			e.st.CountReviewTurn(ctx, e.agent.ID)
+			e.st.CountReviewTurn(ctx, store.ThreadKey{AgentID: e.agent.ID, AccountID: e.acct.ID, ChatJID: chat})
 		}
 		e.m.HandleMessage(ctx, e.msg(chat, "hello", true)) // the tenth
 		e.rec.wait(t, "text")
@@ -1810,7 +1923,7 @@ func TestReviewBeforeSleep(t *testing.T) {
 		return nil
 	}
 
-	before, _ := e.st.Agent(ctx, e.agent.ID)
+	before := e.thread(chat)
 	rec := review()
 	if rec.Status != store.TurnOK || rec.CostUSD < 0.2 || rec.CostUSD > 0.25 {
 		t.Fatalf("review = %+v", rec)
@@ -1826,7 +1939,7 @@ func TestReviewBeforeSleep(t *testing.T) {
 	if matches, _ := filepath.Glob(filepath.Join(spec.Dir, "*", ".claude", "projects", "w", "fork-*.jsonl")); len(matches) != 0 {
 		t.Fatalf("the review's copy was kept: %v", matches)
 	}
-	after, _ := e.st.Agent(ctx, e.agent.ID)
+	after := e.thread(chat)
 	if after.SessionID == "" || after.SessionID != before.SessionID && before.SessionID != "" || after.ReviewTurns != 0 {
 		t.Fatalf("after the review: session %q (was %q), review turns %d", after.SessionID, before.SessionID, after.ReviewTurns)
 	}

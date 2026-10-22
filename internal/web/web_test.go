@@ -548,6 +548,45 @@ func TestAgentTabs(t *testing.T) {
 	}
 }
 
+// Each chat has its own conversation: the console picks which one a
+// message continues, only among the agent's own chats, and the Chats tab
+// starts one afresh without touching the others.
+func TestConversationsPerChat(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	alice := f.login(t, "alice@example.com")
+	id, other := alice.createAgent("bot"), alice.createAgent("other")
+	acct := &store.Account{UserID: f.users["alice@example.com"].ID, JID: "1:1@s.whatsapp.net", Phone: "15550001111", Status: store.AccountConnected}
+	f.store.CreateAccount(ctx, acct)
+	f.store.PutRoute(ctx, &store.Route{AccountID: acct.ID, ChatJID: "team@g.us", ChatName: "team", AgentID: id})
+	f.store.PutRoute(ctx, &store.Route{AccountID: acct.ID, ChatJID: "family@g.us", ChatName: "family", AgentID: other})
+	team := store.ThreadKey{AgentID: id, AccountID: acct.ID, ChatJID: "team@g.us"}
+	console := store.ThreadKey{AgentID: id}
+	f.store.SetThreadSession(ctx, team, "s-team")
+	f.store.SetThreadContext(ctx, team, 64000)
+	f.store.SetThreadSession(ctx, console, "s-console")
+
+	if _, body := alice.get("/agents/" + id); !strings.Contains(body, `<option value="`+acct.ID+`/team@g.us">team</option>`) ||
+		strings.Contains(body, "family") || !strings.Contains(body, "64k tokens") {
+		t.Fatal("the console's picker or the chat's size is wrong")
+	}
+	if code, _ := alice.post("/agents/"+id+"/prompt", url.Values{"text": {"hi"}, "thread": {acct.ID + "/family@g.us"}}); code != http.StatusBadRequest {
+		t.Fatalf("a message continued another agent's chat: %d", code)
+	}
+	if _, body := alice.get("/agents/" + id + "/chats"); !strings.Contains(body, `name="thread" value="`+acct.ID+`/team@g.us"`) {
+		t.Fatal("the Chats tab cannot start the chat afresh")
+	}
+	if code, _ := alice.post("/agents/"+id+"/new-session", url.Values{"thread": {acct.ID + "/team@g.us"}}); code != http.StatusSeeOther {
+		t.Fatalf("new conversation: %d", code)
+	}
+	if th, _ := f.store.Thread(ctx, team); th.SessionID != "" {
+		t.Fatalf("team's conversation after starting afresh: %q", th.SessionID)
+	}
+	if th, _ := f.store.Thread(ctx, console); th.SessionID != "s-console" {
+		t.Fatalf("the console's conversation went too: %q", th.SessionID)
+	}
+}
+
 func TestRemovingANumberTakesItsLastFourDigits(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()

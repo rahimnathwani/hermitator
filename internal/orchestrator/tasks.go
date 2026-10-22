@@ -377,7 +377,7 @@ func (m *Manager) handleRequests(ctx context.Context, spec *sandbox.Spec, ag *st
 		if err != nil {
 			answer.Message = "unreadable request: " + err.Error()
 		} else {
-			answer = m.answer(ctx, spec, ag, chat, req)
+			answer = m.answer(ctx, spec, ag, m.originChat(ctx, ag.ID, req.Turn, chat), req)
 		}
 		data, _ := json.Marshal(answer)
 		root.WriteFile(strings.TrimSuffix(path, ".json")+".answer.json", data, 0o644)

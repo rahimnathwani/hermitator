@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"context"
-	"github.com/rahimnathwani/hermitator/internal/turn"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -11,6 +10,8 @@ import (
 	"github.com/rahimnathwani/hermitator/internal/ids"
 	"github.com/rahimnathwani/hermitator/internal/sandbox"
 	"github.com/rahimnathwani/hermitator/internal/spool"
+	"github.com/rahimnathwani/hermitator/internal/store"
+	"github.com/rahimnathwani/hermitator/internal/turn"
 )
 
 // actor owns one agent's runtime state. Its fields are only touched on
@@ -39,16 +40,17 @@ type actor struct {
 	// inBackground keeps one background delivery at a time per agent.
 	inBackground atomic.Bool
 
-	// todos is the agent's own task list from its latest turn, for /plan.
-	todos   []turn.Todo
-	todosAt time.Time
-	// forkNext makes the next turn branch off the current conversation.
-	forkNext bool
-	// lastSystem and lastChat are the last turn's system prompt and chat:
-	// a review before sleep reuses the prompt, to read the conversation
-	// from the cache, and answers in the chat.
-	lastSystem string
-	lastChat   Message
+	// todos is the agent's own task list from its latest turn, for /plan
+	// in the chat that turn answered.
+	todos       []turn.Todo
+	todosAt     time.Time
+	todosThread store.ThreadKey
+	// forkNext makes a chat's next turn branch off its conversation.
+	forkNext map[store.ThreadKey]bool
+	// lastSystem is the system prompt of each conversation's last turn: a
+	// review before sleep reuses it, to read the conversation from the
+	// cache.
+	lastSystem map[store.ThreadKey]string
 }
 
 func (a *actor) loop(ctx context.Context) {
@@ -122,11 +124,12 @@ func (a *actor) startTurn() {
 	if a.turn != nil || len(a.pending) == 0 {
 		return
 	}
-	// One turn answers one chat; messages from other chats wait their turn.
-	first := a.pending[0]
+	// One turn answers one chat, in its conversation; messages from other
+	// chats wait their turn.
+	first := chatKey(a.pending[0])
 	var batch, rest []Message
 	for _, msg := range a.pending {
-		if msg.AccountID == first.AccountID && msg.Chat == first.Chat {
+		if chatKey(msg) == first {
 			batch = append(batch, msg)
 		} else {
 			rest = append(rest, msg)
@@ -198,9 +201,8 @@ func (a *actor) reap() {
 	if time.Since(a.lastActive) < ag.IdleTimeout || spec.Holding(time.Now()) {
 		return
 	}
-	// A review reads the whole conversation, so it goes before compacting.
-	if a.reviewFirst(ag) || a.compactFirst(ag) {
-		return // suspended once they are done
+	if a.sleepWork(ag) {
+		return // suspended once it is done
 	}
 	if st, err := a.suspend(a.ctx); err != nil {
 		a.m.log.Error("suspend idle agent", "agent", a.id, "err", err)
@@ -257,7 +259,24 @@ type activeTurn struct {
 	steering sync.WaitGroup
 }
 
-func chatKey(m Message) string { return m.AccountID + "\x00" + m.Chat }
+// forgetThread drops what the actor kept about a conversation that is
+// starting afresh.
+func (a *actor) forgetThread(k store.ThreadKey) {
+	if a.todosThread == k {
+		a.todos = nil
+	}
+	delete(a.forkNext, k)
+	delete(a.lastSystem, k)
+}
+
+// forgetThreads drops what the actor kept about every conversation.
+func (a *actor) forgetThreads() {
+	a.todos, a.forkNext, a.lastSystem = nil, nil, nil
+}
+
+func chatKey(m Message) string {
+	return m.AccountID + "\x00" + m.Chat + "\x00" + m.ThreadAccount + "\x00" + m.ThreadChat
+}
 
 // steerable is a plain message: one that changes nothing about how the
 // turn runs, so it can join a turn already under way.

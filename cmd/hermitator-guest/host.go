@@ -36,6 +36,7 @@ func askOr(req turn.HostRequest, wait time.Duration, pending string) int {
 		return 1
 	}
 	id := fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid())
+	req.Turn = os.Getenv(turn.EnvTurn)
 	data, _ := json.Marshal(req)
 	tmp := filepath.Join(dir, "."+id+".json")
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {

@@ -368,10 +368,12 @@ func (m *Manager) Status(agentID string) Status {
 	return st
 }
 
-// Prompt queues a message typed in the web UI.
-func (m *Manager) Prompt(agentID, text string) {
-	msg := Message{Text: text, FromMe: true, Owner: true, Time: time.Now(), SenderName: "web"}
-	m.actor(agentID).do(func(a *actor) { a.enqueue(msg) })
+// Prompt queues a message typed in the web UI, continuing the
+// conversation k: the console's own, or one of the agent's chats'.
+func (m *Manager) Prompt(k store.ThreadKey, text string) {
+	msg := Message{Text: text, FromMe: true, Owner: true, Time: time.Now(), SenderName: "web",
+		ThreadAccount: k.AccountID, ThreadChat: k.ChatJID}
+	m.actor(k.AgentID).do(func(a *actor) { a.enqueue(msg) })
 }
 
 // Wake boots or restores an agent's sandbox without running a turn.
@@ -408,14 +410,14 @@ func (m *Manager) Abort(agentID string) bool {
 // ErrBusy is returned when an agent is in the middle of a turn.
 var ErrBusy = errors.New("the agent is in the middle of a turn")
 
-// NewSession makes the agent's next turn start a fresh conversation.
-func (m *Manager) NewSession(ctx context.Context, agentID string) error {
-	return m.actor(agentID).call(func(a *actor) error {
+// NewSession makes a chat's next turn start a fresh conversation.
+func (m *Manager) NewSession(ctx context.Context, k store.ThreadKey) error {
+	return m.actor(k.AgentID).call(func(a *actor) error {
 		if a.turn != nil {
 			return ErrBusy
 		}
-		a.todos, a.forkNext = nil, false
-		return m.store.SetAgentSession(ctx, agentID, "")
+		a.forgetThread(k)
+		return m.store.SetThreadSession(ctx, k, "")
 	})
 }
 
@@ -569,7 +571,8 @@ func (m *Manager) UpdateAgent(ctx context.Context, updated *store.Agent) error {
 			return err
 		}
 		if switched {
-			return m.store.SetAgentSession(ctx, updated.ID, "")
+			a.forgetThreads()
+			return m.store.ClearThreads(ctx, updated.ID)
 		}
 		return nil
 	})

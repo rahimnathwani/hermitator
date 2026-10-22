@@ -133,11 +133,17 @@ func capNote(limit float64) string {
 	return fmt.Sprintf(" of a $%.2f limit", limit)
 }
 
-// planText answers /plan from the agent's last task list, without waking it.
-func (m *Manager) planText(ag *store.Agent) string {
+// planText answers /plan from the agent's last task list, without waking
+// it; only the chat whose turn made the list sees it.
+func (m *Manager) planText(ag *store.Agent, k store.ThreadKey) string {
 	var todos []turn.Todo
 	var at time.Time
-	m.actor(ag.ID).call(func(a *actor) error { todos, at = a.todos, a.todosAt; return nil })
+	m.actor(ag.ID).call(func(a *actor) error {
+		if a.todosThread == k {
+			todos, at = a.todos, a.todosAt
+		}
+		return nil
+	})
 	if len(todos) == 0 {
 		return "*" + ag.Name + "* has not made a task list in this conversation. Agents make one for bigger jobs; ask for progress instead."
 	}

@@ -90,6 +90,12 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		return false
 	}
 	log := m.log.With("agent", agent.ID, "turn", t.id)
+	key := last.thread(agent.ID)
+	th, err := m.store.Thread(ctx, key)
+	if err != nil {
+		log.Error("load conversation", "err", err)
+		th = &store.Thread{ThreadKey: key}
+	}
 
 	// From here the batch is answered, if only with an error: a restart
 	// must not hand it over again (an interrupted turn offers /retry).
@@ -144,16 +150,16 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	if context := m.heldContext(ctx, spec, held); context != "" {
 		prompt = context + "\n\n" + prompt
 	}
-	if agent.SessionID == "" {
-		agent.SessionID = ids.UUID()
-		m.store.SetAgentSession(ctx, agent.ID, agent.SessionID)
+	if th.SessionID == "" {
+		th.SessionID = ids.UUID()
+		m.store.SetThreadSession(ctx, key, th.SessionID)
 	}
 	var fork bool
-	a.call(func(a *actor) error { fork, a.forkNext = a.forkNext, false; return nil })
+	a.call(func(a *actor) error { fork = a.forkNext[key]; delete(a.forkNext, key); return nil })
 
 	rec := &store.Turn{
 		ID: t.id, AgentID: agent.ID, AccountID: last.AccountID, ChatJID: last.Chat,
-		Harness: agent.Harness, SessionID: agent.SessionID, Input: clip(prompt, 4000), Prompt: prompt, Wake: wake, WakeMS: wakeMS,
+		Harness: agent.Harness, SessionID: th.SessionID, Input: clip(prompt, 4000), Prompt: prompt, Wake: wake, WakeMS: wakeMS,
 	}
 	if err := m.store.CreateTurn(ctx, rec); err != nil {
 		log.Error("record turn", "err", err)
@@ -164,6 +170,9 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	loc := m.location(ctx, agent)
 	env := map[string]string{"TZ": loc.String()}
 	for k, v := range creds.env {
+		env[k] = v
+	}
+	for k, v := range m.turnEnv(ctx, spec, t.id, th) {
 		env[k] = v
 	}
 	// /once overrides the agent's model and effort for this turn.
@@ -178,7 +187,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	}
 	req := turn.Request{
 		Harness:      agent.Harness,
-		SessionID:    agent.SessionID,
+		SessionID:    th.SessionID,
 		Prompt:       prompt,
 		Images:       images,
 		Model:        model,
@@ -191,11 +200,16 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		Files:        creds.files,
 		// overCap only looks before the turn; this stops a runaway in it.
 		MaxCostUSD:     m.allowance(ctx, agent),
-		SessionCostUSD: agent.SessionCost,
+		SessionCostUSD: th.SessionCost,
 	}
 	m.writeTasks(ctx, spec, agent)
 	system := req.SystemPrompt
-	a.do(func(a *actor) { a.lastSystem, a.lastChat = system, last })
+	a.do(func(a *actor) {
+		if a.lastSystem == nil {
+			a.lastSystem = map[store.ThreadKey]string{}
+		}
+		a.lastSystem[key] = system
+	})
 	stdin, _ := json.Marshal(req)
 	client := spec.Spool()
 	if err := client.Submit(spool.Job{ID: t.id, Argv: []string{"hermitator-guest", "turn"}, Stdin: stdin}); err != nil {
@@ -312,7 +326,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 			chat.sendAgent(ev.Text)
 		case turn.EventTodos:
 			todos := ev.Todos
-			a.do(func(a *actor) { a.todos, a.todosAt = todos, time.Now() })
+			a.do(func(a *actor) { a.todos, a.todosAt, a.todosThread = todos, time.Now(), key })
 		case turn.EventResult, turn.EventError:
 			e := ev
 			result = &e
@@ -327,7 +341,8 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	for _, data := range client.Unsteered(t.id) {
 		var s turn.Steer
 		if json.Unmarshal(data, &s) == nil && s.Text != "" {
-			again := Message{AccountID: last.AccountID, Chat: last.Chat, Sender: last.Sender, Owner: true, Time: time.Now(), Prompt: s.Text}
+			again := Message{AccountID: last.AccountID, Chat: last.Chat, ThreadAccount: last.ThreadAccount, ThreadChat: last.ThreadChat,
+				Sender: last.Sender, Owner: true, Time: time.Now(), Prompt: s.Text}
 			a.do(func(a *actor) { a.enqueue(again) })
 		}
 	}
@@ -341,14 +356,15 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		client.Remove(t.id)
 	}
 
+	m.store.TouchThread(ctx, key)
 	if result != nil && result.Type == turn.EventResult {
 		if reviewable(batch) {
-			m.store.CountReviewTurn(ctx, agent.ID)
+			m.store.CountReviewTurn(ctx, key)
 		}
-		m.accountSession(ctx, agent, result, prompt)
+		m.accountSession(ctx, agent, th, result, prompt)
 		if result.ContextTokens > 0 {
 			rec.ContextTokens = result.ContextTokens
-			m.store.SetAgentContext(ctx, agent.ID, result.ContextTokens)
+			m.store.SetThreadContext(ctx, key, result.ContextTokens)
 		}
 	}
 
@@ -387,28 +403,28 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 // when a session is resumed, so the turn's cost is the increase since the
 // last total. A total lower than the last one means Claude started over
 // and the figure stands on its own. pi reports per turn already.
-func (m *Manager) accountSession(ctx context.Context, ag *store.Agent, result *turn.Event, prompt string) {
+func (m *Manager) accountSession(ctx context.Context, ag *store.Agent, th *store.Thread, result *turn.Event, prompt string) {
 	sid := result.SessionID
 	if sid == "" {
-		sid = ag.SessionID
+		sid = th.SessionID
 	}
-	m.store.SessionTurn(ctx, ag.ID, sid, ag.Harness, clip(prompt, 200))
-	m.accountCost(ctx, ag, result, sid)
+	m.store.SessionTurn(ctx, th.ThreadKey, sid, ag.Harness, clip(prompt, 200))
+	m.accountCost(ctx, ag, th, result, sid)
 }
 
 // accountCost turns the harness's cost figure into the run's own cost.
-func (m *Manager) accountCost(ctx context.Context, ag *store.Agent, result *turn.Event, sid string) {
+func (m *Manager) accountCost(ctx context.Context, ag *store.Agent, th *store.Thread, result *turn.Event, sid string) {
 	if ag.Harness != store.HarnessClaude {
-		if sid != ag.SessionID {
-			m.store.SetAgentSession(ctx, ag.ID, sid)
+		if sid != th.SessionID {
+			m.store.SetThreadSession(ctx, th.ThreadKey, sid)
 		}
 		return
 	}
 	total := result.CostUSD
-	if sid == ag.SessionID && total >= ag.SessionCost {
-		result.CostUSD = total - ag.SessionCost
+	if sid == th.SessionID && total >= th.SessionCost {
+		result.CostUSD = total - th.SessionCost
 	}
-	m.store.SetAgentSessionCost(ctx, ag.ID, sid, total)
+	m.store.SetThreadSessionCost(ctx, th.ThreadKey, sid, total)
 	m.store.SetSessionCost(ctx, ag.ID, sid, total)
 }
 
@@ -636,6 +652,7 @@ func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat ch
 		if err == nil {
 			err = json.Unmarshal(raw, &meta)
 		}
+		chat := m.originChat(ctx, spec.ID, meta.Turn, chat)
 		if err == nil && meta.File == "" && strings.TrimSpace(meta.Text) != "" {
 			chat.sendAgent(clip(meta.Text, maxMessage))
 			sentFiles++
@@ -662,6 +679,28 @@ func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat ch
 		m.hub.publish(spec.ID, UIEvent{Kind: "event", Event: &turn.Event{Type: "sent", Text: file}})
 	}
 	return sentFiles
+}
+
+// originChat is the chat of the turn that something in the sandbox came
+// from, directly or through a background job that turn started, so
+// output reaches the chat that asked for it rather than whichever spoke
+// last. The turn ID comes from the sandbox, so it only counts for one of
+// this agent's turns in a chat still linked to it; otherwise, or for a
+// turn from the web console, it is def.
+func (m *Manager) originChat(ctx context.Context, agentID, turnID string, def chatRef) chatRef {
+	if turnID == "" {
+		return def
+	}
+	rec, err := m.store.Turn(ctx, turnID)
+	if err != nil || rec.AgentID != agentID || rec.AccountID == "" ||
+		(rec.AccountID == def.msg.AccountID && rec.ChatJID == def.msg.Chat) {
+		return def
+	}
+	route, err := m.store.Route(ctx, rec.AccountID, rec.ChatJID)
+	if err != nil || route.AgentID != agentID {
+		return def
+	}
+	return chatRef{m: m, msg: Message{AccountID: rec.AccountID, Chat: rec.ChatJID}, redact: def.redact}
 }
 
 // readRegular reads a regular file of at most maxOutboxFile bytes.
@@ -928,24 +967,47 @@ type stallState struct {
 func (m *Manager) historyNote(ctx context.Context, spec *sandbox.Spec, ag *store.Agent, last Message) string {
 	var b strings.Builder
 	b.WriteString("\n- A long conversation is summarised before you sleep, and the summary keeps little of what tools showed you. When you learn something that will matter later (a cause found, a value, where something lives), say it in a few words in your reply.")
+	b.WriteString("\n- Each chat you are in has a conversation of its own; this one is with this chat only. Files on this machine, and your memory file, are shared by all of them.")
 	switch ag.Harness {
 	case store.HarnessClaude:
-		b.WriteString("\n- Full transcripts of your conversations with this owner, including what was summarised and what came before a /new, are in ~/.claude/projects/ (one .jsonl per conversation).")
+		b.WriteString("\n- Full transcripts of your conversations, including what was summarised and what came before a /new, are in ~/.claude/projects/ (one .jsonl per conversation).")
 	case store.HarnessPi:
-		b.WriteString("\n- Full transcripts of your conversations with this owner, including what was summarised and what came before a /new, are in ~/.pi/agent/sessions/.")
+		b.WriteString("\n- Full transcripts of your conversations, including what was summarised and what came before a /new, are in ~/.pi/agent/sessions/.")
 	}
 	if m.newGuest(spec) {
-		b.WriteString(" When someone refers to something from before, or you need a detail a summary dropped, look it up before guessing: hermitator-guest recall WORDS lists the newest messages containing all of WORDS, in your transcripts and in chat history files, and hermitator-guest recall --show REF reads the messages around one.")
+		b.WriteString(" When someone refers to something from before, or you need a detail a summary dropped, look it up before guessing: hermitator-guest recall WORDS lists the newest messages containing all of WORDS in this chat's conversations and history file, and hermitator-guest recall --show REF reads the messages around one. recall --all searches your other chats too; other people may be in those, so do that only when the owner asks.")
 	} else {
 		b.WriteString(" Search them when someone refers to something from before.")
 	}
-	if last.AccountID != "" {
-		if route, err := m.store.Route(ctx, last.AccountID, last.Chat); err == nil && route.History {
+	if key := last.thread(ag.ID); key.AccountID != "" {
+		if route, err := m.store.Route(ctx, key.AccountID, key.ChatJID); err == nil && route.History {
 			fmt.Fprintf(&b, "\n- Everything said in this chat since its history was turned on, other people's messages included, is in %s; hermitator-guest recall searches it too.",
 				path.Join(m.rt.GuestShared(spec), historyFile(route)))
 		}
 	}
 	return b.String()
+}
+
+// turnEnv tells guest commands which turn and conversation they run in,
+// background jobs included: whatsapp-send and requests report to the chat
+// whose turn started them, and recall searches that chat's conversations
+// unless asked for all.
+func (m *Manager) turnEnv(ctx context.Context, spec *sandbox.Spec, turnID string, th *store.Thread) map[string]string {
+	sessions := []string{th.SessionID}
+	if list, err := m.store.Sessions(ctx, th.ThreadKey, 200); err == nil {
+		for _, c := range list {
+			if c.SessionID != th.SessionID {
+				sessions = append(sessions, c.SessionID)
+			}
+		}
+	}
+	env := map[string]string{turn.EnvTurn: turnID, turn.EnvSessions: strings.Join(sessions, ",")}
+	if th.AccountID != "" {
+		if route, err := m.store.Route(ctx, th.AccountID, th.ChatJID); err == nil {
+			env[turn.EnvHistory] = path.Join(m.rt.GuestShared(spec), historyFile(route))
+		}
+	}
+	return env
 }
 
 // newGuest reports whether the sandbox runs the current guest bundle, with

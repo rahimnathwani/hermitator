@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"net/url"
 	"sort"
 	"strconv"
@@ -62,7 +63,11 @@ func (s *Store) Close() error { return s.db.Close() }
 // DB exposes the handle for backups and tests.
 func (s *Store) DB() *sql.DB { return s.db }
 
-func (s *Store) migrate(ctx context.Context) error {
+func (s *Store) migrate(ctx context.Context) error { return s.migrateTo(ctx, math.MaxInt) }
+
+// migrateTo applies pending migrations up to version last; tests use it
+// to put data in an old schema and watch a migration move it.
+func (s *Store) migrateTo(ctx context.Context, last int) error {
 	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
 		return err
 	}
@@ -82,6 +87,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 		if version <= current {
 			continue
+		}
+		if version > last {
+			break
 		}
 		body, err := migrations.ReadFile("migrations/" + e.Name())
 		if err != nil {

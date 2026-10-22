@@ -85,7 +85,7 @@ func TestStartFromRepo(t *testing.T) {
 func TestConsoleTurnThatCannotRunIsRecorded(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
-	e.m.Prompt(e.agent.ID, "set yourself up")
+	e.m.Prompt(store.ThreadKey{AgentID: e.agent.ID}, "set yourself up")
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {
 		if turns, _ := e.st.Turns(ctx, e.agent.ID, 5); len(turns) == 1 {

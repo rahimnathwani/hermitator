@@ -42,9 +42,12 @@ func (s *Store) Usage(ctx context.Context, userID string) ([]UsageWindow, error)
 	return out, rows.Err()
 }
 
-// Conversation is one session an agent has had with its harness.
+// Conversation is one session an agent has had with its harness, in one
+// chat.
 type Conversation struct {
 	AgentID     string
+	AccountID   string
+	ChatJID     string
 	SessionID   string
 	Harness     string
 	FirstPrompt string
@@ -54,12 +57,13 @@ type Conversation struct {
 	LastAt      time.Time
 }
 
-// SessionTurn records a turn in a session, adding the session if new.
-func (s *Store) SessionTurn(ctx context.Context, agentID, sessionID, harness, prompt string) error {
+// SessionTurn records a turn in a chat's session, adding the session if
+// new.
+func (s *Store) SessionTurn(ctx context.Context, k ThreadKey, sessionID, harness, prompt string) error {
 	now := ts(time.Now())
-	_, err := s.db.ExecContext(ctx, `INSERT INTO agent_sessions (agent_id, session_id, harness, first_prompt, turns, started_at, last_at) VALUES (?, ?, ?, ?, 1, ?, ?)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO agent_sessions (agent_id, account_id, chat_jid, session_id, harness, first_prompt, turns, started_at, last_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
 		ON CONFLICT (agent_id, session_id) DO UPDATE SET turns = turns + 1, last_at = excluded.last_at`,
-		agentID, sessionID, harness, prompt, now, now)
+		k.AgentID, k.AccountID, k.ChatJID, sessionID, harness, prompt, now, now)
 	return err
 }
 
@@ -69,10 +73,11 @@ func (s *Store) SetSessionCost(ctx context.Context, agentID, sessionID string, t
 	return err
 }
 
-// Sessions lists an agent's conversations, most recent first.
-func (s *Store) Sessions(ctx context.Context, agentID string, limit int) ([]*Conversation, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT agent_id, session_id, harness, first_prompt, turns, cost_total, started_at, last_at
-		FROM agent_sessions WHERE agent_id = ? ORDER BY last_at DESC LIMIT ?`, agentID, limit)
+// Sessions lists the conversations an agent has had in one chat, most
+// recent first.
+func (s *Store) Sessions(ctx context.Context, k ThreadKey, limit int) ([]*Conversation, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT agent_id, account_id, chat_jid, session_id, harness, first_prompt, turns, cost_total, started_at, last_at
+		FROM agent_sessions WHERE agent_id = ? AND account_id = ? AND chat_jid = ? ORDER BY last_at DESC LIMIT ?`, k.AgentID, k.AccountID, k.ChatJID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +86,7 @@ func (s *Store) Sessions(ctx context.Context, agentID string, limit int) ([]*Con
 	for rows.Next() {
 		var x Conversation
 		var started, last string
-		if err := rows.Scan(&x.AgentID, &x.SessionID, &x.Harness, &x.FirstPrompt, &x.Turns, &x.CostTotal, &started, &last); err != nil {
+		if err := rows.Scan(&x.AgentID, &x.AccountID, &x.ChatJID, &x.SessionID, &x.Harness, &x.FirstPrompt, &x.Turns, &x.CostTotal, &started, &last); err != nil {
 			return nil, err
 		}
 		x.StartedAt, x.LastAt = parseTS(started), parseTS(last)

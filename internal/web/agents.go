@@ -22,6 +22,8 @@ type agentView struct {
 	*store.Agent
 	Status orchestrator.Status
 	Routes []routeView
+	// ConsoleTokens is the size of the web console's own conversation.
+	ConsoleTokens int
 }
 
 func (a agentView) Busy() bool { return a.Status.Busy }
@@ -38,6 +40,8 @@ type routeView struct {
 	*store.Route
 	Account string
 	Held    int
+	// Tokens is the size of the chat's conversation.
+	Tokens int
 }
 
 func (s *Server) agentFor(r *http.Request, v *viewer) (*store.Agent, error) {
@@ -54,13 +58,20 @@ func (s *Server) agentFor(r *http.Request, v *viewer) (*store.Agent, error) {
 func (s *Server) view(r *http.Request, a *store.Agent, withRoutes bool) agentView {
 	av := agentView{Agent: a, Status: s.Agents.Status(a.ID)}
 	if withRoutes {
+		tokens := map[store.ThreadKey]int{}
+		threads, _ := s.Store.Threads(r.Context(), a.ID)
+		for _, th := range threads {
+			tokens[th.ThreadKey] = th.ContextTokens
+		}
+		av.ConsoleTokens = tokens[store.ThreadKey{AgentID: a.ID}]
 		routes, _ := s.Store.RoutesForAgent(r.Context(), a.ID)
 		for _, rt := range routes {
 			name := rt.AccountID
 			if acct, err := s.Store.Account(r.Context(), rt.AccountID); err == nil {
 				name = "+" + acct.Phone
 			}
-			av.Routes = append(av.Routes, routeView{Route: rt, Account: name, Held: s.Store.HeldCount(r.Context(), rt.AccountID, rt.ChatJID)})
+			av.Routes = append(av.Routes, routeView{Route: rt, Account: name, Held: s.Store.HeldCount(r.Context(), rt.AccountID, rt.ChatJID),
+				Tokens: tokens[store.ThreadKey{AgentID: a.ID, AccountID: rt.AccountID, ChatJID: rt.ChatJID}]})
 		}
 	}
 	return av
@@ -473,11 +484,36 @@ func (s *Server) newSession(w http.ResponseWriter, r *http.Request, v *viewer) {
 		http.NotFound(w, r)
 		return
 	}
-	if err := s.Agents.NewSession(r.Context(), a.ID); err != nil {
-		s.back(w, r, "/agents/"+a.ID, "The agent is in the middle of a turn.")
+	k, ok := s.threadKey(r, a)
+	if !ok {
+		http.Error(w, "no such chat", http.StatusBadRequest)
 		return
 	}
-	s.back(w, r, "/agents/"+a.ID, "The next message starts a fresh conversation.")
+	if err := s.Agents.NewSession(r.Context(), k); err != nil {
+		s.back(w, r, "/agents/"+a.ID+"/chats", "The agent is in the middle of a turn.")
+		return
+	}
+	s.back(w, r, "/agents/"+a.ID+"/chats", "The next message there starts a fresh conversation.")
+}
+
+// threadKey reads the conversation a form picked: "" for the web
+// console's own, or ACCOUNT/CHAT for one of the agent's chats.
+func (s *Server) threadKey(r *http.Request, a *store.Agent) (store.ThreadKey, bool) {
+	k := store.ThreadKey{AgentID: a.ID}
+	v := formValue(r, "thread")
+	if v == "" {
+		return k, true
+	}
+	account, chat, ok := strings.Cut(v, "/")
+	if !ok {
+		return k, false
+	}
+	route, err := s.Store.Route(r.Context(), account, chat)
+	if err != nil || route.AgentID != a.ID {
+		return k, false
+	}
+	k.AccountID, k.ChatJID = account, chat
+	return k, true
 }
 
 func (s *Server) newLinkCode(w http.ResponseWriter, r *http.Request, v *viewer) {
@@ -504,7 +540,12 @@ func (s *Server) prompt(w http.ResponseWriter, r *http.Request, v *viewer) {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	s.Agents.Prompt(a.ID, text)
+	k, ok := s.threadKey(r, a)
+	if !ok {
+		http.Error(w, "no such chat", http.StatusBadRequest)
+		return
+	}
+	s.Agents.Prompt(k, text)
 	s.audit(r, v, "agent.prompt", "agent="+a.ID)
 	w.WriteHeader(http.StatusNoContent)
 }

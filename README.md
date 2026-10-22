@@ -39,7 +39,8 @@ keep hundreds of them.
   way WhatsApp Web does: ideally one that belongs to your agents, so you
   message them like a contact, though it can share your own too. Each chat
   with that number (or each group it is in) is bound to an agent with
-  `/link CODE`. Photos, voice notes (transcribed locally with whisper.cpp, with a word list per
+  `/link CODE`. An agent can be in several chats, each with a
+  conversation of its own; they share its files. Photos, voice notes (transcribed locally with whisper.cpp, with a word list per
   agent for names and jargon)
   and documents go in; replying to a photo or file sends it along again.
   Files come back when the agent runs `whatsapp-send`.
@@ -66,8 +67,8 @@ keep hundreds of them.
 - **Cheap to wake after days.** A long conversation is compacted just
   before the agent sleeps, while its history is still cached, so the next
   wake re-reads a summary instead of paying full price for all of it.
-  Nothing is lost: `hermitator-guest recall` lets the agent search every
-  past conversation, and the chat's history if you keep one, without a
+  Nothing is lost: `hermitator-guest recall` lets the agent search the
+  chat's past conversations, and its history if you keep one, without a
   model call. Every ten turns or so, before sleeping, it also writes down
   lasting facts (how your projects are set up, what you prefer) in the
   memory file it reads at the start of every conversation.
@@ -248,7 +249,7 @@ hermitator answers itself:
 | `/history on`, `/history off` | Keep this chat's messages, everyone's, in a file the agent can search |
 | `/preview PORT`, `/previews`, `/previews off` | A link to a web server the agent runs; list them; turn them all off |
 | `/timezone Europe/London` | The time zone schedules use (also in Settings) |
-| `/new` | Start a fresh conversation; files are kept (alias `/clear`) |
+| `/new` | Start a fresh conversation in this chat; files are kept (alias `/clear`) |
 | `/model`, `/model opus`, `/model default` | Show or change the model |
 | `/effort`, `/effort high`, `/effort default` | Show or change how hard it thinks |
 | `/once opus max: …` | Use another model or effort for this one message |

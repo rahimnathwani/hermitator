@@ -53,23 +53,23 @@ func reviewable(batch []Message) bool {
 	return false
 }
 
-// reviewFirst starts a review instead of suspending the agent, if one is
-// due; it reports whether it did.
-func (a *actor) reviewFirst(ag *store.Agent) bool {
-	if ag.ReviewTurns < reviewAfter || ag.SessionID == "" || a.lastSystem == "" || memoryFiles[ag.Harness] == "" ||
-		time.Since(a.lastActive) > compactWarm {
+// reviewFirst starts a review of a conversation instead of suspending the
+// agent, if one is due; it reports whether it did.
+func (a *actor) reviewFirst(ag *store.Agent, th *store.Thread) bool {
+	system := a.lastSystem[th.ThreadKey]
+	if th.ReviewTurns < reviewAfter || th.SessionID == "" || system == "" || memoryFiles[ag.Harness] == "" ||
+		time.Since(th.LastAt) > compactWarm {
 		return false
 	}
-	system, chat := a.lastSystem, a.lastChat
-	return a.beforeSleep(ag, "review-", func(t *activeTurn) { a.m.review(t, ag, system, chat) })
+	return a.beforeSleep(ag, "review-", func(t *activeTurn) { a.m.review(t, ag, th, system) })
 }
 
-func (m *Manager) review(t *activeTurn, ag *store.Agent, system string, last Message) {
+func (m *Manager) review(t *activeTurn, ag *store.Agent, th *store.Thread, system string) {
 	ctx, cancel := context.WithTimeout(m.ctx, 10*time.Minute)
 	defer cancel()
 	// Counted as tried whatever happens, or a failure would be retried on
 	// every reaper tick.
-	m.store.ResetReviewTurns(ctx, ag.ID)
+	m.store.ResetReviewTurns(ctx, th.ThreadKey)
 	log := m.log.With("agent", ag.ID, "turn", t.id)
 	spec, err := m.Spec(ag)
 	if err != nil {
@@ -86,12 +86,12 @@ func (m *Manager) review(t *activeTurn, ag *store.Agent, system string, last Mes
 	for k, v := range creds.env {
 		env[k] = v
 	}
-	req := turn.Request{Harness: ag.Harness, SessionID: ag.SessionID, Fork: true, Discard: true,
+	req := turn.Request{Harness: ag.Harness, SessionID: th.SessionID, Fork: true, Discard: true,
 		Prompt: fmt.Sprintf(reviewPrompt, memoryFiles[ag.Harness], time.Now().In(loc).Format("2006-01-02")),
 		Model:  ag.Model, Effort: ag.Effort, Provider: ag.PiProvider, SystemPrompt: system, Env: env, Files: creds.files,
-		MaxCostUSD: m.allowance(ctx, ag), SessionCostUSD: ag.SessionCost}
+		MaxCostUSD: m.allowance(ctx, ag), SessionCostUSD: th.SessionCost}
 	stdin, _ := json.Marshal(req)
-	rec := &store.Turn{ID: t.id, AgentID: ag.ID, Harness: ag.Harness, SessionID: ag.SessionID,
+	rec := &store.Turn{ID: t.id, AgentID: ag.ID, Harness: ag.Harness, SessionID: th.SessionID,
 		Input: "[Looking back over the conversation for things to remember, before sleeping]"}
 	m.store.CreateTurn(ctx, rec)
 	client := spec.Spool()
@@ -123,9 +123,9 @@ func (m *Manager) review(t *activeTurn, ag *store.Agent, system string, last Mes
 	case err != nil || result == nil:
 		rec.Status, rec.Output = store.TurnError, "the review did not finish"
 	case result.Type == turn.EventError || result.IsError:
-		rec.Status, rec.Output, rec.CostUSD = store.TurnError, redact.apply(result.Text), reviewCost(ag, result)
+		rec.Status, rec.Output, rec.CostUSD = store.TurnError, redact.apply(result.Text), reviewCost(ag, th, result)
 	default:
-		rec.Status, rec.Output, rec.CostUSD = store.TurnOK, redact.apply(result.Text), reviewCost(ag, result)
+		rec.Status, rec.Output, rec.CostUSD = store.TurnOK, redact.apply(result.Text), reviewCost(ag, th, result)
 	}
 	if t.wasAborted() {
 		rec.Status = store.TurnAborted
@@ -133,16 +133,16 @@ func (m *Manager) review(t *activeTurn, ag *store.Agent, system string, last Mes
 	m.store.FinishTurn(ctx, rec)
 	log.Info("reviewed before sleep", "status", rec.Status, "cost_usd", rec.CostUSD)
 	if reply := strings.Trim(rec.Output, " \t\n.*`"); rec.Status == store.TurnOK && reply != noReply && reply != "" {
-		chat := chatRef{m: m, msg: Message{AccountID: last.AccountID, Chat: last.Chat}, prefix: "🧠 *Memory*\n\n", redact: redact}
+		chat := chatRef{m: m, msg: Message{AccountID: th.AccountID, Chat: th.ChatJID}, prefix: "🧠 *Memory*\n\n", redact: redact}
 		chat.sendAgent(rec.Output)
 	}
 }
 
 // reviewCost is what a review cost. Claude Code reports a running total,
 // which a fork carries over from the session it copied.
-func reviewCost(ag *store.Agent, result *turn.Event) float64 {
-	if ag.Harness == store.HarnessClaude && result.CostUSD >= ag.SessionCost {
-		return result.CostUSD - ag.SessionCost
+func reviewCost(ag *store.Agent, th *store.Thread, result *turn.Event) float64 {
+	if ag.Harness == store.HarnessClaude && result.CostUSD >= th.SessionCost {
+		return result.CostUSD - th.SessionCost
 	}
 	return result.CostUSD
 }

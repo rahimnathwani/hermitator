@@ -13,7 +13,21 @@ type OutboxMeta struct {
 	File    string `json:"file,omitempty"`
 	Caption string `json:"caption,omitempty"`
 	Text    string `json:"text,omitempty"`
+	// Turn is the turn that queued it, or whose background job did: the
+	// host sends it to that turn's chat.
+	Turn string `json:"turn,omitempty"`
 }
+
+// The host tells guest commands, through the environment a turn and its
+// background jobs share, which turn and conversation they belong to.
+const (
+	EnvTurn = "HERMITATOR_TURN"
+	// EnvSessions lists the chat's harness sessions, comma-separated, the
+	// current one first.
+	EnvSessions = "HERMITATOR_SESSIONS"
+	// EnvHistory is the chat's history file, if it has one.
+	EnvHistory = "HERMITATOR_HISTORY"
+)
 
 // HostRequest is something a guest command asks the host to do.
 type HostRequest struct {
@@ -32,6 +46,9 @@ type HostRequest struct {
 	Options  []string `json:"options,omitempty"`
 	// Port is for preview.
 	Port int `json:"port,omitempty"`
+	// Turn is the turn the request came from, or whose background job
+	// it came from; its chat is the one to answer in.
+	Turn string `json:"turn,omitempty"`
 }
 
 // HostAnswer is the host's answer, written next to the request.

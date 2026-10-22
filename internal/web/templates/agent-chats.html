@@ -62,5 +62,33 @@
   </div>
   {{end}}
 </section>
+
+<section class="card">
+  <div class="card-head"><div><h2>Conversations</h2><p>Each chat has its own conversation with {{$a.Name}}, and the web console one more; files and its memory file are shared by all of them. A conversation's size is what each turn re-reads, so a long one is summarised before the agent sleeps.</p></div></div>
+  <ul class="conversations">
+    <li>
+      <span><strong>Web console</strong><span class="sub">{{if $a.ConsoleTokens}}{{tokens $a.ConsoleTokens}} tokens{{else}}small, or not started{{end}}</span></span>
+      {{template "new-conversation" (newConversation $a.Agent.ID "" "the web console")}}
+    </li>
+    {{range $a.Routes}}
+    <li>
+      <span><strong>{{if .ChatName}}{{.ChatName}}{{else}}{{.ChatJID}}{{end}}</strong><span class="sub">{{if .Tokens}}{{tokens .Tokens}} tokens{{else}}small, or not started{{end}}</span></span>
+      {{template "new-conversation" (newConversation $a.Agent.ID (printf "%s/%s" .AccountID .ChatJID) (or .ChatName "this chat"))}}
+    </li>
+    {{end}}
+  </ul>
+  <p class="hint">In a chat, <code>/new</code> does the same, and <code>/sessions</code> and <code>/resume</code> go back to an earlier one.</p>
+</section>
 </div>
+{{end}}
+
+{{define "new-conversation"}}
+<form method="post" action="/agents/{{.AgentID}}/new-session" data-confirm="Start fresh" data-confirm-title="Start a fresh conversation in {{.Name}}?">
+  <input type="hidden" name="thread" value="{{.Thread}}">
+  <template data-confirm-body>
+    <p>The next message in {{.Name}} starts a new conversation. Other chats' conversations, and the files in the workspace, stay as they are.</p>
+    {{if .Thread}}<p>To go back to this one, send <code>/sessions</code> in that chat, then <code>/resume</code>.</p>{{end}}
+  </template>
+  <button class="small" title="The next message here starts a fresh conversation">{{icon "restart"}}New conversation…</button>
+</form>
 {{end}}

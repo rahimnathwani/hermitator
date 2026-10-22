@@ -34,9 +34,14 @@ var funcs = template.FuncMap{
 	"until":    func(t time.Time) string { return humanDuration(time.Until(t)) },
 	"dur":      humanDuration,
 	"triggers": triggerChoice,
-	"icon":     icon,
-	"last4":    lastFour,
-	"join":     strings.Join,
+	// newConversation is what a "New conversation" form needs: the
+	// conversation, as the thread field names it, and what to call it.
+	"newConversation": func(agentID, thread, name string) map[string]string {
+		return map[string]string{"AgentID": agentID, "Thread": thread, "Name": name}
+	},
+	"icon":  icon,
+	"last4": lastFour,
+	"join":  strings.Join,
 	"capital": func(s string) string {
 		if s == "" {
 			return s

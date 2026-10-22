@@ -49,13 +49,30 @@ func compactInstructions(now time.Time) string {
 	return fmt.Sprintf(compactKeep, now.Format("Mon 2 Jan 2006"))
 }
 
-// compactFirst starts compacting an agent's conversation instead of
-// suspending it, if that is worth doing; it reports whether it did.
-func (a *actor) compactFirst(ag *store.Agent) bool {
-	if ag.ContextTokens < a.m.compactAbove() || ag.SessionID == "" || time.Since(a.lastActive) > compactWarm {
+// sleepWork starts, instead of suspending the agent, the first review or
+// compaction one of its conversations is due; it reports whether it did.
+// One runs per reaper tick, so the next tick starts the next.
+func (a *actor) sleepWork(ag *store.Agent) bool {
+	threads, _ := a.m.store.Threads(a.ctx, ag.ID)
+	for _, th := range threads {
+		if time.Since(th.LastAt) > compactWarm {
+			break // the rest are older still, and no longer cached
+		}
+		// A review reads the whole conversation, so it goes before compacting.
+		if a.reviewFirst(ag, th) || a.compactFirst(ag, th) {
+			return true
+		}
+	}
+	return false
+}
+
+// compactFirst starts compacting a conversation instead of suspending the
+// agent, if that is worth doing; it reports whether it did.
+func (a *actor) compactFirst(ag *store.Agent, th *store.Thread) bool {
+	if th.ContextTokens < a.m.compactAbove() || th.SessionID == "" || time.Since(th.LastAt) > compactWarm {
 		return false
 	}
-	return a.beforeSleep(ag, "compact-", func(t *activeTurn) { a.m.compact(a, t, ag) })
+	return a.beforeSleep(ag, "compact-", func(t *activeTurn) { a.m.compact(t, ag, th) })
 }
 
 // beforeSleep runs job, a look at the conversation while it is still
@@ -91,7 +108,7 @@ func (m *Manager) compactAbove() int {
 	return compactAbove
 }
 
-func (m *Manager) compact(a *actor, t *activeTurn, ag *store.Agent) {
+func (m *Manager) compact(t *activeTurn, ag *store.Agent, th *store.Thread) {
 	ctx, cancel := context.WithTimeout(m.ctx, 10*time.Minute)
 	defer cancel()
 	log := m.log.With("agent", ag.ID, "turn", t.id)
@@ -99,7 +116,7 @@ func (m *Manager) compact(a *actor, t *activeTurn, ag *store.Agent) {
 	// conversation anew; one that cannot even start would otherwise be
 	// retried on every reaper tick, keeping the agent awake.
 	tokens := 0
-	defer func() { m.store.SetAgentContext(ctx, ag.ID, tokens) }()
+	defer func() { m.store.SetThreadContext(ctx, th.ThreadKey, tokens) }()
 	spec, err := m.Spec(ag)
 	if err != nil {
 		log.Warn("not compacting before sleep", "err", err)
@@ -115,10 +132,10 @@ func (m *Manager) compact(a *actor, t *activeTurn, ag *store.Agent) {
 	for k, v := range creds.env {
 		env[k] = v
 	}
-	req := turn.Request{Harness: ag.Harness, SessionID: ag.SessionID, Compact: true, Prompt: compactInstructions(time.Now().In(m.location(ctx, ag))),
+	req := turn.Request{Harness: ag.Harness, SessionID: th.SessionID, Compact: true, Prompt: compactInstructions(time.Now().In(m.location(ctx, ag))),
 		Model: ag.Model, Provider: ag.PiProvider, Env: env, Files: creds.files}
 	stdin, _ := json.Marshal(req)
-	rec := &store.Turn{ID: t.id, AgentID: ag.ID, Harness: ag.Harness, SessionID: ag.SessionID,
+	rec := &store.Turn{ID: t.id, AgentID: ag.ID, Harness: ag.Harness, SessionID: th.SessionID,
 		Input: "[Compacting the conversation before sleeping, so the next wake re-reads less]"}
 	m.store.CreateTurn(ctx, rec)
 	client := spec.Spool()
@@ -152,9 +169,9 @@ func (m *Manager) compact(a *actor, t *activeTurn, ag *store.Agent) {
 	default:
 		sid := result.SessionID
 		if sid == "" {
-			sid = ag.SessionID
+			sid = th.SessionID
 		}
-		m.accountCost(ctx, ag, result, sid)
+		m.accountCost(ctx, ag, th, result, sid)
 		rec.Status, rec.Output, rec.CostUSD, rec.ContextTokens = store.TurnOK, result.Text, result.CostUSD, result.ContextTokens
 	}
 	if t.wasAborted() {

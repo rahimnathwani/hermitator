@@ -3,11 +3,21 @@
 {{template "agent-head" $d}}
 <div class="columns">
   <section class="card console">
-    <div class="card-head"><div><h2>Activity</h2><p>Live: each message, and what the agent does with it.</p></div></div>
+    <div class="card-head"><div><h2>Activity</h2><p>Live: each message, and what the agent does with it.</p></div>
+      {{if $a.Routes}}
+      <label class="thread-pick" title="Each chat has its own conversation. What you type here continues the one you pick; the reply shows only here.">
+        <span class="muted small">Continue</span>
+        <select name="thread" form="composer" data-keep aria-label="Conversation to continue">
+          <option value="">the console's own</option>
+          {{range $a.Routes}}<option value="{{.AccountID}}/{{.ChatJID}}">{{if .ChatName}}{{.ChatName}}{{else}}{{.ChatJID}}{{end}}</option>{{end}}
+        </select>
+      </label>
+      {{end}}
+    </div>
     <div class="log" data-mount="log" data-src="/agents/{{$a.ID}}/events" aria-live="polite">
       <p class="empty-log">Nothing yet. When a message reaches {{$a.Name}}, from WhatsApp or from the box below, you can watch it work here.</p>
     </div>
-    <form method="post" action="/agents/{{$a.ID}}/prompt" class="composer" data-reset hx-swap="none">
+    <form method="post" action="/agents/{{$a.ID}}/prompt" class="composer" id="composer" data-reset hx-swap="none">
       <textarea name="text" rows="1" placeholder="Message {{$a.Name}}…" aria-label="Message" required></textarea>
       <button class="primary icon-only" title="Send (Ctrl or ⌘ + Enter)" aria-label="Send">{{icon "send"}}</button>
     </form>
@@ -22,7 +32,6 @@
         <dt>Model</dt><dd>{{if $a.Model}}{{$a.Model}}{{else}}<span class="muted">default</span>{{end}}</dd>
         <dt>Effort</dt><dd>{{if $a.Effort}}{{$a.Effort}}{{else}}<span class="muted">default</span>{{end}}</dd>
         <dt>Sleeps after</dt><dd>{{minutes $a.IdleTimeout}} min idle</dd>
-        <dt>Conversation</dt><dd>{{if $a.ContextTokens}}{{tokens $a.ContextTokens}} tokens, re-read on every wake{{else}}<span class="muted">small, or just compacted</span>{{end}}</dd>
         <dt>Memory</dt><dd>{{memory $a.MemoryMB}}</dd>
         <dt>Image</dt><dd><span class="mono">{{$a.Image}}</span>{{with $d.NewerImage}}<br><a class="small" href="/agents/{{$a.ID}}/settings">Update available</a>{{end}}{{with $d.OwnCopies}}<br><a class="small" href="/agents/{{$a.ID}}/settings">Runs its own {{range $i, $c := .}}{{if $i}} and {{end}}{{$c.Name}}{{end}}</a>{{end}}</dd>
         <dt>Address</dt><dd class="mono">{{$a.IP}}</dd>
@@ -35,7 +44,7 @@
       {{with $a.Routes}}
       <ul class="mini-routes">
         {{range .}}
-        <li><span class="tile">{{icon "chat"}}</span><span><strong>{{if .ChatName}}{{.ChatName}}{{else}}{{.ChatJID}}{{end}}</strong><span class="sub">You: {{triggerLabel .OwnerTrigger}} · others: {{triggerLabel .OthersTrigger}}{{if .Held}} · {{.Held}} waiting{{end}}</span></span></li>
+        <li><span class="tile">{{icon "chat"}}</span><span><strong>{{if .ChatName}}{{.ChatName}}{{else}}{{.ChatJID}}{{end}}</strong><span class="sub">You: {{triggerLabel .OwnerTrigger}} · others: {{triggerLabel .OthersTrigger}}{{if .Held}} · {{.Held}} waiting{{end}}{{if .Tokens}} · {{tokens .Tokens}} tokens{{end}}</span></span></li>
         {{end}}
       </ul>
       {{else}}

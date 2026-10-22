@@ -11,20 +11,22 @@ import (
 
 // Conversations: /new no longer loses the old one. /sessions lists them,
 // /resume N goes back to one, and /fork branches off the current one so
-// both can be continued.
+// both can be continued. Each chat has its own, and these see only the
+// chat they are sent in.
 
-func (m *Manager) sessionsCommand(ctx context.Context, ag *store.Agent, reply func(string)) {
-	list, _ := m.store.Sessions(ctx, ag.ID, 10)
+func (m *Manager) sessionsCommand(ctx context.Context, ag *store.Agent, k store.ThreadKey, reply func(string)) {
+	list, _ := m.store.Sessions(ctx, k, 10)
 	if len(list) == 0 {
-		reply("*" + ag.Name + "* has not had a conversation yet.")
+		reply("*" + ag.Name + "* has not had a conversation in this chat yet.")
 		return
 	}
+	th, _ := m.store.Thread(ctx, k)
 	loc := m.location(ctx, ag)
 	var b strings.Builder
 	fmt.Fprintf(&b, "*%s's conversations*\n", ag.Name)
 	for i, s := range list {
 		current := ""
-		if s.SessionID == ag.SessionID {
+		if th != nil && s.SessionID == th.SessionID {
 			current = " (current)"
 		}
 		other := ""
@@ -45,8 +47,13 @@ func plural(n int) string {
 	return "s"
 }
 
-func (m *Manager) resumeCommand(ctx context.Context, ag *store.Agent, arg string, reply func(string)) {
-	list, _ := m.store.Sessions(ctx, ag.ID, 10)
+func (m *Manager) resumeCommand(ctx context.Context, ag *store.Agent, k store.ThreadKey, arg string, reply func(string)) {
+	list, _ := m.store.Sessions(ctx, k, 10)
+	th, err := m.store.Thread(ctx, k)
+	if err != nil {
+		reply("⚠️ " + err.Error())
+		return
+	}
 	n, err := strconv.Atoi(strings.TrimSpace(arg))
 	if err != nil || n < 1 || n > len(list) {
 		reply("Which one? /sessions lists them with their numbers; then /resume N.")
@@ -54,7 +61,7 @@ func (m *Manager) resumeCommand(ctx context.Context, ag *store.Agent, arg string
 	}
 	s := list[n-1]
 	switch {
-	case s.SessionID == ag.SessionID:
+	case s.SessionID == th.SessionID:
 		reply("That is the current conversation already.")
 		return
 	case s.Harness != ag.Harness:
@@ -65,8 +72,12 @@ func (m *Manager) resumeCommand(ctx context.Context, ag *store.Agent, arg string
 		if a.turn != nil {
 			return ErrBusy
 		}
-		a.todos, a.forkNext = nil, false
-		return m.store.SetAgentSessionCost(ctx, ag.ID, s.SessionID, s.CostTotal)
+		a.forgetThread(k)
+		if err := m.store.SetThreadSessionCost(ctx, k, s.SessionID, s.CostTotal); err != nil {
+			return err
+		}
+		// Its size is not known until its next turn says.
+		return m.store.SetThreadContext(ctx, k, 0)
 	})
 	if err == ErrBusy {
 		reply("*" + ag.Name + "* is busy. Send /stop first, or wait for it to finish.")
@@ -78,15 +89,21 @@ func (m *Manager) resumeCommand(ctx context.Context, ag *store.Agent, arg string
 	reply("↩️ Back to: " + clip(strings.Join(strings.Fields(s.FirstPrompt), " "), 100) + ". The next message carries on from there.")
 }
 
-func (m *Manager) forkCommand(ctx context.Context, ag *store.Agent, reply func(string)) {
+func (m *Manager) forkCommand(ctx context.Context, ag *store.Agent, k store.ThreadKey, reply func(string)) {
+	th, err := m.store.Thread(ctx, k)
 	switch {
 	case ag.Harness != store.HarnessClaude:
 		reply("/fork works with Claude Code; pi agents can start afresh with /new and go back with /resume.")
 		return
-	case ag.SessionID == "":
+	case err != nil || th.SessionID == "":
 		reply("There is no conversation to branch off yet.")
 		return
 	}
-	m.actor(ag.ID).do(func(a *actor) { a.forkNext = true })
+	m.actor(ag.ID).do(func(a *actor) {
+		if a.forkNext == nil {
+			a.forkNext = map[store.ThreadKey]bool{}
+		}
+		a.forkNext[k] = true
+	})
 	reply("🌿 Your next message branches off this conversation. The current one stays as it is, under /sessions.")
 }
