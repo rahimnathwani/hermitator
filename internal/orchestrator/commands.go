@@ -39,11 +39,22 @@ var commandAliases = map[string]string{
 	"timezone": "timezone",
 	"tz":       "timezone",
 	"sh":       "sh",
+	"compact":  "compact",
 }
 
-// ParseCommand recognises hermitator's chat commands. Anything else that
-// starts with a slash (such as Claude Code's own /compact) goes to the
-// agent untouched.
+// harnessCommands are slash commands Claude Code and pi take at their own
+// prompt. From the chat they reach the harness as plain text (stream-json
+// and RPC input take no slash commands), so a message made of one would
+// cost a turn and do nothing.
+var harnessCommands = map[string]bool{
+	"add-dir": true, "agents": true, "bug": true, "config": true, "context": true, "cost": true, "doctor": true,
+	"export": true, "hooks": true, "init": true, "login": true, "logout": true, "mcp": true, "memory": true,
+	"permissions": true, "pr-comments": true, "release-notes": true, "review": true, "vim": true,
+}
+
+// ParseCommand recognises hermitator's chat commands. Anything else goes
+// to the agent untouched, unless NotACommand has something to say about
+// it first.
 func ParseCommand(text string) (Command, bool) {
 	text = strings.TrimSpace(text)
 	if !strings.HasPrefix(text, "/") {
@@ -57,6 +68,31 @@ func ParseCommand(text string) (Command, bool) {
 	return Command{Name: canon, Arg: strings.TrimSpace(arg)}, true
 }
 
+// NotACommand explains a slash word hermitator does not know, when it is
+// plainly meant as one: a message that is nothing but /word, or one that
+// opens with a command of the harness's own. It reports whether it has
+// anything to say; a path such as "/workspace is full" is left alone.
+func NotACommand(text, harness string) (string, bool) {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "/") {
+		return "", false
+	}
+	word, _, _ := strings.Cut(text[1:], " ")
+	lower := strings.ToLower(word)
+	if word == "" || strings.ContainsAny(word, "/.") || commandAliases[lower] != "" {
+		return "", false
+	}
+	switch {
+	case lower == "cost" || lower == "context":
+		return "/" + word + " is " + harness + "'s own command and does not work from the chat. /usage shows spending and allowances; /status shows the conversation's size.", true
+	case harnessCommands[lower]:
+		return "/" + word + " is " + harness + "'s own command and does not work from the chat, where messages reach it as text. Use the Terminal tab on the agent's page in hermitator, or ask the agent in plain words.", true
+	case strings.TrimSpace(text[1:]) == word:
+		return "There is no /" + word + " command; /help lists them. To send it to the agent as text, start the message with something else.", true
+	}
+	return "", false
+}
+
 const helpText = `*hermitator commands*
 /status: what this agent is doing
 /sleep: suspend the sandbox now (alias /exit)
@@ -66,6 +102,7 @@ const helpText = `*hermitator commands*
 /tasks: scheduled tasks (/tasks pause|resume|delete N)
 /timezone [ZONE]: show or set the time zone schedules use
 /new: start a fresh conversation, keeping all files (alias /clear)
+/compact: summarise this conversation now, so the next messages re-read less
 /sessions: past conversations; /resume N goes back to one
 /fork: branch the next message off this conversation
 /plan: the agent's task list for what it is doing

@@ -708,6 +708,66 @@ func TestLateMessagesCarryTheirAge(t *testing.T) {
 	}
 }
 
+// A slash word that is no command of hermitator's gets an answer instead
+// of a turn: the harness would take it as text and do nothing with it. A
+// path is not a command.
+func TestSlashWordsThatAreNotCommands(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	for _, c := range []struct{ text, want string }{
+		{"/stauts", "no /stauts command"},
+		{"/cost", "/usage"},
+		{"/mcp add x", "Terminal tab"},
+	} {
+		e.m.HandleMessage(ctx, e.msg(chat, c.text, true))
+		if got := e.rec.wait(t, "text"); !strings.Contains(got.body, c.want) {
+			t.Fatalf("reply to %q = %q", c.text, got.body)
+		}
+	}
+	if turns, _ := e.st.Turns(ctx, e.agent.ID, 5); len(turns) != 0 {
+		t.Fatalf("turns ran: %+v", turns)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/workspace is full", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "echo:") {
+		t.Fatalf("a path was taken for a command: %q", got.body)
+	}
+	e.idle(t)
+}
+
+// /compact summarises the chat's conversation now, holding the turn slot
+// while it does.
+func TestCompactCommand(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "/compact", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "no conversation") {
+		t.Fatalf("before any turn: %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "fill up", true))
+	e.rec.wait(t, "text")
+	e.idle(t)
+	e.m.HandleMessage(ctx, e.msg(chat, "/compact", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "Compacting") {
+		t.Fatalf("first reply = %q", got.body)
+	}
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "Compacted") || !strings.Contains(got.body, "70k") {
+		t.Fatalf("second reply = %q", got.body)
+	}
+	e.idle(t)
+	if got := e.thread(chat).ContextTokens; got != 0 {
+		t.Fatalf("size after compacting = %d", got)
+	}
+	if turns, _ := e.st.Turns(ctx, e.agent.ID, 1); !strings.Contains(turns[0].Input, "Compacting") || turns[0].Status != store.TurnOK {
+		t.Fatalf("last turn = %+v", turns[0])
+	}
+}
+
 func TestMentionsName(t *testing.T) {
 	for text, want := range map[string]bool{
 		"@bot hi":         true,

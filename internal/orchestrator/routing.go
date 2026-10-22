@@ -85,6 +85,14 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) (queued bool) 
 	if isCmd && owner {
 		return m.command(ctx, acct, agentID, route, msg, cmd, reply)
 	}
+	if owner && msg.Media == nil {
+		if ag, err := m.store.Agent(ctx, agentID); err == nil {
+			if text, ok := NotACommand(msg.Text, harnessName(ag.Harness)); ok {
+				reply(text)
+				return false
+			}
+		}
+	}
 	if strings.TrimSpace(msg.Text) == "" && msg.Media == nil {
 		return false
 	}
@@ -254,6 +262,8 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		reply("🧹 The next message starts a fresh conversation. Files in the sandbox are untouched, and /sessions can bring this one back.")
 	case "status":
 		reply(m.statusText(ctx, ag))
+	case "compact":
+		m.compactCommand(ctx, ag, msg.thread(agentID), reply)
 	case "listen":
 		m.listen(ctx, route, ag, cmd.Arg, reply)
 	case "model":

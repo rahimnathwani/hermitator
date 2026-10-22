@@ -108,7 +108,7 @@ func (m *Manager) compactAbove() int {
 	return compactAbove
 }
 
-func (m *Manager) compact(t *activeTurn, ag *store.Agent, th *store.Thread) {
+func (m *Manager) compact(t *activeTurn, ag *store.Agent, th *store.Thread) *store.Turn {
 	ctx, cancel := context.WithTimeout(m.ctx, 10*time.Minute)
 	defer cancel()
 	log := m.log.With("agent", ag.ID, "turn", t.id)
@@ -117,15 +117,19 @@ func (m *Manager) compact(t *activeTurn, ag *store.Agent, th *store.Thread) {
 	// retried on every reaper tick, keeping the agent awake.
 	tokens := 0
 	defer func() { m.store.SetThreadContext(ctx, th.ThreadKey, tokens) }()
+	rec := &store.Turn{ID: t.id, AgentID: ag.ID, Harness: ag.Harness, SessionID: th.SessionID,
+		Input: "[Compacting the conversation before sleeping, so the next wake re-reads less]", Status: store.TurnError}
 	spec, err := m.Spec(ag)
 	if err != nil {
-		log.Warn("not compacting before sleep", "err", err)
-		return
+		log.Warn("not compacting", "err", err)
+		rec.Output = err.Error()
+		return rec
 	}
 	creds, problem := m.credentials(ctx, ag)
 	if problem != "" {
-		log.Info("not compacting before sleep", "reason", problem)
-		return
+		log.Info("not compacting", "reason", problem)
+		rec.Output = problem
+		return rec
 	}
 	m.usePlaceholders(ctx, ag, spec, &creds)
 	env := map[string]string{"TZ": m.location(ctx, ag).String()}
@@ -135,14 +139,12 @@ func (m *Manager) compact(t *activeTurn, ag *store.Agent, th *store.Thread) {
 	req := turn.Request{Harness: ag.Harness, SessionID: th.SessionID, Compact: true, Prompt: compactInstructions(time.Now().In(m.location(ctx, ag))),
 		Model: ag.Model, Provider: ag.PiProvider, Env: env, Files: creds.files}
 	stdin, _ := json.Marshal(req)
-	rec := &store.Turn{ID: t.id, AgentID: ag.ID, Harness: ag.Harness, SessionID: th.SessionID,
-		Input: "[Compacting the conversation before sleeping, so the next wake re-reads less]"}
 	m.store.CreateTurn(ctx, rec)
 	client := spec.Spool()
 	if err := client.Submit(spool.Job{ID: t.id, Argv: []string{"hermitator-guest", "turn"}, Stdin: stdin}); err != nil {
 		rec.Status, rec.Output = store.TurnError, err.Error()
 		m.store.FinishTurn(ctx, rec)
-		return
+		return rec
 	}
 	t.submitted(&client)
 	var result *turn.Event
@@ -179,5 +181,54 @@ func (m *Manager) compact(t *activeTurn, ag *store.Agent, th *store.Thread) {
 	}
 	m.store.FinishTurn(ctx, rec)
 	tokens = rec.ContextTokens
-	log.Info("compacted before sleep", "status", rec.Status, "output", rec.Output, "cost_usd", rec.CostUSD)
+	log.Info("compacted", "status", rec.Status, "output", rec.Output, "cost_usd", rec.CostUSD)
+	return rec
+}
+
+// compactCommand compacts a chat's conversation now, for /compact. It
+// takes the turn slot like a turn, so a message arriving meanwhile waits.
+func (m *Manager) compactCommand(ctx context.Context, ag *store.Agent, key store.ThreadKey, reply func(string)) {
+	th, err := m.store.Thread(ctx, key)
+	if err != nil || th.SessionID == "" {
+		reply("There is no conversation here to compact yet.")
+		return
+	}
+	if over := m.overCap(ctx, ag); over != "" {
+		reply(over)
+		return
+	}
+	t := &activeTurn{id: "compact-" + ids.New()}
+	a := m.actor(ag.ID)
+	if a.call(func(a *actor) error {
+		if a.turn != nil {
+			return ErrBusy
+		}
+		a.turn = t
+		a.lastActive = time.Now()
+		return nil
+	}) != nil {
+		reply("*" + ag.Name + "* is busy. Send /stop first, or wait for it to finish.")
+		return
+	}
+	reply("🗜 Compacting this conversation…")
+	go func() {
+		rec := m.compact(t, ag, th)
+		a.do(func(a *actor) {
+			a.turn = nil
+			a.lastActive = time.Now()
+			if a.debounce == nil {
+				a.startTurn()
+			}
+		})
+		switch {
+		case rec.Status == store.TurnOK && th.ContextTokens > 0:
+			reply(fmt.Sprintf("🗜 Compacted this conversation; it was about %dk tokens. The full transcript stays on disk, where the agent can search it.", th.ContextTokens/1000))
+		case rec.Status == store.TurnOK:
+			reply("🗜 Compacted this conversation. The full transcript stays on disk, where the agent can search it.")
+		case rec.Status == store.TurnAborted:
+			reply("⏹ The compaction was stopped.")
+		default:
+			reply("⚠️ Could not compact: " + rec.Output)
+		}
+	}()
 }

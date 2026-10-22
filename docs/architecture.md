@@ -393,7 +393,7 @@ its session, running cost, size and review count), and the web console
 has one more; the workspace and the memory file are shared by all of
 them. A turn answers one chat in that chat's conversation, so switching
 between chats neither mixes their histories nor invalidates each other's
-prompt cache. `/new`, `/sessions`, `/resume` and `/fork` act on the chat
+prompt cache. `/new`, `/compact`, `/sessions`, `/resume` and `/fork` act on the chat
 they are sent in, and `/plan` shows only that chat's task list. The web
 console can continue any chat's conversation; its reply is shown only in
 the console. Separation is of context, not a security boundary: the agent

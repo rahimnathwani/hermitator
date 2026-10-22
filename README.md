@@ -250,6 +250,7 @@ hermitator answers itself:
 | `/preview PORT`, `/previews`, `/previews off` | A link to a web server the agent runs; list them; turn them all off |
 | `/timezone Europe/London` | The time zone schedules use (also in Settings) |
 | `/new` | Start a fresh conversation in this chat; files are kept (alias `/clear`) |
+| `/compact` | Summarise this conversation now, so the next messages re-read less |
 | `/model`, `/model opus`, `/model default` | Show or change the model |
 | `/effort`, `/effort high`, `/effort default` | Show or change how hard it thinks |
 | `/once opus max: …` | Use another model or effort for this one message |
@@ -264,10 +265,12 @@ model ID, with effort from `low` to `max`; pi takes its provider's models,
 with thinking from `off` to `max`. The agent's Settings tab has the same
 choices, and its Overview shows which model each turn actually ran on.
 
-Other slash commands, such as Claude Code's `/compact`, pass through to the
-agent. Only you can use commands: messages from your own numbers (listed in
-Settings, and learnt from `/link`), or sent by the linked account itself when
-it is your own number.
+A message that is only a slash word hermitator does not know, or that
+opens with one of Claude Code's or pi's own commands (`/cost`, `/mcp`),
+gets an explanation instead of a turn: the harness would have read it as
+plain text. Only you can use commands: messages from your own numbers
+(listed in Settings, and learnt from `/link`), or sent by the linked
+account itself when it is your own number.
 
 Each linked chat has two settings: which of **your** messages wake the agent,
 and which of **other people's** do. Each is *always*, *by mentioning it* or
