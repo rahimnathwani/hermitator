@@ -22,6 +22,15 @@ func TestFormat(t *testing.T) {
 		{"```go\nfunc **x**() {}\n```", "```\nfunc **x**() {}\n```"},
 		{"2 * 3 * 4 = 24", "2 * 3 * 4 = 24"},
 		{"a*b*c", "a*b*c"},
+		// Two columns become a list of key: value lines; the header goes.
+		{"| Key | Value |\n|---|---|\n| **Host** | db-1 |\n| Port | `5432` |", "*Host*: db-1\n*Port*: `5432`"},
+		{"Before\n\n| a | b |\n| :-- | --: |\n| x | y |\n\nAfter", "Before\n\n*x*: y\n\nAfter"},
+		// Wider tables go in a monospace block with columns lined up.
+		{"| Name | Status | Time |\n|---|---|---|\n| build | **ok** | 3s |\n| tests | failed | 2m 10s |",
+			"```\nName   Status  Time\nbuild  ok      3s\ntests  failed  2m 10s\n```"},
+		// A table inside a code block is left alone, as is a lone pipe line.
+		{"```\n| a | b |\n|---|---|\n```", "```\n| a | b |\n|---|---|\n```"},
+		{"a | b\nnot a table", "a | b\nnot a table"},
 	}
 	for _, c := range cases {
 		if got := Format(c.in); got != c.want {

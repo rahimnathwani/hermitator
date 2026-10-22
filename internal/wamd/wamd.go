@@ -18,6 +18,8 @@ var (
 	italicStar = regexp.MustCompile(`(^|[^*\w])\*([^*\s](?:[^*\n]*?[^*\s])?)\*($|[^*\w])`)
 	strike     = regexp.MustCompile(`~~([^~\n]+?)~~`)
 	fence      = regexp.MustCompile("^\\s*```")
+	// tableRule is the line under a table's header: |---|:--:|.
+	tableRule = regexp.MustCompile(`^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$`)
 )
 
 // placeholder stands in for WhatsApp's bold marker while italics are
@@ -28,15 +30,23 @@ const placeholder = "\x00"
 // left alone.
 func Format(md string) string {
 	lines := strings.Split(strings.ReplaceAll(md, "\r\n", "\n"), "\n")
+	var out []string
 	inFence := false
-	for i, line := range lines {
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
 		if fence.MatchString(line) {
 			inFence = !inFence
 			// WhatsApp does not understand language tags.
-			lines[i] = strings.TrimSpace(line)[:3]
+			out = append(out, strings.TrimSpace(line)[:3])
 			continue
 		}
 		if inFence {
+			out = append(out, line)
+			continue
+		}
+		if n := tableLength(lines[i:]); n > 0 {
+			out = append(out, formatTable(lines[i:i+n])...)
+			i += n - 1
 			continue
 		}
 		if m := heading.FindStringSubmatch(line); m != nil {
@@ -45,9 +55,107 @@ func Format(md string) string {
 			line = bullet.ReplaceAllString(line, "$1- ")
 			line = formatInline(line)
 		}
-		lines[i] = line
+		out = append(out, line)
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(out, "\n")
+}
+
+// tableLength is the number of lines of the pipe table starting at
+// lines[0], or 0 if none starts there: a header row, a rule, and rows
+// until the first line without a pipe.
+func tableLength(lines []string) int {
+	if len(lines) < 2 || !strings.Contains(lines[0], "|") || !tableRule.MatchString(lines[1]) || len(tableCells(lines[0])) == 0 {
+		return 0
+	}
+	n := 2
+	for n < len(lines) && strings.Contains(lines[n], "|") && strings.TrimSpace(lines[n]) != "" {
+		n++
+	}
+	return n
+}
+
+// tableCells splits a table row into its cells, trimmed.
+func tableCells(line string) []string {
+	s := strings.TrimSpace(line)
+	s = strings.TrimPrefix(s, "|")
+	s = strings.TrimSuffix(s, "|")
+	cells := strings.Split(s, "|")
+	for i, c := range cells {
+		cells[i] = strings.TrimSpace(c)
+	}
+	return cells
+}
+
+// formatTable renders a pipe table for a phone. Tables do not exist in
+// WhatsApp, and agents write them however often they are told not to.
+// Two columns read well as a list of "*key*: value" lines; anything
+// wider goes in a monospace block with its columns lined up, which is
+// the best a phone can do.
+func formatTable(lines []string) []string {
+	header := tableCells(lines[0])
+	var rows [][]string
+	for _, line := range lines[2:] {
+		rows = append(rows, tableCells(line))
+	}
+	cell := func(row []string, i int) string {
+		if i < len(row) {
+			return row[i]
+		}
+		return ""
+	}
+	var out []string
+	switch len(header) {
+	case 1:
+		for _, row := range rows {
+			out = append(out, "- "+formatInline(cell(row, 0)))
+		}
+	case 2:
+		for _, row := range rows {
+			key := strings.ReplaceAll(formatInline(cell(row, 0)), "*", "")
+			value := formatInline(cell(row, 1))
+			switch {
+			case key == "":
+				out = append(out, "- "+value)
+			case value == "":
+				out = append(out, "*"+key+"*")
+			default:
+				out = append(out, "*"+key+"*: "+value)
+			}
+		}
+	default:
+		all := append([][]string{header}, rows...)
+		widths := make([]int, len(header))
+		for _, row := range all {
+			for i := range widths {
+				widths[i] = max(widths[i], utf8.RuneCountInString(plainCell(cell(row, i))))
+			}
+		}
+		out = append(out, "```")
+		for _, row := range all {
+			var b strings.Builder
+			for i, w := range widths {
+				c := plainCell(cell(row, i))
+				if i == len(widths)-1 {
+					b.WriteString(c)
+				} else {
+					b.WriteString(c + strings.Repeat(" ", w-utf8.RuneCountInString(c)+2))
+				}
+			}
+			out = append(out, strings.TrimRight(b.String(), " "))
+		}
+		out = append(out, "```")
+	}
+	return out
+}
+
+// plainCell strips inline markup, which a monospace block would show.
+func plainCell(s string) string {
+	s = image.ReplaceAllString(s, "$2")
+	s = link.ReplaceAllString(s, "$1")
+	for _, mark := range []string{"**", "__", "`", "~~"} {
+		s = strings.ReplaceAll(s, mark, "")
+	}
+	return s
 }
 
 func formatInline(line string) string {
