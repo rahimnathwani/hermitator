@@ -350,6 +350,9 @@ type Status struct {
 	Queued     int
 	Holds      int
 	LastActive time.Time
+	// Since is when the running turn started, and Doing its latest step.
+	Since time.Time
+	Doing string
 }
 
 // Status reports what an agent is doing.
@@ -363,6 +366,12 @@ func (m *Manager) Status(agentID string) Status {
 	}
 	a.call(func(a *actor) error {
 		st = Status{State: a.state, Busy: a.turn != nil, Queued: len(a.pending), Holds: a.holds, LastActive: a.lastActive}
+		if t := a.turn; t != nil {
+			st.Since = t.started
+			if p := t.progress.Load(); p != nil {
+				st.Doing = p.doing
+			}
+		}
 		return nil
 	})
 	return st

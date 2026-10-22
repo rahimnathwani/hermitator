@@ -768,6 +768,35 @@ func TestCompactCommand(t *testing.T) {
 	}
 }
 
+// /status while a turn runs says how long it has been going and what it
+// was last doing, which the stall watcher already knew.
+func TestStatusWhileWorking(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "go quiet", true))
+	deadline := time.Now().Add(10 * time.Second)
+	for e.m.Status(e.agent.ID).Doing == "" {
+		if time.Now().After(deadline) {
+			t.Fatal("the turn never reported a step")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/status", true))
+	got := e.rec.wait(t, "text")
+	if !strings.Contains(got.body, "State: working for ") || !strings.Contains(got.body, "(last step: Bash npm test)") {
+		t.Fatalf("status = %q", got.body)
+	}
+	e.rec.wait(t, "text")
+	e.idle(t)
+	e.m.HandleMessage(ctx, e.msg(chat, "/status", true))
+	if got := e.rec.wait(t, "text"); strings.Contains(got.body, "last step") {
+		t.Fatalf("status after the turn = %q", got.body)
+	}
+}
+
 func TestMentionsName(t *testing.T) {
 	for text, want := range map[string]bool{
 		"@bot hi":         true,

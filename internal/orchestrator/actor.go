@@ -136,7 +136,7 @@ func (a *actor) startTurn() {
 		}
 	}
 	a.pending = rest
-	t := &activeTurn{id: ids.New()}
+	t := &activeTurn{id: ids.New(), started: time.Now()}
 	for _, msg := range batch {
 		if msg.TaskID != "" {
 			t.tasks = append(t.tasks, msg.TaskID)
@@ -247,6 +247,10 @@ type activeTurn struct {
 	id string
 	// tasks are the scheduled tasks whose runs this turn answers.
 	tasks []string
+	// started is when the turn began; progress is its latest sign of
+	// life and the step it was on, for the stall warning and /status.
+	started  time.Time
+	progress atomic.Pointer[stallState]
 
 	mu      sync.Mutex
 	client  *spool.Client

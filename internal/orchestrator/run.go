@@ -280,7 +280,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	}()
 
 	// A quiet turn may be a slow build, so this only ever warns, once.
-	var progress atomic.Pointer[stallState]
+	progress := &t.progress
 	progress.Store(&stallState{at: time.Now()})
 	go func() {
 		tick := time.NewTicker(m.cfg.StallAfter / 10)
@@ -296,7 +296,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 					warned = true
 					last := ""
 					if p.doing != "" {
-						last = " (last step: " + chat.redact.apply(clip(p.doing, 120)) + ")"
+						last = " (last step: " + clip(p.doing, 120) + ")"
 					}
 					chat.send(fmt.Sprintf("⏳ No sign of progress for %s%s. It may just be slow; /stop ends the turn.", humanize(time.Since(p.at)), last))
 				}
@@ -310,6 +310,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		if json.Unmarshal(line, &ev) != nil {
 			return
 		}
+		ev.Text, ev.Detail = chat.redact.apply(ev.Text), chat.redact.apply(ev.Detail)
 		doing := progress.Load().doing
 		if ev.Type == turn.EventTool {
 			doing = strings.TrimSpace(ev.Tool + " " + ev.Detail)
@@ -318,7 +319,6 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		if ev.Model != "" {
 			rec.Model = ev.Model
 		}
-		ev.Text, ev.Detail = chat.redact.apply(ev.Text), chat.redact.apply(ev.Detail)
 		switch ev.Type {
 		case turn.EventTool:
 			rec.Tools++

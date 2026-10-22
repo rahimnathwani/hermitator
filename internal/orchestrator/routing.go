@@ -261,7 +261,7 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		}
 		reply("🧹 The next message starts a fresh conversation. Files in the sandbox are untouched, and /sessions can bring this one back.")
 	case "status":
-		reply(m.statusText(ctx, ag))
+		reply(m.statusText(ctx, ag, msg.thread(agentID)))
 	case "compact":
 		m.compactCommand(ctx, ag, msg.thread(agentID), reply)
 	case "listen":
@@ -314,7 +314,7 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 	return false
 }
 
-func (m *Manager) statusText(ctx context.Context, ag *store.Agent) string {
+func (m *Manager) statusText(ctx context.Context, ag *store.Agent, key store.ThreadKey) string {
 	st := m.Status(ag.ID)
 	state := st.State
 	if state == "" {
@@ -327,8 +327,17 @@ func (m *Manager) statusText(ctx context.Context, ag *store.Agent) string {
 	}
 	fmt.Fprintf(&b, "\nModel: %s", describeModel(ag))
 	fmt.Fprintf(&b, "\nState: %s", describeState(state, st.Busy))
+	if st.Busy && !st.Since.IsZero() {
+		fmt.Fprintf(&b, " for %s", humanize(time.Since(st.Since)))
+		if st.Doing != "" {
+			fmt.Fprintf(&b, " (last step: %s)", clip(st.Doing, 120))
+		}
+	}
 	if st.Queued > 0 {
 		fmt.Fprintf(&b, ", %d message(s) queued", st.Queued)
+	}
+	if th, err := m.store.Thread(ctx, key); err == nil && th.ContextTokens > 0 {
+		fmt.Fprintf(&b, "\nConversation: about %dk tokens (/compact shrinks it)", (th.ContextTokens+500)/1000)
 	}
 	if spec, err := m.Spec(ag); err == nil {
 		if size, err := dirSize(spec.Dir + "/upper"); err == nil {
