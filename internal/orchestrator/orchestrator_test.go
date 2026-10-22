@@ -146,7 +146,11 @@ total=$(wc -l < "$HOME/modes" | tr -d ' ')
 printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"**echo:** '"$text"'","session_id":"'"$sid"'","total_cost_usd":0.0'"$total"'}'
 `
 
-type sent struct{ kind, chat, body string }
+type sent struct {
+	kind, chat, body string
+	// quote is the ID of the message a text replied to, if any.
+	quote string
+}
 
 type recorder struct {
 	mu  sync.Mutex
@@ -168,24 +172,28 @@ func (r *recorder) SendText(_ context.Context, _, chat, text string) error {
 		return errors.New("not connected")
 	}
 	r.failTexts.Store(0)
-	r.add(sent{"text", chat, text})
+	r.add(sent{"text", chat, text, ""})
+	return nil
+}
+func (r *recorder) SendReply(_ context.Context, _, chat, text string, q Quote) error {
+	r.add(sent{"text", chat, text, q.MessageID})
 	return nil
 }
 func (r *recorder) SendFile(_ context.Context, _, chat, name string, data []byte, caption string) error {
-	r.add(sent{"file", chat, caption + "|" + string(data)})
+	r.add(sent{"file", chat, caption + "|" + string(data), ""})
 	return nil
 }
 func (r *recorder) SendPoll(_ context.Context, _, chat, question string, options []string) error {
-	r.add(sent{"poll", chat, question + "|" + strings.Join(options, "|")})
+	r.add(sent{"poll", chat, question + "|" + strings.Join(options, "|"), ""})
 	return nil
 }
 func (r *recorder) React(_ context.Context, _, chat, _, _, emoji string) error {
-	r.add(sent{"react", chat, emoji})
+	r.add(sent{"react", chat, emoji, ""})
 	return nil
 }
 func (r *recorder) Typing(context.Context, string, string, bool) error { return nil }
 func (r *recorder) MarkRead(_ context.Context, _, chat, _, id string) error {
-	r.add(sent{"read", chat, id})
+	r.add(sent{"read", chat, id, ""})
 	return nil
 }
 
@@ -795,6 +803,48 @@ func TestStatusWhileWorking(t *testing.T) {
 	if got := e.rec.wait(t, "text"); strings.Contains(got.body, "last step") {
 		t.Fatalf("status after the turn = %q", got.body)
 	}
+}
+
+// A reply quotes the message it answers when that would otherwise be
+// unclear: in a group, or when the message waited behind another turn.
+// A quick answer in a direct chat does not.
+func TestRepliesQuoteWhenUnclear(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "quick one", true))
+	if got := e.rec.wait(t, "text"); got.quote != "" {
+		t.Fatalf("a quick direct reply quoted %q", got.quote)
+	}
+	e.idle(t)
+
+	group := "g@g.us"
+	e.link(t, group)
+	asked := e.msg(group, "in a group", true)
+	asked.IsGroup = true
+	e.m.HandleMessage(ctx, asked)
+	if got := e.rec.wait(t, "text"); got.quote != asked.ID {
+		t.Fatalf("group reply quoted %q, want %q", got.quote, asked.ID)
+	}
+	e.idle(t)
+
+	// A message from another chat waits for the running turn (one from
+	// the same chat would join it).
+	other := "other@s.whatsapp.net"
+	e.link(t, other)
+	e.m.HandleMessage(ctx, e.msg(chat, "go quiet", true))
+	for e.m.Status(e.agent.ID).Doing == "" {
+		time.Sleep(10 * time.Millisecond)
+	}
+	waited := e.msg(other, "while busy", true)
+	e.m.HandleMessage(ctx, waited)
+	e.rec.wait(t, "text") // the answer to "go quiet"
+	if got := e.rec.wait(t, "text"); got.quote != waited.ID || !strings.Contains(got.body, "while busy") {
+		t.Fatalf("queued reply = %+v, want a quote of %s", got, waited.ID)
+	}
+	e.idle(t)
 }
 
 func TestMentionsName(t *testing.T) {

@@ -468,6 +468,9 @@ func (m *Manager) holdAwake(ctx context.Context, agentID string, touch bool) (re
 type nopMessenger struct{}
 
 func (nopMessenger) SendText(context.Context, string, string, string) error { return nil }
+func (nopMessenger) SendReply(context.Context, string, string, string, Quote) error {
+	return nil
+}
 func (nopMessenger) SendFile(context.Context, string, string, string, []byte, string) error {
 	return nil
 }

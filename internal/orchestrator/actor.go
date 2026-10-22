@@ -107,6 +107,7 @@ func (a *actor) enqueue(msg Message) {
 	}
 	if a.turn != nil && msg.ID != "" {
 		// Behind a turn it may wait a while; say it arrived.
+		msg.Queued = true
 		go chatRef{m: a.m, msg: msg}.react(queuedReaction)
 	}
 	a.pending = append(a.pending, msg)

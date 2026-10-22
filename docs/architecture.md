@@ -266,6 +266,9 @@ only from the panel's exact host.
 7. Files the agent queues with `whatsapp-send` are delivered while the turn is
    still running. When it ends, the reply is converted from Markdown to
    WhatsApp formatting and split into messages, and the reaction becomes ✅.
+   In a group, after a message that waited behind another turn, or when
+   the turn took over a minute, the reply quotes the message it answers,
+   so the phone shows what it is about.
 
 Agents talk to the host through `/shared` only. Besides the outbox,
 guest commands such as `hermitator-guest schedule` drop requests into

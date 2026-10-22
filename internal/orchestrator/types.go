@@ -34,6 +34,9 @@ type Message struct {
 	Owner bool
 	// Mentioned means the message @mentions the account or replies to it.
 	Mentioned bool
+	// Queued is set by the actor when the message had to wait for a turn
+	// in progress, so its answer will come a while after it.
+	Queued bool
 	// GroupSize is the number of participants, for groups.
 	GroupSize int
 	Text      string
@@ -85,6 +88,8 @@ type Media struct {
 // Messenger sends things back to a chat.
 type Messenger interface {
 	SendText(ctx context.Context, accountID, chat, text string) error
+	// SendReply sends text quoting an earlier message of the chat.
+	SendReply(ctx context.Context, accountID, chat, text string, q Quote) error
 	SendFile(ctx context.Context, accountID, chat, name string, data []byte, caption string) error
 	// SendPoll sends a single-choice poll; votes come back as messages.
 	SendPoll(ctx context.Context, accountID, chat, question string, options []string) error
@@ -92,6 +97,14 @@ type Messenger interface {
 	Typing(ctx context.Context, accountID, chat string, typing bool) error
 	// MarkRead sends a read receipt, where the account wants them.
 	MarkRead(ctx context.Context, accountID, chat, sender, messageID string) error
+}
+
+// Quote names a message a reply attaches to, with its text for the
+// preview WhatsApp shows above the reply.
+type Quote struct {
+	MessageID string
+	Sender    string
+	Text      string
 }
 
 // Transcriber turns a voice note into text.

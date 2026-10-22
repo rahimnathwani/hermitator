@@ -28,6 +28,12 @@ import (
 // can arrive hours after it was typed.
 const waitedFor = 10 * time.Minute
 
+// quoteAfter is how long a turn may take before its reply quotes the
+// message it answers. A quick answer in a direct chat follows its
+// question; one that comes minutes later, or in a group, or after
+// waiting behind another turn, needs saying what it is about.
+const quoteAfter = time.Minute
+
 // maxMessage is the longest single WhatsApp message hermitator sends.
 // WhatsApp allows far more, but long walls of text are unreadable on a
 // phone.
@@ -88,6 +94,9 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	chat.quiet = true
 	for _, msg := range batch {
 		chat.quiet = chat.quiet && msg.TaskID != ""
+	}
+	if last.IsGroup || last.Queued {
+		chat.quote = quoteOf(last)
 	}
 
 	agent, err := m.store.Agent(ctx, a.id)
@@ -472,6 +481,9 @@ func (m *Manager) finish(ctx context.Context, chat chatRef, rec *store.Turn, res
 			chat.react("✅")
 		}
 	}
+	if !rec.StartedAt.IsZero() && chat.quote == nil && time.Since(rec.StartedAt) >= quoteAfter {
+		chat.quote = quoteOf(chat.msg)
+	}
 	if !rec.StartedAt.IsZero() {
 		m.store.FinishTurn(ctx, rec)
 		defer m.capWarning(ctx, chat, rec)
@@ -747,6 +759,21 @@ type chatRef struct {
 	quiet bool
 	// redact keeps secret values out of what the agent sends.
 	redact redactor
+	// quote, when set, is the message the next text sent attaches to.
+	quote *Quote
+}
+
+// quoteOf is the quote for a reply to msg, or nil for a message that
+// cannot be quoted (one from a scheduled task, or the web console).
+func quoteOf(msg Message) *Quote {
+	if msg.ID == "" || msg.AccountID == "" {
+		return nil
+	}
+	text := strings.TrimSpace(msg.Text)
+	if msg.Media != nil && text == "" {
+		text = "[" + msg.Media.Kind + "]"
+	}
+	return &Quote{MessageID: msg.ID, Sender: msg.Sender, Text: clip(text, 200)}
 }
 
 func (c chatRef) ok() bool { return c.msg.AccountID != "" && c.msg.Chat != "" }
@@ -763,7 +790,13 @@ func (c chatRef) send(text string) {
 		ids = nil
 	}
 	for i, part := range parts {
-		if err := c.m.msgr.SendText(c.m.ctx, c.msg.AccountID, c.msg.Chat, part); err != nil {
+		var err error
+		if q := c.quote; q != nil && i == 0 {
+			err = c.m.msgr.SendReply(c.m.ctx, c.msg.AccountID, c.msg.Chat, part, *q)
+		} else {
+			err = c.m.msgr.SendText(c.m.ctx, c.msg.AccountID, c.msg.Chat, part)
+		}
+		if err != nil {
 			c.m.log.Warn("send reply; will try again", "chat", c.msg.Chat, "err", err)
 			if ids != nil {
 				for _, id := range ids[i:] {
