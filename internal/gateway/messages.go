@@ -147,8 +147,9 @@ func (g *Gateway) convert(ctx context.Context, a *account, e *events.Message) (o
 			msg.Mentioned = true
 		}
 		if q := ctxInfo.GetQuotedMessage(); q != nil {
+			msg.QuotedID = ctxInfo.GetStanzaID()
 			if quoted := quotedText(q); quoted != "" {
-				msg.Text = "> " + strings.ReplaceAll(quoted, "\n", "\n> ") + "\n\n" + msg.Text
+				msg.QuotedText, msg.Text = quoted, orchestrator.QuoteText(quoted, msg.Text)
 			}
 			// "What's in this?" in reply to a photo means the photo: bring it
 			// along, from WhatsApp's servers, as if it came with this message.

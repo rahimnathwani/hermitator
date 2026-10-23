@@ -10,6 +10,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/store"
@@ -45,9 +46,14 @@ type Message struct {
 	Edits string
 	// GroupSize is the number of participants, for groups.
 	GroupSize int
-	Text      string
-	Time      time.Time
-	Media     *Media
+	// Text is what the agent reads: for a reply, the quoted message comes
+	// first (see QuoteText).
+	Text string
+	// QuotedID and QuotedText are the message this one replies to.
+	QuotedID   string
+	QuotedText string
+	Time       time.Time
+	Media      *Media
 	// Model and Effort override the agent's settings for this message's
 	// turn; /once sets them.
 	Model  string
@@ -68,6 +74,20 @@ type Message struct {
 	// only in the console. Empty, it continues the console's own.
 	ThreadAccount string
 	ThreadChat    string
+}
+
+// QuoteText is text as the agent reads a reply to quoted: the quote first,
+// as in an email.
+func QuoteText(quoted, text string) string {
+	return "> " + strings.ReplaceAll(quoted, "\n", "\n> ") + "\n\n" + text
+}
+
+// typed is what the sender wrote, without the message it replies to.
+func (m Message) typed() string {
+	if m.QuotedText == "" {
+		return m.Text
+	}
+	return strings.TrimPrefix(m.Text, QuoteText(m.QuotedText, ""))
 }
 
 // thread is the conversation a message belongs to: its chat's, or for a

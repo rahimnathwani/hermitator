@@ -56,8 +56,10 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) (queued bool) 
 	reply := func(text string) { chatRef{m: m, msg: msg}.send(text) }
 	owner := msg.FromMe || m.store.IsOwnerNumber(ctx, acct.UserID, msg.SenderPhone)
 
-	cmd, isCmd := ParseCommand(msg.Text)
-	isCmd = isCmd && msg.Media == nil
+	// A command sent as a reply is still a command; the quote and anything
+	// it brought along are for the agent.
+	cmd, isCmd := ParseCommand(msg.typed())
+	isCmd = isCmd && (msg.Media == nil || msg.Media.Quoted)
 	if isCmd && cmd.Name == "link" {
 		// A valid code proves its sender can see the agent's page, so it
 		// is accepted from anyone; guessing is throttled.
@@ -95,9 +97,9 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) (queued bool) 
 	if isCmd && owner {
 		return m.command(ctx, acct, agentID, route, msg, cmd, reply)
 	}
-	if owner && msg.Media == nil {
+	if owner && (msg.Media == nil || msg.Media.Quoted) {
 		if ag, err := m.store.Agent(ctx, agentID); err == nil {
-			if text, ok := NotACommand(msg.Text, harnessName(ag.Harness)); ok {
+			if text, ok := NotACommand(msg.typed(), harnessName(ag.Harness)); ok {
 				reply(text)
 				return false
 			}
@@ -289,6 +291,9 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		}
 		once := msg
 		once.Text, once.Model, once.Effort = text, model, effort
+		if msg.QuotedText != "" {
+			once.Text = QuoteText(msg.QuotedText, text)
+		}
 		// Asking explicitly wakes the agent whatever the chat's settings.
 		m.actor(agentID).do(func(a *actor) { a.enqueue(once) })
 		return true

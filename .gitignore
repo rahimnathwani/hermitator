@@ -21,3 +21,6 @@ id_ed25519*
 .idea/
 .vscode/
 /notes/
+
+# second-model review notes
+/.reviews/
