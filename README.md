@@ -252,6 +252,8 @@ hermitator answers itself:
 | `/stop` | Abort the current turn |
 | `/retry` | Run the last message again, after a failure or a restart |
 | `/sh COMMAND` | Run a shell command in the sandbox and get its output, without the model |
+| `/get PATH` | Send a file from the sandbox to this chat now; a folder comes zipped |
+| `/git`, `/git PATH` | Repositories with uncommitted or unpushed work; one repository's changes and recent commits |
 | `/tasks`, `/tasks pause N`, `/tasks resume N`, `/tasks run N`, `/tasks delete N` | Scheduled tasks; `run` starts one now, outside its schedule |
 | `/in 2h …`, `/at 9am …`, `/every 0 9 * * 1-5: …` | Schedule a message to the agent, without asking the model to |
 | `/plan` | The agent's own task list for what it is doing, without waking it |

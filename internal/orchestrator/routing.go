@@ -242,6 +242,10 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		m.timezoneCommand(ctx, ag, cmd.Arg, reply)
 	case "sh":
 		go m.shell(agentID, cmd.Arg, reply)
+	case "get":
+		go m.getFile(agentID, chatRef{m: m, msg: msg}, cmd.Arg, reply)
+	case "git":
+		go m.gitCommand(agentID, cmd.Arg, reply)
 	case "unlink":
 		if route == nil {
 			reply("This chat is not linked; it reaches *" + ag.Name + "* as the account's fallback agent. Change that in hermitator.")

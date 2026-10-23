@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -115,5 +116,71 @@ func TestScheduleFromChat(t *testing.T) {
 	}
 	if again, _ := e.st.Task(ctx, in.ID); !again.NextRun.Equal(in.NextRun) {
 		t.Fatal("/tasks run moved the next run")
+	}
+}
+
+// /get sends a sandbox file to the chat at once; a folder goes as a zip.
+func TestGetFile(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	spec, _ := e.m.Spec(e.agent)
+	ws := filepath.Join(spec.Dir, "workspace")
+	os.MkdirAll(filepath.Join(ws, "site", "css"), 0o755)
+	os.WriteFile(filepath.Join(ws, "report.txt"), []byte("the report"), 0o644)
+	os.WriteFile(filepath.Join(ws, "site", "css", "a.css"), []byte("body{}"), 0o644)
+
+	e.m.HandleMessage(ctx, e.msg(chat, "/get report.txt", true))
+	if got := e.rec.wait(t, "file"); got.body != "|the report" {
+		t.Fatalf("/get file = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/get site", true))
+	if got := e.rec.wait(t, "file"); !strings.HasPrefix(got.body, "|PK") {
+		t.Fatalf("/get folder = %.20q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/get nope.txt", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "nope.txt") || !strings.Contains(got.body, "exit") {
+		t.Fatalf("/get missing = %q", got.body)
+	}
+	if turns, _ := e.st.Turns(ctx, e.agent.ID, 1); len(turns) != 0 {
+		t.Fatal("/get ran a model turn")
+	}
+}
+
+// /git says which repositories have work that exists nowhere else.
+func TestGitCommand(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	spec, _ := e.m.Spec(e.agent)
+	ws := filepath.Join(spec.Dir, "workspace")
+	git := func(dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	shop := filepath.Join(ws, "shop")
+	os.MkdirAll(shop, 0o755)
+	git(shop, "init", "-q", "-b", "main")
+	os.WriteFile(filepath.Join(shop, "a.txt"), []byte("a"), 0o644)
+	git(shop, "add", "a.txt")
+	git(shop, "commit", "-q", "-m", "Add the navbar")
+	os.WriteFile(filepath.Join(shop, "b.txt"), []byte("b"), 0o644)
+
+	e.m.HandleMessage(ctx, e.msg(chat, "/git", true))
+	got := e.rec.wait(t, "text")
+	if !strings.Contains(got.body, "*/workspace/shop* (main): 1 uncommitted file, no remote, 1 commit") || !strings.Contains(got.body, ": Add the navbar") {
+		t.Fatalf("/git = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/git shop", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "?? b.txt") || !strings.Contains(got.body, "Add the navbar") {
+		t.Fatalf("/git shop = %q", got.body)
+	}
+	if formatRepos("") != "No git repositories under /workspace." {
+		t.Fatal("no repos")
 	}
 }
