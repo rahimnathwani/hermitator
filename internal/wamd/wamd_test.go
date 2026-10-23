@@ -28,6 +28,9 @@ func TestFormat(t *testing.T) {
 		// Wider tables go in a monospace block with columns lined up.
 		{"| Name | Status | Time |\n|---|---|---|\n| build | **ok** | 3s |\n| tests | failed | 2m 10s |",
 			"```\nName   Status  Time\nbuild  ok      3s\ntests  failed  2m 10s\n```"},
+		// Too wide for a phone, they become a record per row.
+		{"| Service | Region | Version | Status |\n|---|---|---|---|\n| **api** | eu-west-1 | v2.14.3 | ✅ healthy |\n| worker | eu-west-1 | | `degraded` |",
+			"*api*\nRegion: eu-west-1\nVersion: v2.14.3\nStatus: ✅ healthy\n\n*worker*\nRegion: eu-west-1\nStatus: `degraded`"},
 		// A table inside a code block is left alone, as is a lone pipe line.
 		{"```\n| a | b |\n|---|---|\n```", "```\n| a | b |\n|---|---|\n```"},
 		{"a | b\nnot a table", "a | b\nnot a table"},

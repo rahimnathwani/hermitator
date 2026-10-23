@@ -365,7 +365,11 @@ session's running total, which its budget counts), and pi is aborted
 once the cost it streams crosses it. Either stops after the model call
 that crossed, so the limit can be exceeded by one call.
 
-`/md` draws a reply again for a phone. The host keeps the Markdown of the
+WhatsApp has no tables, so `wamd` rewrites them: two columns as
+`*key*: value` lines, wider ones as a monospace block when it fits across
+a phone held upright (34 characters), and otherwise as a record per row,
+headed by its first cell, with a `Header: value` line for each other cell.
+`/md` draws a reply again for a phone, tables and all. The host keeps the Markdown of the
 last ten replies in each chat (agent replies and `/sh` output), with the
 IDs of the messages they went out as, so a reply or a 🖼 reaction can name
 one. It turns the Markdown into an escaped HTML page (`wamd.HTML`), writes

@@ -86,11 +86,17 @@ func tableCells(line string) []string {
 	return cells
 }
 
+// maxMonoWidth is the widest a monospace line can be before WhatsApp
+// wraps it on a phone held upright, scrambling a table's columns.
+const maxMonoWidth = 34
+
 // formatTable renders a pipe table for a phone. Tables do not exist in
 // WhatsApp, and agents write them however often they are told not to.
-// Two columns read well as a list of "*key*: value" lines; anything
-// wider goes in a monospace block with its columns lined up, which is
-// the best a phone can do.
+// Two columns read well as a list of "*key*: value" lines. Wider tables
+// go in a monospace block with their columns lined up when that fits
+// across a phone, and otherwise become one record per row, headed by its
+// first cell, with a "Header: value" line for each other cell. /md draws
+// the table itself.
 func formatTable(lines []string) []string {
 	header := tableCells(lines[0])
 	var rows [][]string
@@ -130,6 +136,13 @@ func formatTable(lines []string) []string {
 				widths[i] = max(widths[i], utf8.RuneCountInString(plainCell(cell(row, i))))
 			}
 		}
+		total := 0
+		for _, w := range widths {
+			total += w + 2
+		}
+		if total-2 > maxMonoWidth {
+			return tableRecords(header, rows)
+		}
 		out = append(out, "```")
 		for _, row := range all {
 			var b strings.Builder
@@ -144,6 +157,36 @@ func formatTable(lines []string) []string {
 			out = append(out, strings.TrimRight(b.String(), " "))
 		}
 		out = append(out, "```")
+	}
+	return out
+}
+
+// tableRecords writes each row of a table as a record: its first cell
+// in bold, then a line per other cell that has something in it.
+func tableRecords(header []string, rows [][]string) []string {
+	var out []string
+	for i, row := range rows {
+		if i > 0 {
+			out = append(out, "")
+		}
+		title := ""
+		if len(row) > 0 {
+			title = strings.ReplaceAll(formatInline(row[0]), "*", "")
+		}
+		if title != "" {
+			out = append(out, "*"+title+"*")
+		}
+		for j := 1; j < len(header) && j < len(row); j++ {
+			if row[j] == "" {
+				continue
+			}
+			name := strings.ReplaceAll(formatInline(header[j]), "*", "")
+			if name == "" {
+				out = append(out, formatInline(row[j]))
+			} else {
+				out = append(out, name+": "+formatInline(row[j]))
+			}
+		}
 	}
 	return out
 }
