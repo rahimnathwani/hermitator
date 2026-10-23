@@ -434,6 +434,23 @@ func (m *Manager) Abort(agentID string) bool {
 	return aborted
 }
 
+// StopAll aborts an agent's running turn and withdraws every message
+// waiting for one, as after an outage, when they would each start a turn.
+// It reports whether a turn was running and how many it withdrew.
+func (m *Manager) StopAll(agentID string) (aborted bool, withdrawn int) {
+	var dropped []Message
+	m.actor(agentID).call(func(a *actor) error {
+		aborted = a.abort()
+		dropped, a.pending = a.pending, nil
+		return nil
+	})
+	for _, msg := range dropped {
+		m.answered(msg)
+		chatRef{m: m, msg: msg}.react("⏹")
+	}
+	return aborted, len(dropped)
+}
+
 // ErrBusy is returned when an agent is in the middle of a turn.
 var ErrBusy = errors.New("the agent is in the middle of a turn")
 

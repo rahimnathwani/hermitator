@@ -66,6 +66,11 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) (queued bool) 
 		m.link(ctx, acct, msg, cmd.Arg, owner, reply)
 		return false
 	}
+	if isCmd && cmd.Name == "agents" && owner {
+		// Before routing: it is how an unlinked chat finds what to link.
+		reply(m.agentsText(ctx, acct, msg))
+		return false
+	}
 
 	route, err := m.store.Route(ctx, acct.ID, msg.Chat)
 	var agentID string
@@ -161,8 +166,9 @@ func (g *linkGuard) fail(sender string) {
 	g.failures[sender] = append(g.failures[sender], time.Now())
 }
 
-func (m *Manager) link(ctx context.Context, acct *store.Account, msg Message, code string, owner bool, reply func(string)) {
+func (m *Manager) link(ctx context.Context, acct *store.Account, msg Message, arg string, owner bool, reply func(string)) {
 	who := msg.Sender
+	code := arg
 	if !owner && m.links.blocked(who) {
 		return
 	}
@@ -170,7 +176,7 @@ func (m *Manager) link(ctx context.Context, acct *store.Account, msg Message, co
 	code = strings.ToUpper(strings.TrimSpace(code))
 	if code == "" {
 		if owner {
-			reply("Usage: /link CODE. You will find the code on the agent's page in hermitator.")
+			reply("Usage: /link CODE, with the code from the agent's page in hermitator, or /link NAME for one of your agents (/agents lists them).")
 		}
 		return
 	}
@@ -178,6 +184,15 @@ func (m *Manager) link(ctx context.Context, acct *store.Account, msg Message, co
 	var ag *store.Agent
 	if err == nil {
 		ag, err = m.store.Agent(ctx, agentID)
+	} else if owner {
+		// The owner may name the agent instead: they can already run
+		// anything in it, so a code proves nothing more.
+		var problem string
+		if ag, problem = m.agentNamed(ctx, acct.UserID, arg); problem != "" {
+			reply(problem)
+			return
+		}
+		err = nil
 	}
 	if err != nil || ag.UserID != acct.UserID {
 		if !owner {
@@ -209,6 +224,51 @@ func (m *Manager) link(ctx context.Context, acct *store.Account, msg Message, co
 	reply(text)
 }
 
+// agentNamed finds one of the user's agents by name, or says why not.
+func (m *Manager) agentNamed(ctx context.Context, userID, name string) (*store.Agent, string) {
+	agents, _ := m.store.Agents(ctx, userID)
+	var found []*store.Agent
+	for _, a := range agents {
+		if strings.EqualFold(a.Name, strings.TrimSpace(name)) {
+			found = append(found, a)
+		}
+	}
+	switch len(found) {
+	case 1:
+		return found[0], ""
+	case 0:
+		return nil, fmt.Sprintf("That is not a valid link code, and you have no agent called %q. /agents lists them.", strings.TrimSpace(name))
+	}
+	return nil, fmt.Sprintf("You have %d agents called %q; link this chat with the code from the agent's page instead.", len(found), strings.TrimSpace(name))
+}
+
+// agentsText lists the user's agents, and which this chat reaches.
+func (m *Manager) agentsText(ctx context.Context, acct *store.Account, msg Message) string {
+	agents, _ := m.store.Agents(ctx, acct.UserID)
+	if len(agents) == 0 {
+		return "You have no agents yet; create one in hermitator."
+	}
+	here := acct.FallbackAgentID
+	if route, err := m.store.Route(ctx, acct.ID, msg.Chat); err == nil {
+		here = route.AgentID
+	}
+	var b strings.Builder
+	b.WriteString("*Your agents*\n")
+	for i, a := range agents {
+		st := m.Status(a.ID)
+		state := st.State
+		if state == "" {
+			state = a.State
+		}
+		fmt.Fprintf(&b, "\n%d. *%s* · %s · %s", i+1, a.Name, harnessName(a.Harness), describeState(state, st.Busy))
+		if a.ID == here {
+			b.WriteString(" ← this chat")
+		}
+	}
+	b.WriteString("\n\n/link NAME links this chat to one.")
+	return b.String()
+}
+
 // command runs an owner's command; it reports whether one queued a turn.
 func (m *Manager) command(ctx context.Context, acct *store.Account, agentID string, route *store.Route, msg Message, cmd Command, reply func(string)) (queued bool) {
 	ag, err := m.store.Agent(ctx, agentID)
@@ -217,7 +277,7 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 	}
 	switch cmd.Name {
 	case "help":
-		reply(helpText)
+		reply(commandHelp(cmd.Arg))
 	case "retry":
 		return m.retry(ctx, agentID, msg, reply)
 	case "tasks":
@@ -244,6 +304,10 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		go m.shell(agentID, chatRef{m: m, msg: msg}, cmd.Arg)
 	case "md":
 		go m.renderCommand(m.ctx, agentID, chatRef{m: m, msg: msg}, msg, cmd.Arg)
+	case "remember":
+		go m.remember(ctx, ag, cmd.Arg, reply)
+	case "awake":
+		m.awakeCommand(ctx, agentID, cmd.Arg, m.location(ctx, ag), reply)
 	case "get":
 		go m.getFile(agentID, chatRef{m: m, msg: msg}, cmd.Arg, reply)
 	case "git":
@@ -269,6 +333,16 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 			reply("😴 *" + ag.Name + "* is stopped. It uses no memory until the next message.")
 		}
 	case "stop":
+		if strings.EqualFold(cmd.Arg, "all") {
+			aborted, n := m.StopAll(agentID)
+			switch {
+			case aborted || n > 0:
+				reply(fmt.Sprintf("⏹ Stopped %s and withdrew %s.", map[bool]string{true: "the current turn", false: "nothing running"}[aborted], count(n, "waiting message")))
+			default:
+				reply("Nothing is running or waiting.")
+			}
+			return false
+		}
 		if m.Abort(agentID) {
 			reply("⏹ Stopping the current turn.")
 		} else {

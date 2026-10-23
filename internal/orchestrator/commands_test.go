@@ -273,3 +273,98 @@ func TestRenderReplies(t *testing.T) {
 		t.Fatalf("left behind in render/: %q", names)
 	}
 }
+
+func TestSmallCommands(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	spec, _ := e.m.Spec(e.agent)
+
+	// /agents and /link NAME work from a chat linked to nothing yet.
+	e.m.HandleMessage(ctx, e.msg(chat, "/agents", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "1. *bot* · Claude Code") || strings.Contains(got.body, "← this chat") {
+		t.Fatalf("/agents = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/link nobody", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, `no agent called "nobody"`) {
+		t.Fatalf("/link nobody = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.from("15550009999", "/link BOT"))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "not valid") {
+		t.Fatalf("a stranger's /link NAME = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/link BOT", true))
+	if got := e.rec.wait(t, "text"); !strings.HasPrefix(got.body, "✅ Linked this chat to *bot*") {
+		t.Fatalf("/link BOT = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/agents", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "← this chat") {
+		t.Fatalf("/agents after linking = %q", got.body)
+	}
+
+	// /remember writes under the heading the review before sleep uses.
+	e.m.HandleMessage(ctx, e.msg(chat, "/remember Sam owns   billing; ask him first", true))
+	if got := e.rec.wait(t, "text"); !strings.HasPrefix(got.body, "🧠 Added to ~/.claude/CLAUDE.md: - 20") {
+		t.Fatalf("/remember = %q", got.body)
+	}
+	memory, _ := os.ReadFile(filepath.Join(spec.Dir, "home", ".claude", "CLAUDE.md"))
+	if !strings.Contains(string(memory), "\n## Remembered\n- 20") || !strings.HasSuffix(string(memory), ": Sam owns billing; ask him first\n") {
+		t.Fatalf("CLAUDE.md = %q", memory)
+	}
+
+	// /awake holds the sandbox until /awake off.
+	holds := func() (n int) {
+		e.m.actor(e.agent.ID).call(func(a *actor) error { n = a.holds; return nil })
+		return n
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/awake 2h", true))
+	if got := e.rec.wait(t, "text"); !strings.HasPrefix(got.body, "☕ Kept awake until") || holds() != 1 {
+		t.Fatalf("/awake 2h = %q, holds %d", got.body, holds())
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/awake 3h", true))
+	e.rec.wait(t, "text")
+	e.m.HandleMessage(ctx, e.msg(chat, "/awake", true))
+	if got := e.rec.wait(t, "text"); !strings.HasPrefix(got.body, "☕ Kept awake until") {
+		t.Fatalf("/awake = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/awake off", true))
+	e.rec.wait(t, "text")
+	deadline := time.Now().Add(2 * time.Second)
+	for holds() != 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if holds() != 0 {
+		t.Fatalf("holds after /awake off = %d", holds())
+	}
+
+	// /stop all aborts the turn and withdraws what waits behind it.
+	e.m.HandleMessage(ctx, e.msg(chat, "sleep", true))
+	for !e.m.Status(e.agent.ID).Busy {
+		time.Sleep(10 * time.Millisecond)
+	}
+	// From another chat, so they wait rather than steer the turn.
+	other := "other@s.whatsapp.net"
+	e.link(t, other)
+	e.m.HandleMessage(ctx, e.msg(other, "one", true))
+	e.m.HandleMessage(ctx, e.msg(other, "two", true))
+	e.m.HandleMessage(ctx, e.msg(chat, "/stop all", true))
+	if got := e.rec.wait(t, "text"); got.body != "⏹ Stopped the current turn and withdrew 2 waiting messages." {
+		t.Fatalf("/stop all = %q", got.body)
+	}
+	e.idle(t)
+	prompts, _ := os.ReadFile(filepath.Join(spec.Dir, "home", "prompts"))
+	if strings.Contains(string(prompts), `"one`) || strings.Contains(string(prompts), "two") {
+		t.Fatalf("a withdrawn message ran: %s", prompts)
+	}
+
+	if got := commandHelp("/MD"); !strings.HasPrefix(got, "/md: ") || strings.Count(got, "\n") != 0 {
+		t.Fatalf("/help md = %q", got)
+	}
+	if got := commandHelp("exit"); !strings.HasPrefix(got, "/sleep: ") {
+		t.Fatalf("/help exit = %q", got)
+	}
+	if got := commandHelp("nope"); got != "There is no /nope command; /help lists them." {
+		t.Fatalf("/help nope = %q", got)
+	}
+}

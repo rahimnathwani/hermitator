@@ -23,10 +23,12 @@ type actor struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	pending    []Message
-	debounce   *time.Timer
-	turn       *activeTurn
-	holds      int
+	pending  []Message
+	debounce *time.Timer
+	turn     *activeTurn
+	holds    int
+	// awake is the owner's /awake, one of the holds.
+	awake      *ownerHold
 	lastActive time.Time
 	state      string
 

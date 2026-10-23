@@ -1,9 +1,13 @@
 package orchestrator
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
+
+	"github.com/rahimnathwani/hermitator/internal/store"
 )
 
 // Chat commands that answer from the sandbox without the model: each is
@@ -118,3 +122,39 @@ func formatRepos(out string) string {
 
 // count is "1 file" or "3 files".
 func count(n int, what string) string { return strconv.Itoa(n) + " " + what + plural(n) }
+
+// rememberScript appends the line on stdin to a memory file under a
+// "## Remembered" heading, as the review before sleep does. The line
+// comes on stdin so nothing in it needs quoting.
+const rememberScript = `f=$HOME/$1
+mkdir -p "$(dirname "$f")" || exit 1
+grep -q '^## Remembered' "$f" 2>/dev/null || printf '\n## Remembered\n' >> "$f" || exit 1
+cat >> "$f"`
+
+// remember adds a line to the agent's memory file, which its harness
+// reads at the start of every conversation: telling the agent costs a
+// turn, and it may word the fact its own way.
+func (m *Manager) remember(ctx context.Context, ag *store.Agent, text string, reply func(string)) {
+	text = strings.Join(strings.Fields(text), " ")
+	file := memoryFiles[ag.Harness]
+	switch {
+	case text == "":
+		reply("Usage: /remember FACT, for example /remember Sam owns the billing service; ask him before changing it")
+		return
+	case file == "":
+		reply("*" + ag.Name + "* has no memory file.")
+		return
+	case len(text) > 1000:
+		reply("That is over 1000 characters; keep the detail in a file and remember where it is.")
+		return
+	}
+	line := fmt.Sprintf("- %s: %s\n", time.Now().In(m.location(ctx, ag)).Format("2006-01-02"), text)
+	argv := []string{"sh", "-c", rememberScript, "remember", strings.TrimPrefix(file, "~/")}
+	m.sandboxJob(ag.ID, "remember", argv, []byte(line), reply, func(r jobResult) {
+		if !r.exit.OK() {
+			reply(formatShell(string(r.out), r.exit))
+			return
+		}
+		reply("🧠 Added to " + file + ": " + strings.TrimSpace(line) + "\n\n*" + ag.Name + "* reads it at the start of every conversation; /new starts one.")
+	})
+}

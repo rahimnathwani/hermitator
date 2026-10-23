@@ -249,7 +249,8 @@ hermitator answers itself:
 |---|---|
 | `/status` | What the agent is doing, its state and disk use |
 | `/sleep` | Suspend it now (alias `/exit`) |
-| `/stop` | Abort the current turn |
+| `/stop`, `/stop all` | Abort the current turn; `all` also withdraws the messages waiting for one |
+| `/awake 2h`, `/awake off` | Keep the sandbox from sleeping (up to 12 hours), so a background job runs on |
 | `/retry` | Run the last message again, after a failure or a restart |
 | `/sh COMMAND` | Run a shell command in the sandbox and get its output, without the model |
 | `/md`, `/md pdf`, `/md file` | The last reply again as a picture (a PDF when it is long), for tables and wide output; reply to an older one with `/md`, or react 🖼 to it, to pick it |
@@ -261,6 +262,7 @@ hermitator answers itself:
 | `/usage` | Claude subscription use (5-hour and weekly, with pace) and spending |
 | `/sessions`, `/resume N` | Past conversations, and going back to one (`/new` keeps them) |
 | `/fork` | Branch the next message off this conversation (Claude Code) |
+| `/remember FACT` | Add a dated line to the agent's memory file, which it reads at the start of every conversation |
 | `/history on`, `/history off` | Keep this chat's messages, everyone's, in a file the agent can search |
 | `/preview PORT`, `/previews`, `/previews off` | A link to a web server the agent runs; list them; turn them all off |
 | `/timezone Europe/London` | The time zone schedules use (also in Settings) |
@@ -271,8 +273,9 @@ hermitator answers itself:
 | `/once opus max: …` | Use another model or effort for this one message |
 | `/switch claude` or `/switch pi` | Change harness, same workspace |
 | `/listen` | Show or change which messages wake the agent in this chat |
-| `/link CODE`, `/unlink` | Bind this chat to an agent, or unbind it |
-| `/help` | The list |
+| `/link CODE`, `/link NAME`, `/unlink` | Bind this chat to an agent (by name, for you), or unbind it |
+| `/agents` | Your agents, and which one this chat reaches |
+| `/help`, `/help COMMAND` | The list, or the lines about one command |
 
 Model and effort changes apply from the next message, and the conversation
 carries on. Claude Code takes `fable`, `opus`, `sonnet`, `haiku` or a full

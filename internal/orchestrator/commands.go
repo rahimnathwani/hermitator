@@ -48,6 +48,33 @@ var commandAliases = map[string]string{
 	"md":       "md",
 	"render":   "md",
 	"img":      "md",
+	"remember": "remember",
+	"awake":    "awake",
+	"agents":   "agents",
+}
+
+// commandHelp is /help, or with a command named, the lines of it that
+// mention that command.
+func commandHelp(arg string) string {
+	name := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(arg), "/"))
+	if name == "" {
+		return helpText
+	}
+	canon := commandAliases[name]
+	if canon == "" {
+		return "There is no /" + name + " command; /help lists them."
+	}
+	var lines []string
+	for _, line := range strings.Split(helpText, "\n") {
+		if strings.Contains(line, "/"+canon+" ") || strings.Contains(line, "/"+canon+":") || strings.Contains(line, "/"+name+")") ||
+			strings.Contains(line, "/"+name+" ") || strings.Contains(line, "/"+name+":") {
+			lines = append(lines, line)
+		}
+	}
+	if len(lines) == 0 {
+		return helpText
+	}
+	return strings.Join(lines, "\n")
 }
 
 // harnessCommands are slash commands Claude Code and pi take at their own
@@ -102,32 +129,46 @@ func NotACommand(text, harness string) (string, bool) {
 }
 
 const helpText = `*hermitator commands*
-/status: what this agent is doing
-/sleep: suspend the sandbox now (alias /exit)
-/stop: abort the running turn
+
+*The agent*
+/status: what it is doing
+/stop: abort the running turn; /stop all also drops the messages waiting
 /retry: run the last message again, after a failure or a restart
-/sh COMMAND: run a shell command in the sandbox and see its output (no model)
-/md: my last reply again as a picture, for tables and wide output (reply to an older one to pick it; /md pdf, /md file); reacting 🖼 does the same
+/plan: its task list for what it is doing
+/usage: your Claude subscription use and spending
+/sleep: suspend the sandbox now (alias /exit)
+/awake 2h: keep the sandbox from sleeping, for a background job (/awake off)
+
+*Without the model*
+/sh COMMAND: run a shell command in the sandbox and see its output
 /get PATH: send a file (or a folder, zipped) from the sandbox to this chat
 /git [PATH]: uncommitted and unpushed work in the workspace's repositories
-/tasks: scheduled tasks (/tasks pause|resume|run|delete N)
+/md: the last reply again as a picture, for tables and wide output; reply to an older one with /md, or react 🖼 to it, to pick it (/md pdf, /md file)
+/remember FACT: add a line to the agent's memory file, read at the start of every conversation
+/preview PORT: a link to a web server the agent runs; /previews lists them, /previews off turns them off
+
+*Later*
 /in 2h MESSAGE, /at 9am MESSAGE, /every CRON: MESSAGE: schedule a message to the agent
+/tasks: scheduled tasks (/tasks pause|resume|run|delete N)
 /timezone [ZONE]: show or set the time zone schedules use
+
+*Conversation*
 /new: start a fresh conversation, keeping all files (alias /clear)
 /compact: summarise this conversation now, so the next messages re-read less
 /sessions: past conversations; /resume N goes back to one
 /fork: branch the next message off this conversation
-/plan: the agent's task list for what it is doing
-/usage: your Claude subscription use and spending
 /history on|off: keep this chat's messages in a file the agent can search
-/preview PORT: a link to a web server the agent runs; /previews lists them, /previews off turns them off
+
+*Model*
 /model [NAME]: show or change the model (/model default to reset)
 /effort [LEVEL]: show or change how hard it thinks
 /once [MODEL] [EFFORT]: MESSAGE: use them for one message only
 /switch claude|pi: change harness
-/listen: show or change which messages wake the agent here
-/unlink: disconnect this chat from the agent
-/link CODE: connect this chat to an agent
-/help: this message
 
-Anything else goes to the agent.`
+*This chat*
+/listen: show or change which messages wake the agent here
+/link CODE or /link NAME: connect this chat to an agent; /agents lists yours
+/unlink: disconnect this chat from the agent
+/help [COMMAND]: this list, or the lines about one command
+
+Anything else goes to the agent; commands work as replies too.`
