@@ -660,6 +660,17 @@ func writeShared(spec *sandbox.Spec, name string, data []byte) error {
 	return root.WriteFile(name, data, 0o644)
 }
 
+func removeShared(spec *sandbox.Spec, names ...string) {
+	root, err := spec.Shared()
+	if err != nil {
+		return
+	}
+	defer root.Close()
+	for _, n := range names {
+		root.Remove(n)
+	}
+}
+
 func readShared(spec *sandbox.Spec, name string) ([]byte, error) {
 	root, err := spec.Shared()
 	if err != nil {
@@ -916,9 +927,12 @@ func quoteOf(msg Message) *Quote {
 func (c chatRef) ok() bool { return c.msg.AccountID != "" && c.msg.Chat != "" }
 
 // send delivers a message hermitator wrote, already in WhatsApp format.
-func (c chatRef) send(text string) {
+func (c chatRef) send(text string) { c.deliver(text) }
+
+// deliver sends text and returns the IDs of the messages it went out as.
+func (c chatRef) deliver(text string) (sent []string) {
 	if !c.ok() || strings.TrimSpace(text) == "" {
-		return
+		return nil
 	}
 	parts := wamd.Split(text, maxMessage)
 	ids, err := c.m.store.QueueSends(c.m.ctx, c.msg.AccountID, c.msg.Chat, parts, time.Now().Add(sendingFor))
@@ -927,11 +941,12 @@ func (c chatRef) send(text string) {
 		ids = nil
 	}
 	for i, part := range parts {
+		var id string
 		var err error
 		if q := c.quote; q != nil && i == 0 {
-			err = c.m.msgr.SendReply(c.m.ctx, c.msg.AccountID, c.msg.Chat, part, *q)
+			id, err = c.m.msgr.SendReply(c.m.ctx, c.msg.AccountID, c.msg.Chat, part, *q)
 		} else {
-			err = c.m.msgr.SendText(c.m.ctx, c.msg.AccountID, c.msg.Chat, part)
+			id, err = c.m.msgr.SendText(c.m.ctx, c.msg.AccountID, c.msg.Chat, part)
 		}
 		if err != nil {
 			c.m.log.Warn("send reply; will try again", "chat", c.msg.Chat, "err", err)
@@ -940,20 +955,30 @@ func (c chatRef) send(text string) {
 					c.m.store.SendFailed(c.m.ctx, id, time.Now().Add(c.m.cfg.ResendInterval))
 				}
 			}
-			return
+			return sent
 		}
+		sent = append(sent, id)
 		if ids != nil {
 			c.m.store.DeleteSend(c.m.ctx, ids[i])
 		}
 	}
+	return sent
 }
 
 // sendAgent delivers the agent's Markdown, converted for WhatsApp.
 func (c chatRef) sendAgent(text string) {
 	text = c.redact.apply(text)
-	c.send(c.prefix + wamd.Format(text))
+	c.sendMarkdown(c.prefix+wamd.Format(text), text)
 	if c.ok() {
 		c.m.recordHistory(c.msg.AccountID, c.msg.Chat, "you (the agent)", text, time.Now())
+	}
+}
+
+// sendMarkdown sends text and remembers the Markdown it came from, for
+// /md to render.
+func (c chatRef) sendMarkdown(text, md string) {
+	if ids := c.deliver(text); len(ids) > 0 {
+		c.m.replies.add(c.msg.AccountID+"\x00"+c.msg.Chat, md, ids)
 	}
 }
 
@@ -1041,7 +1066,7 @@ func (m *Manager) tellInterrupted(turns []*store.Turn) {
 		case <-time.After(m.cfg.RetryNoticeDelay):
 		}
 		for chat := range pending {
-			if err := m.msgr.SendText(m.ctx, chat[0], chat[1], text); err == nil {
+			if _, err := m.msgr.SendText(m.ctx, chat[0], chat[1], text); err == nil {
 				delete(pending, chat)
 			}
 		}

@@ -113,9 +113,10 @@ type Media struct {
 
 // Messenger sends things back to a chat.
 type Messenger interface {
-	SendText(ctx context.Context, accountID, chat, text string) error
+	// SendText sends text and returns the message's ID.
+	SendText(ctx context.Context, accountID, chat, text string) (string, error)
 	// SendReply sends text quoting an earlier message of the chat.
-	SendReply(ctx context.Context, accountID, chat, text string, q Quote) error
+	SendReply(ctx context.Context, accountID, chat, text string, q Quote) (string, error)
 	// SendNote sends text and returns the message's ID, for Edit.
 	SendNote(ctx context.Context, accountID, chat, text string) (string, error)
 	// Edit replaces the text of a message this account sent recently.

@@ -59,7 +59,7 @@ func (m *Manager) resend(now time.Time) {
 		if !strings.HasPrefix(text, resendNote) {
 			text = resendNote + text
 		}
-		if err := m.msgr.SendText(m.ctx, u.AccountID, u.ChatJID, text); err != nil {
+		if _, err := m.msgr.SendText(m.ctx, u.AccountID, u.ChatJID, text); err != nil {
 			stuck[chat] = true
 			m.store.SendFailed(m.ctx, u.ID, now.Add(min(m.cfg.ResendInterval<<min(u.Attempts, 10), resendMax)))
 			continue

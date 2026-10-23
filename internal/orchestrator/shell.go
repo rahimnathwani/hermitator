@@ -19,15 +19,16 @@ const maxShellOutput = 3000
 // output, without involving the model: quick checks cost nothing and
 // still work when the model is rate-limited or broken. Commands are
 // owner-only, like every chat command.
-func (m *Manager) shell(agentID, command string, reply func(string)) {
+func (m *Manager) shell(agentID string, chat chatRef, command string) {
 	command = strings.TrimSpace(command)
 	if command == "" {
-		reply("Usage: /sh COMMAND, for example /sh git -C /workspace log --oneline -5")
+		chat.send("Usage: /sh COMMAND, for example /sh git -C /workspace log --oneline -5")
 		return
 	}
 	argv := []string{"sh", "-lc", "cd /workspace 2>/dev/null; exec 2>&1; " + command}
-	m.sandboxJob(agentID, "sh", argv, nil, reply, func(r jobResult) {
-		reply(formatShell(string(r.out), r.exit))
+	m.sandboxJob(agentID, "sh", argv, nil, chat.send, func(r jobResult) {
+		// Wide output wraps on a phone; /md draws it as it is.
+		chat.sendMarkdown(formatShell(string(r.out), r.exit), "```\n"+shellOutput(string(r.out))+"\n```")
 	})
 }
 
@@ -72,7 +73,8 @@ func (m *Manager) sandboxJob(agentID, kind string, argv []string, stdin []byte, 
 	done(jobResult{out, exit, spec})
 }
 
-func formatShell(out string, exit spool.Exit) string {
+// shellOutput is the end of a command's output, as much as is sent.
+func shellOutput(out string) string {
 	out = strings.TrimRight(out, "\n")
 	if len(out) > maxShellOutput {
 		cut := len(out) - maxShellOutput
@@ -81,8 +83,12 @@ func formatShell(out string, exit spool.Exit) string {
 		}
 		out = "…" + out[cut:]
 	}
-	// Backticks inside would end WhatsApp's code block early.
-	out = strings.ReplaceAll(out, "```", "'''")
+	// Backticks inside would end a code block early.
+	return strings.ReplaceAll(out, "```", "'''")
+}
+
+func formatShell(out string, exit spool.Exit) string {
+	out = shellOutput(out)
 	status := ""
 	if !exit.OK() {
 		status = "\n" + exit.String()

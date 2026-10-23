@@ -356,34 +356,27 @@ func firstNonEmpty(ss ...string) string {
 }
 
 // SendText implements orchestrator.Messenger.
-func (g *Gateway) SendText(ctx context.Context, accountID, chat, text string) error {
-	cli, jid, err := g.target(accountID, chat)
-	if err != nil {
-		return err
-	}
-	resp, err := cli.SendMessage(ctx, jid, &waE2E.Message{Conversation: proto.String(text)})
-	if err == nil {
-		g.sent.add(resp.ID)
-	}
-	return err
+func (g *Gateway) SendText(ctx context.Context, accountID, chat, text string) (string, error) {
+	return g.SendNote(ctx, accountID, chat, text)
 }
 
 // SendReply implements orchestrator.Messenger: text that quotes an
 // earlier message, so the phone shows what it answers.
-func (g *Gateway) SendReply(ctx context.Context, accountID, chat, text string, q orchestrator.Quote) error {
+func (g *Gateway) SendReply(ctx context.Context, accountID, chat, text string, q orchestrator.Quote) (string, error) {
 	cli, jid, err := g.target(accountID, chat)
 	if err != nil {
-		return err
+		return "", err
 	}
 	info := &waE2E.ContextInfo{StanzaID: proto.String(q.MessageID), QuotedMessage: &waE2E.Message{Conversation: proto.String(q.Text)}}
 	if sender, err := types.ParseJID(q.Sender); err == nil && !sender.IsEmpty() {
 		info.Participant = proto.String(sender.ToNonAD().String())
 	}
 	resp, err := cli.SendMessage(ctx, jid, &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String(text), ContextInfo: info}})
-	if err == nil {
-		g.sent.add(resp.ID)
+	if err != nil {
+		return "", err
 	}
-	return err
+	g.sent.add(resp.ID)
+	return resp.ID, nil
 }
 
 // SendNote implements orchestrator.Messenger: a text whose ID comes

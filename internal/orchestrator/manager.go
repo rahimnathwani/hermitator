@@ -72,9 +72,10 @@ type Manager struct {
 	log   *slog.Logger
 	hub   hub
 
-	msgr   Messenger
-	egress egressCache
-	codex  codexState
+	msgr    Messenger
+	egress  egressCache
+	codex   codexState
+	replies sentReplies
 	// bg counts background deliveries in flight, and loops the goroutines
 	// that run until the context ends (actors, the reaper, the scheduler,
 	// the resender), for Wait. stopped, under mu, is set by Wait, after
@@ -484,9 +485,11 @@ func (m *Manager) holdAwake(ctx context.Context, agentID string, touch bool) (re
 
 type nopMessenger struct{}
 
-func (nopMessenger) SendText(context.Context, string, string, string) error { return nil }
-func (nopMessenger) SendReply(context.Context, string, string, string, Quote) error {
-	return nil
+func (nopMessenger) SendText(context.Context, string, string, string) (string, error) {
+	return "", nil
+}
+func (nopMessenger) SendReply(context.Context, string, string, string, Quote) (string, error) {
+	return "", nil
 }
 func (nopMessenger) SendNote(context.Context, string, string, string) (string, error) {
 	return "", nil

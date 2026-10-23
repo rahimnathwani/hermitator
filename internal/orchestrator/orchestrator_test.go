@@ -152,6 +152,10 @@ type sent struct {
 	kind, chat, body string
 	// quote is the ID of the message a text replied to, if any.
 	quote string
+	// name is a file's.
+	name string
+	// id is the ID a text went out as.
+	id string
 }
 
 type recorder struct {
@@ -162,6 +166,7 @@ type recorder struct {
 	// not connected.
 	failTexts atomic.Int32
 	notes     atomic.Int32
+	texts     atomic.Int32
 }
 
 func (r *recorder) add(s sent) {
@@ -170,42 +175,44 @@ func (r *recorder) add(s sent) {
 	r.mu.Unlock()
 	r.ch <- s
 }
-func (r *recorder) SendText(_ context.Context, _, chat, text string) error {
+func (r *recorder) SendText(_ context.Context, _, chat, text string) (string, error) {
 	if r.failTexts.Add(-1) >= 0 {
-		return errors.New("not connected")
+		return "", errors.New("not connected")
 	}
 	r.failTexts.Store(0)
-	r.add(sent{"text", chat, text, ""})
-	return nil
+	id := fmt.Sprintf("text-%d", r.texts.Add(1))
+	r.add(sent{kind: "text", chat: chat, body: text, id: id})
+	return id, nil
 }
-func (r *recorder) SendReply(_ context.Context, _, chat, text string, q Quote) error {
-	r.add(sent{"text", chat, text, q.MessageID})
-	return nil
+func (r *recorder) SendReply(_ context.Context, _, chat, text string, q Quote) (string, error) {
+	id := fmt.Sprintf("text-%d", r.texts.Add(1))
+	r.add(sent{kind: "text", chat: chat, body: text, quote: q.MessageID, id: id})
+	return id, nil
 }
 func (r *recorder) SendNote(_ context.Context, _, chat, text string) (string, error) {
 	id := fmt.Sprintf("note-%d", r.notes.Add(1))
-	r.add(sent{"note", chat, id + "|" + text, ""})
+	r.add(sent{kind: "note", chat: chat, body: id + "|" + text})
 	return id, nil
 }
 func (r *recorder) Edit(_ context.Context, _, chat, id, text string) error {
-	r.add(sent{"edit", chat, id + "|" + text, ""})
+	r.add(sent{kind: "edit", chat: chat, body: id + "|" + text})
 	return nil
 }
 func (r *recorder) SendFile(_ context.Context, _, chat, name string, data []byte, caption string) error {
-	r.add(sent{"file", chat, caption + "|" + string(data), ""})
+	r.add(sent{kind: "file", chat: chat, body: caption + "|" + string(data), name: name})
 	return nil
 }
 func (r *recorder) SendPoll(_ context.Context, _, chat, question string, options []string) error {
-	r.add(sent{"poll", chat, question + "|" + strings.Join(options, "|"), ""})
+	r.add(sent{kind: "poll", chat: chat, body: question + "|" + strings.Join(options, "|")})
 	return nil
 }
 func (r *recorder) React(_ context.Context, _, chat, _, _, emoji string) error {
-	r.add(sent{"react", chat, emoji, ""})
+	r.add(sent{kind: "react", chat: chat, body: emoji})
 	return nil
 }
 func (r *recorder) Typing(context.Context, string, string, bool) error { return nil }
 func (r *recorder) MarkRead(_ context.Context, _, chat, _, id string) error {
-	r.add(sent{"read", chat, id, ""})
+	r.add(sent{kind: "read", chat: chat, body: id})
 	return nil
 }
 

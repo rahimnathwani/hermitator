@@ -241,7 +241,9 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 	case "timezone":
 		m.timezoneCommand(ctx, ag, cmd.Arg, reply)
 	case "sh":
-		go m.shell(agentID, cmd.Arg, reply)
+		go m.shell(agentID, chatRef{m: m, msg: msg}, cmd.Arg)
+	case "md":
+		go m.renderCommand(m.ctx, agentID, chatRef{m: m, msg: msg}, msg, cmd.Arg)
 	case "get":
 		go m.getFile(agentID, chatRef{m: m, msg: msg}, cmd.Arg, reply)
 	case "git":

@@ -365,6 +365,15 @@ session's running total, which its budget counts), and pi is aborted
 once the cost it streams crosses it. Either stops after the model call
 that crossed, so the limit can be exceeded by one call.
 
+`/md` draws a reply again for a phone. The host keeps the Markdown of the
+last ten replies in each chat (agent replies and `/sh` output), with the
+IDs of the messages they went out as, so a reply or a 🖼 reaction can name
+one. It turns the Markdown into an escaped HTML page (`wamd.HTML`), writes
+it to `/shared/render`, and has the sandbox draw it with the image's
+Python Playwright as a spool job: a PNG, or a PDF when the page is much
+taller than wide. The host runs no browser, and the page loads nothing
+else. If drawing fails, the Markdown goes as a file.
+
 Every text to a chat is written to the `unsent` table before it is sent
 and deleted once WhatsApp has taken it. One that fails is retried, in
 order within its chat, after 10 seconds and then twice as long each time

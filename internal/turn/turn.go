@@ -26,6 +26,9 @@ const (
 	// HoldsDir holds a file per running `hermitator-guest hold`, which
 	// keeps the sandbox awake.
 	HoldsDir = "holds"
+	// RenderDir holds pages the host has the sandbox draw for /md, and
+	// the pictures it draws, for as long as that takes.
+	RenderDir = "render"
 	// TasksFile lists the agent's scheduled tasks, written by the host.
 	TasksFile = "tasks.json"
 )

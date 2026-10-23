@@ -184,3 +184,92 @@ func TestGitCommand(t *testing.T) {
 		t.Fatal("no repos")
 	}
 }
+
+// fakePython stands in for the image's Python Playwright: it "draws" the
+// page by copying its HTML, so the test can see what would be drawn.
+const fakePython = `#!/bin/sh
+cat >/dev/null
+[ -f "$HOME/render-fail" ] && { echo "chromium crashed"; exit 1; }
+kind=$4
+[ "$kind" = auto ] && kind=png
+{ printf '%s:' "$kind"; cat "$HERMITATOR_SHARED/$2"; } > "$HERMITATOR_SHARED/$3.$kind"
+echo "$kind"
+`
+
+// /md sends a reply again drawn as a picture: the latest, the one
+// replied to, or the one reacted to with 🖼.
+func TestRenderReplies(t *testing.T) {
+	bin := t.TempDir()
+	os.WriteFile(filepath.Join(bin, "python3"), []byte(fakePython), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	spec, _ := e.m.Spec(e.agent)
+
+	e.m.HandleMessage(ctx, e.msg(chat, "/md", true))
+	if got := e.rec.wait(t, "text"); got.body != "There is no reply here to render yet." {
+		t.Fatalf("/md with nothing = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "hello", true))
+	answer := e.rec.wait(t, "text")
+	e.idle(t)
+	e.m.HandleMessage(ctx, e.msg(chat, "/md", true))
+	got := e.rec.wait(t, "file")
+	if got.name != "reply.png" || !strings.HasPrefix(got.body, "|png:<!doctype html>") || !strings.Contains(got.body, "<strong>echo:</strong> hello") {
+		t.Fatalf("/md = %s %.300q", got.name, got.body)
+	}
+
+	// /sh output counts as a reply too, and is drawn as a code block.
+	e.m.HandleMessage(ctx, e.msg(chat, "/sh echo 'a  b  c'", true))
+	e.rec.wait(t, "text")
+	e.m.HandleMessage(ctx, e.msg(chat, "/md pdf", true))
+	if got := e.rec.wait(t, "file"); got.name != "reply.pdf" || !strings.Contains(got.body, "<pre><code>a  b  c</code></pre>") {
+		t.Fatalf("/md pdf after /sh = %s %.300q", got.name, got.body)
+	}
+
+	// Replying with /md picks an older reply.
+	again := reply(e.msg(chat, "/md", true), answer.body)
+	again.QuotedID = answer.id
+	e.m.HandleMessage(ctx, again)
+	if got := e.rec.wait(t, "file"); !strings.Contains(got.body, "echo:</strong> hello") {
+		t.Fatalf("/md as a reply = %.300q", got.body)
+	}
+	// So does reacting 🖼 to it; other reactions, or on other messages, do nothing.
+	react := e.msg(chat, "", true)
+	react.ReactsTo, react.Reaction = answer.id, "🖼️"
+	e.m.HandleMessage(ctx, react)
+	if got := e.rec.wait(t, "file"); !strings.Contains(got.body, "echo:</strong> hello") {
+		t.Fatalf("🖼 = %.300q", got.body)
+	}
+
+	e.m.HandleMessage(ctx, e.msg(chat, "/md file", true))
+	if got := e.rec.wait(t, "file"); got.name != "reply.md" || !strings.HasPrefix(got.body, "|```\na  b  c\n```") {
+		t.Fatalf("/md file = %s %q", got.name, got.body)
+	}
+
+	// When drawing fails, the Markdown still arrives.
+	os.WriteFile(filepath.Join(spec.Dir, "home", "render-fail"), nil, 0o644)
+	e.m.HandleMessage(ctx, e.msg(chat, "/md", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "Could not draw it (chromium crashed") {
+		t.Fatalf("failure = %q", got.body)
+	}
+	if got := e.rec.wait(t, "file"); got.name != "reply.md" {
+		t.Fatalf("fallback = %s", got.name)
+	}
+	// The files go once the send is done.
+	entries, _ := os.ReadDir(filepath.Join(spec.SharedDir(), "render"))
+	for deadline := time.Now().Add(5 * time.Second); len(entries) > 0 && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+		entries, _ = os.ReadDir(filepath.Join(spec.SharedDir(), "render"))
+	}
+	if len(entries) != 0 {
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("left behind in render/: %q", names)
+	}
+}

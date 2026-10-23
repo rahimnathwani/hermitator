@@ -45,6 +45,9 @@ var commandAliases = map[string]string{
 	"every":    "every",
 	"get":      "get",
 	"git":      "git",
+	"md":       "md",
+	"render":   "md",
+	"img":      "md",
 }
 
 // harnessCommands are slash commands Claude Code and pi take at their own
@@ -104,6 +107,7 @@ const helpText = `*hermitator commands*
 /stop: abort the running turn
 /retry: run the last message again, after a failure or a restart
 /sh COMMAND: run a shell command in the sandbox and see its output (no model)
+/md: my last reply again as a picture, for tables and wide output (reply to an older one to pick it; /md pdf, /md file); reacting 🖼 does the same
 /get PATH: send a file (or a folder, zipped) from the sandbox to this chat
 /git [PATH]: uncommitted and unpushed work in the workspace's repositories
 /tasks: scheduled tasks (/tasks pause|resume|run|delete N)

@@ -13,10 +13,20 @@ var stopReactions = map[string]bool{"❌": true, "🛑": true, "⛔": true, "�
 
 // reaction acts on an owner's reaction to one of the chat's messages. A
 // stop emoji on a message the running turn answers aborts the turn; on
-// one still waiting for its turn, it withdraws the message. Any other
-// reaction means nothing to hermitator.
+// one still waiting for its turn, it withdraws the message. A picture
+// emoji on one of the agent's replies sends it again drawn, as /md does.
+// Any other reaction means nothing to hermitator.
 func (m *Manager) reaction(ctx context.Context, agentID string, msg Message) {
-	if !stopReactions[strings.ReplaceAll(strings.TrimSpace(msg.Reaction), "\ufe0f", "")] {
+	emoji := strings.ReplaceAll(strings.TrimSpace(msg.Reaction), "\ufe0f", "")
+	if renderReactions[emoji] {
+		// Only on a reply hermitator remembers; on anything else it is
+		// just a reaction.
+		if md, ok := m.replies.find(msg.AccountID+"\x00"+msg.Chat, msg.ReactsTo); ok && msg.ReactsTo != "" {
+			go m.render(agentID, chatRef{m: m, msg: msg}, md, "auto")
+		}
+		return
+	}
+	if !stopReactions[emoji] {
 		return
 	}
 	var withdrawn *Message
