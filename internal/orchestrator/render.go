@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/ids"
+	"github.com/rahimnathwani/hermitator/internal/store"
 	"github.com/rahimnathwani/hermitator/internal/turn"
 	"github.com/rahimnathwani/hermitator/internal/wamd"
 )
@@ -23,6 +24,8 @@ const (
 	// keepReplies is how many replies per chat /md can go back to.
 	keepReplies = 10
 	keepFor     = 24 * time.Hour
+	// keepBytes caps each one: a picture of more would be unreadable.
+	keepBytes = 200 << 10
 )
 
 // sentReplies remembers the Markdown behind the last replies sent to each
@@ -49,7 +52,7 @@ func (s *sentReplies) add(chat, md string, ids []string) {
 	for len(list) > 0 && (len(list) >= keepReplies || time.Since(list[0].at) > keepFor) {
 		list = list[1:]
 	}
-	s.chats[chat] = append(list, sentReply{md, ids, time.Now()})
+	s.chats[chat] = append(list, sentReply{clip(md, keepBytes), ids, time.Now()})
 }
 
 // find returns the Markdown of the reply that went out as message id, or
@@ -94,12 +97,16 @@ func (m *Manager) renderCommand(ctx context.Context, agentID string, chat chatRe
 	md, ok := m.replies.find(key, msg.QuotedID)
 	switch {
 	case ok:
+	case msg.Media != nil && msg.Media.Quoted:
+		chat.send("That is a picture or a file, not a reply I can draw.")
+		return
 	case msg.QuotedText != "":
 		// Sent before hermitator last started: what WhatsApp quotes is
 		// the formatted text, which still renders.
 		md = msg.QuotedText
 	default:
-		if t, err := m.store.LastChatTurn(ctx, agentID, msg.AccountID, msg.Chat); err == nil && strings.TrimSpace(t.Output) != "" {
+		t, err := m.store.LastChatTurn(ctx, agentID, msg.AccountID, msg.Chat)
+		if err == nil && t.Status == store.TurnOK && strings.TrimSpace(t.Output) != noReply {
 			md = t.Output
 		}
 	}

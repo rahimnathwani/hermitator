@@ -186,7 +186,7 @@ func (a *actor) abort() bool {
 }
 
 func (a *actor) reap() {
-	if a.turn != nil || a.holds > 0 || a.state != sandbox.Running {
+	if a.turn != nil || a.state != sandbox.Running {
 		return
 	}
 	ag, err := a.m.store.Agent(a.ctx, a.id)
@@ -207,7 +207,9 @@ func (a *actor) reap() {
 			a.m.background(spec, ag)
 		}()
 	}
-	if time.Since(a.lastActive) < ag.IdleTimeout || spec.Holding(time.Now()) {
+	// A hold (/awake, the terminal) keeps it up, but what its background
+	// jobs send still goes out.
+	if a.holds > 0 || time.Since(a.lastActive) < ag.IdleTimeout || spec.Holding(time.Now()) {
 		return
 	}
 	if a.sleepWork(ag) {

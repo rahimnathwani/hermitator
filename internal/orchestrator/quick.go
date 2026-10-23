@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rahimnathwani/hermitator/internal/ids"
 	"github.com/rahimnathwani/hermitator/internal/store"
 )
 
@@ -14,7 +15,8 @@ import (
 // one spool job, so it costs a wake and a few seconds, not a turn.
 
 // getScript queues a file for the chat the way the agent would, zipping
-// a directory first. Paths are relative to the workspace.
+// a directory first, under a turn ID of its own so that only it is sent.
+// Paths are relative to the workspace.
 const getScript = `cd "${HERMITATOR_WORKSPACE:-/workspace}" 2>/dev/null
 p=$1
 if [ -d "$p" ]; then
@@ -25,7 +27,7 @@ if [ -d "$p" ]; then
   (cd "$p" && zip -qr "$z" .) 2>&1 || exit 1
   p=$z
 fi
-whatsapp-send "$p" 2>&1 >/dev/null
+HERMITATOR_TURN=$2 whatsapp-send "$p" 2>&1 >/dev/null
 s=$?
 rm -rf /tmp/hermitator-get
 exit $s`
@@ -38,15 +40,16 @@ func (m *Manager) getFile(agentID string, chat chatRef, path string, reply func(
 		reply("Usage: /get PATH, for example /get report.pdf (from /workspace) or /get /tmp/screenshot.png. A folder is sent as a zip.")
 		return
 	}
-	m.sandboxJob(agentID, "get", []string{"sh", "-c", getScript, "get", path}, nil, reply, func(r jobResult) {
+	tag := "get-" + ids.New()
+	m.sandboxJob(agentID, "get", []string{"sh", "-c", getScript, "get", path, tag}, nil, reply, func(r jobResult) {
 		if !r.exit.OK() {
 			reply(formatShell(string(r.out), r.exit))
 			return
 		}
-		// Straight to this chat, rather than at the next background tick.
-		if m.deliverOutbox(m.ctx, r.spec, chat) == 0 {
-			reply("⚠️ Could not send " + path + ".")
-		}
+		// Straight to this chat, rather than at the next background tick,
+		// and only this file: the rest of the outbox keeps to its cap.
+		// A failure to send says so itself.
+		m.deliverQueued(m.ctx, r.spec, chat, tag)
 	})
 }
 
@@ -123,13 +126,29 @@ func formatRepos(out string) string {
 // count is "1 file" or "3 files".
 func count(n int, what string) string { return strconv.Itoa(n) + " " + what + plural(n) }
 
-// rememberScript appends the line on stdin to a memory file under a
-// "## Remembered" heading, as the review before sleep does. The line
-// comes on stdin so nothing in it needs quoting.
+// rememberScript adds the line on stdin to the end of a memory file's
+// "## Remembered" section, the one the review before sleep writes to,
+// adding the section at the end if there is none. The line comes on
+// stdin, and reaches awk through the environment, so nothing in it is
+// read as quoting or escapes.
 const rememberScript = `f=$HOME/$1
-mkdir -p "$(dirname "$f")" || exit 1
-grep -q '^## Remembered' "$f" 2>/dev/null || printf '\n## Remembered\n' >> "$f" || exit 1
-cat >> "$f"`
+mkdir -p "$(dirname "$f")" && touch "$f" || exit 1
+L=$(cat) && export L
+awk '
+BEGIN { l = ENVIRON["L"] }
+{
+  if (sec && !done && /^## /) { print l; done = 1 }
+  if (sec && !done && /^[[:space:]]*$/) { blanks++; next }
+  for (; blanks > 0; blanks--) print ""
+  if (/^## /) sec = ($0 ~ /^## Remembered[[:space:]]*$/)
+  print
+}
+END {
+  if (!done) {
+    if (!sec) { if (NR) print ""; print "## Remembered" }
+    print l
+  }
+}' "$f" > "$f.new" && cat "$f.new" > "$f" && rm -f "$f.new"`
 
 // remember adds a line to the agent's memory file, which its harness
 // reads at the start of every conversation: telling the agent costs a
@@ -148,7 +167,7 @@ func (m *Manager) remember(ctx context.Context, ag *store.Agent, text string, re
 		reply("That is over 1000 characters; keep the detail in a file and remember where it is.")
 		return
 	}
-	line := fmt.Sprintf("- %s: %s\n", time.Now().In(m.location(ctx, ag)).Format("2006-01-02"), text)
+	line := fmt.Sprintf("- %s: %s", time.Now().In(m.location(ctx, ag)).Format("2006-01-02"), text)
 	argv := []string{"sh", "-c", rememberScript, "remember", strings.TrimPrefix(file, "~/")}
 	m.sandboxJob(ag.ID, "remember", argv, []byte(line), reply, func(r jobResult) {
 		if !r.exit.OK() {

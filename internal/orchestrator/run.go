@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/ids"
@@ -682,6 +683,12 @@ func readShared(spec *sandbox.Spec, name string) ([]byte, error) {
 
 // deliverOutbox sends every file the agent has queued.
 func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat chatRef) (sentFiles int) {
+	return m.deliverQueued(ctx, spec, chat, "")
+}
+
+// deliverQueued sends what is queued in the outbox; with only set, just
+// what was queued under that turn ID.
+func (m *Manager) deliverQueued(ctx context.Context, spec *sandbox.Spec, chat chatRef, only string) (sentFiles int) {
 	// A turn and the background tick may both look; only one at a time
 	// may, or a file could go out twice.
 	a := m.actor(spec.ID)
@@ -709,6 +716,9 @@ func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat ch
 		raw, err := root.ReadFile(in(name))
 		if err == nil {
 			err = json.Unmarshal(raw, &meta)
+		}
+		if only != "" && (err != nil || meta.Turn != only) {
+			continue
 		}
 		chat := m.originChat(ctx, spec.ID, meta.Turn, chat)
 		if err == nil && meta.File == "" && strings.TrimSpace(meta.Voice) != "" {
@@ -789,7 +799,9 @@ func (m *Manager) originChat(ctx context.Context, agentID, turnID string, def ch
 
 // readRegular reads a regular file of at most maxOutboxFile bytes.
 func readRegular(root *os.Root, name string) ([]byte, error) {
-	f, err := root.Open(name)
+	// Non-blocking, so a FIFO the agent put there cannot stall the open;
+	// the check below then refuses it.
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}

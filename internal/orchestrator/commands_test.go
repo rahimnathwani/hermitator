@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/store"
+	"github.com/rahimnathwani/hermitator/internal/turn"
 )
 
 // reply is msg sent as a WhatsApp reply to quoted, the way the gateway
@@ -303,13 +304,16 @@ func TestSmallCommands(t *testing.T) {
 		t.Fatalf("/agents after linking = %q", got.body)
 	}
 
-	// /remember writes under the heading the review before sleep uses.
+	// /remember writes under the heading the review before sleep uses,
+	// even when another section follows it.
+	os.MkdirAll(filepath.Join(spec.Dir, "home", ".claude"), 0o755)
+	os.WriteFile(filepath.Join(spec.Dir, "home", ".claude", "CLAUDE.md"), []byte("# Me\n\n## Remembered\n- old\n\n## Style\nshort\n"), 0o644)
 	e.m.HandleMessage(ctx, e.msg(chat, "/remember Sam owns   billing; ask him first", true))
 	if got := e.rec.wait(t, "text"); !strings.HasPrefix(got.body, "🧠 Added to ~/.claude/CLAUDE.md: - 20") {
 		t.Fatalf("/remember = %q", got.body)
 	}
 	memory, _ := os.ReadFile(filepath.Join(spec.Dir, "home", ".claude", "CLAUDE.md"))
-	if !strings.Contains(string(memory), "\n## Remembered\n- 20") || !strings.HasSuffix(string(memory), ": Sam owns billing; ask him first\n") {
+	if !strings.Contains(string(memory), "## Remembered\n- old\n- 20") || !strings.Contains(string(memory), ": Sam owns billing; ask him first\n\n## Style\nshort\n") {
 		t.Fatalf("CLAUDE.md = %q", memory)
 	}
 
@@ -366,5 +370,102 @@ func TestSmallCommands(t *testing.T) {
 	}
 	if got := commandHelp("nope"); got != "There is no /nope command; /help lists them." {
 		t.Fatalf("/help nope = %q", got)
+	}
+}
+
+// The render script is Python the tests otherwise never run; at least it
+// must parse.
+func TestRenderScriptParses(t *testing.T) {
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("no python3")
+	}
+	cmd := exec.Command(py, "-c", "import ast, sys; ast.parse(sys.stdin.read())")
+	cmd.Stdin = strings.NewReader(renderScript)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("renderScript: %v\n%s", err, out)
+	}
+}
+
+// While /awake holds the sandbox, what background jobs send still goes
+// out; /get sends only its own file, leaving the rest of the outbox to
+// the background cap.
+func TestAwakeStillDeliversAndGetSendsOnlyItsFile(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "hello", true))
+	e.rec.wait(t, "text")
+	e.idle(t)
+
+	e.m.HandleMessage(ctx, e.msg(chat, "/awake 2h", true))
+	e.rec.wait(t, "text")
+	e.m.HandleMessage(ctx, e.msg(chat, `/sh whatsapp-send --text "job done" >/dev/null`, true))
+	e.rec.wait(t, "text") // /sh's own reply
+	if got := e.rec.wait(t, "text"); got.body != "job done" {
+		t.Fatalf("background text while awake = %q", got.body)
+	}
+
+	spec, _ := e.m.Spec(e.agent)
+	outbox := filepath.Join(spec.SharedDir(), turn.OutboxDir)
+	os.MkdirAll(outbox, 0o755)
+	os.WriteFile(filepath.Join(outbox, "1-other.txt"), []byte("other"), 0o644)
+	os.WriteFile(filepath.Join(outbox, "1-other.txt.meta.json"), []byte(`{"file":"1-other.txt","turn":"someone-else"}`), 0o644)
+	os.WriteFile(filepath.Join(outbox, "2-mine.txt"), []byte("mine"), 0o644)
+	os.WriteFile(filepath.Join(outbox, "2-mine.txt.meta.json"), []byte(`{"file":"2-mine.txt","turn":"get-x"}`), 0o644)
+	if n := e.m.deliverQueued(ctx, spec, chatRef{m: e.m, msg: e.msg(chat, "", true)}, "get-x"); n != 1 {
+		t.Fatalf("delivered %d", n)
+	}
+	if got := e.rec.wait(t, "file"); got.body != "|mine" {
+		t.Fatalf("delivered %q", got.body)
+	}
+	if _, err := os.Stat(filepath.Join(outbox, "1-other.txt.meta.json")); err != nil {
+		t.Fatal("/get sent someone else's file")
+	}
+}
+
+// Scheduling as a reply keeps the quote; /at takes "9:30 pm"; /md as a
+// reply to a picture says so; after a restart /md falls back to the last
+// turn's reply.
+func TestRepliesToScheduleAndRender(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+
+	e.m.HandleMessage(ctx, reply(e.msg(chat, "/in 1h check whether this is fixed", true), "Deploy failed: disk full"))
+	if got := e.rec.wait(t, "text"); !strings.HasPrefix(got.body, "📅 Scheduled: check whether this is fixed (once") {
+		t.Fatalf("/in as a reply = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/at 9:30 pm water the plants", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "water the plants (once, next") || !strings.Contains(got.body, "21:30") {
+		t.Fatalf("/at 9:30 pm = %q", got.body)
+	}
+	tasks, _ := e.st.Tasks(ctx, e.agent.ID)
+	var quoted bool
+	for _, task := range tasks {
+		quoted = quoted || task.Prompt == "> Deploy failed: disk full\n\ncheck whether this is fixed"
+	}
+	if !quoted {
+		t.Fatalf("tasks lost the quote: %+v", tasks[0])
+	}
+
+	photo := reply(e.msg(chat, "/md", true), "[image] ")
+	photo.Media = &Media{Kind: "image", Quoted: true}
+	e.m.HandleMessage(ctx, photo)
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "picture or a file") {
+		t.Fatalf("/md on a photo = %q", got.body)
+	}
+
+	e.m.HandleMessage(ctx, e.msg(chat, "hello", true))
+	e.rec.wait(t, "text")
+	e.idle(t)
+	e.m.replies = sentReplies{} // as after a restart
+	e.m.HandleMessage(ctx, e.msg(chat, "/md file", true))
+	if got := e.rec.wait(t, "file"); got.body != "|**echo:** hello" {
+		t.Fatalf("/md after a restart = %q", got.body)
 	}
 }

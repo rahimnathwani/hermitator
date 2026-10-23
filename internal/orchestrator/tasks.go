@@ -560,6 +560,10 @@ func (m *Manager) scheduleCommand(ctx context.Context, ag *store.Agent, msg Mess
 		if clock, rest, ok := strings.Cut(prompt, " "); ok && len(when) == len("2006-01-02") && strings.Count(when, "-") == 2 {
 			when, prompt = when+" "+clock, rest
 		}
+		// "9:30 pm" is one time, as is "9:30pm".
+		if half, rest, _ := strings.Cut(prompt, " "); strings.EqualFold(half, "am") || strings.EqualFold(half, "pm") {
+			when, prompt = when+half, rest
+		}
 		req.At, req.Prompt = when, prompt
 	case "every":
 		usage = "Usage: /every CRON: MESSAGE, for example /every 0 9 * * 1-5: check CI and tell me if anything failed"
@@ -573,6 +577,12 @@ func (m *Manager) scheduleCommand(ctx context.Context, ag *store.Agent, msg Mess
 	if strings.TrimSpace(req.Prompt) == "" || (req.In == "" && req.At == "" && req.Cron == "") {
 		reply(usage)
 		return
+	}
+	if msg.QuotedText != "" {
+		// Sent as a reply, the task is about the message replied to; its
+		// name still comes from what was typed.
+		req.Name = clip(strings.Join(strings.Fields(req.Prompt), " "), 60)
+		req.Prompt = QuoteText(msg.QuotedText, strings.TrimSpace(req.Prompt))
 	}
 	t, err := m.newTask(ctx, ag, chatRef{m: m, msg: msg}, req, store.TaskByOwner)
 	if err != nil {

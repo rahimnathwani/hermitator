@@ -171,7 +171,7 @@ func tableRecords(header []string, rows [][]string) []string {
 		}
 		title := ""
 		if len(row) > 0 {
-			title = strings.ReplaceAll(formatInline(row[0]), "*", "")
+			title = plainCell(row[0])
 		}
 		if title != "" {
 			out = append(out, "*"+title+"*")
@@ -180,7 +180,7 @@ func tableRecords(header []string, rows [][]string) []string {
 			if row[j] == "" {
 				continue
 			}
-			name := strings.ReplaceAll(formatInline(header[j]), "*", "")
+			name := plainCell(header[j])
 			if name == "" {
 				out = append(out, formatInline(row[j]))
 			} else {

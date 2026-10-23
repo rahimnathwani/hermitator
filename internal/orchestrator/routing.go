@@ -180,19 +180,26 @@ func (m *Manager) link(ctx context.Context, acct *store.Account, msg Message, ar
 		}
 		return
 	}
-	agentID, err := m.store.ConsumeLinkCode(ctx, code)
+	// The owner may name the agent instead: they can already run anything
+	// in it, so a code proves nothing more. A name is tried first, so a
+	// name that happens to spell a live code does not use the code up.
 	var ag *store.Agent
-	if err == nil {
-		ag, err = m.store.Agent(ctx, agentID)
-	} else if owner {
-		// The owner may name the agent instead: they can already run
-		// anything in it, so a code proves nothing more.
-		var problem string
-		if ag, problem = m.agentNamed(ctx, acct.UserID, arg); problem != "" {
+	var err error
+	named, problem := (*store.Agent)(nil), ""
+	if owner {
+		named, problem = m.agentNamed(ctx, acct.UserID, arg)
+	}
+	if named != nil {
+		ag = named
+	} else {
+		var agentID string
+		agentID, err = m.store.ConsumeLinkCode(ctx, code)
+		if err == nil {
+			ag, err = m.store.Agent(ctx, agentID)
+		} else if problem != "" {
 			reply(problem)
 			return
 		}
-		err = nil
 	}
 	if err != nil || ag.UserID != acct.UserID {
 		if !owner {
@@ -307,7 +314,7 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 	case "remember":
 		go m.remember(ctx, ag, cmd.Arg, reply)
 	case "awake":
-		m.awakeCommand(ctx, agentID, cmd.Arg, m.location(ctx, ag), reply)
+		go m.awakeCommand(agentID, cmd.Arg, m.location(ctx, ag), reply)
 	case "get":
 		go m.getFile(agentID, chatRef{m: m, msg: msg}, cmd.Arg, reply)
 	case "git":
@@ -321,6 +328,8 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		m.store.Audit(ctx, acct.UserID, acct.UserID, "route.unlink", fmt.Sprintf("agent=%s chat=%s", ag.ID, msg.Chat))
 		reply("Unlinked this chat from *" + ag.Name + "*.")
 	case "sleep":
+		// Asking it to sleep overrides /awake.
+		m.setAwake(m.actor(agentID), nil)
 		state, err := m.Sleep(ctx, agentID)
 		switch {
 		case errors.Is(err, ErrBusy):
@@ -336,8 +345,10 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		if strings.EqualFold(cmd.Arg, "all") {
 			aborted, n := m.StopAll(agentID)
 			switch {
-			case aborted || n > 0:
-				reply(fmt.Sprintf("⏹ Stopped %s and withdrew %s.", map[bool]string{true: "the current turn", false: "nothing running"}[aborted], count(n, "waiting message")))
+			case aborted:
+				reply("⏹ Stopped the current turn and withdrew " + count(n, "waiting message") + ".")
+			case n > 0:
+				reply("⏹ Nothing was running; withdrew " + count(n, "waiting message") + ".")
 			default:
 				reply("Nothing is running or waiting.")
 			}

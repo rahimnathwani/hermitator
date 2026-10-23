@@ -436,7 +436,8 @@ func (m *Manager) Abort(agentID string) bool {
 
 // StopAll aborts an agent's running turn and withdraws every message
 // waiting for one, as after an outage, when they would each start a turn.
-// It reports whether a turn was running and how many it withdrew.
+// It reports whether a turn was running and how many it withdrew. A
+// scheduled run withdrawn this way runs again at its next time.
 func (m *Manager) StopAll(agentID string) (aborted bool, withdrawn int) {
 	var dropped []Message
 	m.actor(agentID).call(func(a *actor) error {

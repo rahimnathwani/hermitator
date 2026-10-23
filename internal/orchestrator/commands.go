@@ -56,7 +56,7 @@ var commandAliases = map[string]string{
 // commandHelp is /help, or with a command named, the lines of it that
 // mention that command.
 func commandHelp(arg string) string {
-	name := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(arg), "/"))
+	name, _, _ := strings.Cut(strings.ToLower(strings.TrimPrefix(strings.TrimSpace(arg), "/")), " ")
 	if name == "" {
 		return helpText
 	}
