@@ -337,7 +337,8 @@ The host keeps the timetable (`tasks` table; cron parsing in
 due. A task is a prompt that reaches the agent as a message in the chat it
 was set up from, in its usual conversation; the reply is headed with the
 task's name. Agents create them with `hermitator-guest schedule`, and the
-owner is told about each one. Times are in the owner's time zone, which
+owner is told about each one; the owner can also set them up from the
+chat with `/in`, `/at` and `/every`, which the host parses itself. Times are in the owner's time zone, which
 is also the agent's `TZ`. A task may run at most every five minutes, an
 agent may have 25, and a task missed while hermitator was down runs once
 when it is back, told how late it is. If its chat is no longer linked to

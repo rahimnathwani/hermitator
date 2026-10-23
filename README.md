@@ -252,7 +252,8 @@ hermitator answers itself:
 | `/stop` | Abort the current turn |
 | `/retry` | Run the last message again, after a failure or a restart |
 | `/sh COMMAND` | Run a shell command in the sandbox and get its output, without the model |
-| `/tasks`, `/tasks pause N`, `/tasks resume N`, `/tasks delete N` | Scheduled tasks |
+| `/tasks`, `/tasks pause N`, `/tasks resume N`, `/tasks run N`, `/tasks delete N` | Scheduled tasks; `run` starts one now, outside its schedule |
+| `/in 2h …`, `/at 9am …`, `/every 0 9 * * 1-5: …` | Schedule a message to the agent, without asking the model to |
 | `/plan` | The agent's own task list for what it is doing, without waking it |
 | `/usage` | Claude subscription use (5-hour and weekly, with pace) and spending |
 | `/sessions`, `/resume N` | Past conversations, and going back to one (`/new` keeps them) |
@@ -279,7 +280,8 @@ choices, and its Overview shows which model each turn actually ran on.
 A message that is only a slash word hermitator does not know, or that
 opens with one of Claude Code's or pi's own commands (`/cost`, `/mcp`),
 gets an explanation instead of a turn: the harness would have read it as
-plain text. Only you can use commands: messages from your own numbers
+plain text. A command sent as a reply to a message still counts as one.
+Only you can use commands: messages from your own numbers
 (listed in Settings, and learnt from `/link`), or sent by the linked
 account itself when it is your own number.
 
