@@ -2,10 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/store"
 )
@@ -48,5 +50,70 @@ func TestCommandsWorkAsReplies(t *testing.T) {
 	e.m.HandleMessage(ctx, reply(e.msg(chat, "/workspace is full, see above", true), "disk report"))
 	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "/workspace is full") {
 		t.Fatalf("reply = %q", got.body)
+	}
+}
+
+// /in, /at and /every set up tasks without a model call, and /tasks run
+// starts one outside its schedule.
+func TestScheduleFromChat(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+
+	e.m.HandleMessage(ctx, e.msg(chat, "/in 2h check whether the deploy finished", true))
+	if got := e.rec.wait(t, "text"); !strings.HasPrefix(got.body, "📅 Scheduled: check whether the deploy finished (once, next") {
+		t.Fatalf("/in = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/at 2099-01-02 09:30 wish me a happy new year", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "Not scheduled: that is more than a year away") {
+		t.Fatalf("/at far away = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/every 0 9 * * 1-5: triage new issues", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "triage new issues (cron 0 9 * * 1-5, next") {
+		t.Fatalf("/every = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/every * * * * *: spam", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "Not scheduled") || !strings.Contains(got.body, "Usage: /every") {
+		t.Fatalf("/every too often = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.msg(chat, "/in soon do it", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, `"soon" is not a duration`) {
+		t.Fatalf("/in soon = %q", got.body)
+	}
+	tasks, _ := e.st.Tasks(ctx, e.agent.ID)
+	var in *store.Task
+	n := 0
+	for i, task := range tasks {
+		if task.Cron == "" {
+			in, n = task, i+1
+		}
+	}
+	if len(tasks) != 2 || in == nil || in.CreatedBy != store.TaskByOwner || time.Until(in.NextRun).Round(time.Hour) != 2*time.Hour {
+		t.Fatalf("tasks = %+v", in)
+	}
+	if turns, _ := e.st.Turns(ctx, e.agent.ID, 1); len(turns) != 0 {
+		t.Fatal("scheduling ran a model turn")
+	}
+	if days("3d") != "72h" || days("90m") != "90m" || days("d") != "d" {
+		t.Fatal("days")
+	}
+
+	e.m.HandleMessage(ctx, e.msg(chat, fmt.Sprintf("/tasks run %d", n), true))
+	if got := e.rec.wait(t, "text"); got.body != "▶️ Running now: check whether the deploy finished." {
+		t.Fatalf("/tasks run = %q", got.body)
+	}
+	if got := e.rec.wait(t, "text"); !strings.HasPrefix(got.body, "⏰ *check whether the deploy finished*") {
+		t.Fatalf("task reply = %q", got.body)
+	}
+	e.idle(t)
+	spec, _ := e.m.Spec(e.agent)
+	prompts, _ := os.ReadFile(filepath.Join(spec.Dir, "home", "prompts"))
+	if !strings.Contains(string(prompts), "outside its schedule") {
+		t.Fatalf("prompt = %s", prompts)
+	}
+	if again, _ := e.st.Task(ctx, in.ID); !again.NextRun.Equal(in.NextRun) {
+		t.Fatal("/tasks run moved the next run")
 	}
 }

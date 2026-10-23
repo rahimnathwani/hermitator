@@ -40,6 +40,9 @@ var commandAliases = map[string]string{
 	"tz":       "timezone",
 	"sh":       "sh",
 	"compact":  "compact",
+	"in":       "in",
+	"at":       "at",
+	"every":    "every",
 }
 
 // harnessCommands are slash commands Claude Code and pi take at their own
@@ -99,7 +102,8 @@ const helpText = `*hermitator commands*
 /stop: abort the running turn
 /retry: run the last message again, after a failure or a restart
 /sh COMMAND: run a shell command in the sandbox and see its output (no model)
-/tasks: scheduled tasks (/tasks pause|resume|delete N)
+/tasks: scheduled tasks (/tasks pause|resume|run|delete N)
+/in 2h MESSAGE, /at 9am MESSAGE, /every CRON: MESSAGE: schedule a message to the agent
 /timezone [ZONE]: show or set the time zone schedules use
 /new: start a fresh conversation, keeping all files (alias /clear)
 /compact: summarise this conversation now, so the next messages re-read less

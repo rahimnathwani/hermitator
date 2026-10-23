@@ -222,6 +222,8 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		return m.retry(ctx, agentID, msg, reply)
 	case "tasks":
 		m.tasksCommand(ctx, ag, cmd.Arg, reply)
+	case "in", "at", "every":
+		m.scheduleCommand(ctx, ag, msg, cmd.Name, cmd.Arg, reply)
 	case "preview", "previews":
 		m.previewCommand(ctx, agentID, cmd, reply)
 	case "history":

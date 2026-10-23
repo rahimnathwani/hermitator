@@ -75,38 +75,46 @@ func (m *Manager) runDueTasks(now time.Time) {
 			m.log.Warn("paused a task whose chat is no longer linked", "agent", t.AgentID, "task", t.ID)
 			continue
 		}
-		by := "the owner"
-		if t.CreatedBy == store.TaskByAgent {
-			by = "you"
-		}
-		when := "once"
-		if t.Cron != "" {
-			when = "on the schedule " + t.Cron
-		}
-		if late := now.Sub(t.NextRun); late > lateAfter {
-			// Most likely hermitator was down; a check of "the last hour",
-			// say, should know.
-			when += fmt.Sprintf(", %s late: it was due at %s", humanize(late), t.NextRun.In(loc).Format("Mon 15:04"))
-		}
-		msg := Message{
-			AccountID: t.AccountID, Chat: t.ChatJID, Owner: true, Time: now, TaskName: t.Name, TaskID: t.ID,
-			Prompt: fmt.Sprintf("[Scheduled task %q, set up by %s on %s, running %s. Do what it asks; your reply goes to this chat. "+
-				"If this time there is nothing worth telling the owner, reply with just %s and nothing is sent.]\n\n%s",
-				t.Name, by, t.CreatedAt.In(loc).Format("2 Jan 2006"), when, noReply, t.Prompt),
-		}
-		m.log.Info("running scheduled task", "agent", t.AgentID, "task", t.ID)
-		if t.Check != "" {
-			m.bg.Add(1)
-			go func() {
-				defer m.bg.Done()
-				m.runCheck(ag, t, msg)
-			}()
-		} else {
-			m.queueRun(t.AgentID, msg)
-		}
+		m.startTask(ag, t, now, loc, false)
 		if spec, err := m.Spec(ag); err == nil {
 			m.writeTasks(m.ctx, spec, ag)
 		}
+	}
+}
+
+// startTask runs a task now: its check if it has one, then its turn.
+// Manual is for /tasks run, outside its schedule.
+func (m *Manager) startTask(ag *store.Agent, t *store.Task, now time.Time, loc *time.Location, manual bool) {
+	by := "the owner"
+	if t.CreatedBy == store.TaskByAgent {
+		by = "you"
+	}
+	when := "once"
+	if t.Cron != "" {
+		when = "on the schedule " + t.Cron
+	}
+	if manual {
+		when = "now, because the owner asked for a run outside its schedule"
+	} else if late := now.Sub(t.NextRun); late > lateAfter {
+		// Most likely hermitator was down; a check of "the last hour",
+		// say, should know.
+		when += fmt.Sprintf(", %s late: it was due at %s", humanize(late), t.NextRun.In(loc).Format("Mon 15:04"))
+	}
+	msg := Message{
+		AccountID: t.AccountID, Chat: t.ChatJID, Owner: true, Time: now, TaskName: t.Name, TaskID: t.ID,
+		Prompt: fmt.Sprintf("[Scheduled task %q, set up by %s on %s, running %s. Do what it asks; your reply goes to this chat. "+
+			"If this time there is nothing worth telling the owner, reply with just %s and nothing is sent.]\n\n%s",
+			t.Name, by, t.CreatedAt.In(loc).Format("2 Jan 2006"), when, noReply, t.Prompt),
+	}
+	m.log.Info("running scheduled task", "agent", t.AgentID, "task", t.ID)
+	if t.Check != "" {
+		m.bg.Add(1)
+		go func() {
+			defer m.bg.Done()
+			m.runCheck(ag, t, msg)
+		}()
+	} else {
+		m.queueRun(t.AgentID, msg)
 	}
 }
 
@@ -256,7 +264,7 @@ func (m *Manager) newTask(ctx context.Context, ag *store.Agent, chat chatRef, re
 	case req.In != "":
 		d, err := time.ParseDuration(req.In)
 		if err != nil {
-			return nil, fmt.Errorf("--in %q: use a duration such as 45m or 2h30m", req.In)
+			return nil, fmt.Errorf("%q is not a duration; use one such as 45m or 2h30m", req.In)
 		}
 		t.NextRun = now.Add(d)
 	default:
@@ -509,14 +517,22 @@ func (m *Manager) tasksCommand(ctx context.Context, ag *store.Agent, arg string,
 		case "delete", "cancel", "rm":
 			m.DeleteTask(ctx, ag, t)
 			reply("🗑 Deleted: " + t.Name + ".")
+		case "run":
+			if !m.stillLinked(ctx, t) {
+				reply("Its chat no longer reaches *" + ag.Name + "*, so there is nowhere for it to answer.")
+				return
+			}
+			// Its next scheduled run stays as it was.
+			m.startTask(ag, t, time.Now(), loc, true)
+			reply("▶️ Running now: " + t.Name + ".")
 		default:
-			reply("Use /tasks, /tasks pause N, /tasks resume N or /tasks delete N.")
+			reply("Use /tasks, /tasks pause N, /tasks resume N, /tasks run N or /tasks delete N.")
 		}
 		return
 	}
 	list, _ := m.store.Tasks(ctx, ag.ID)
 	if len(list) == 0 {
-		reply("*" + ag.Name + "* has no scheduled tasks. Ask it to do something later, for example \"every weekday at 9, check CI and tell me\".")
+		reply("*" + ag.Name + "* has no scheduled tasks. Ask it to do something later, for example \"every weekday at 9, check CI and tell me\", or use /in 2h, /at 9am or /every.")
 		return
 	}
 	var b strings.Builder
@@ -524,8 +540,56 @@ func (m *Manager) tasksCommand(ctx context.Context, ag *store.Agent, arg string,
 	for i, t := range list {
 		fmt.Fprintf(&b, "\n%d. %s", i+1, describeTask(t, loc))
 	}
-	b.WriteString("\n\n/tasks pause N, /tasks resume N, /tasks delete N")
+	b.WriteString("\n\n/tasks pause N, /tasks resume N, /tasks run N, /tasks delete N")
 	reply(b.String())
+}
+
+// scheduleCommand handles /in, /at and /every: a task set up from the
+// chat, with no model call to turn the request into a schedule.
+func (m *Manager) scheduleCommand(ctx context.Context, ag *store.Agent, msg Message, name, arg string, reply func(string)) {
+	req, usage := turn.HostRequest{}, ""
+	switch name {
+	case "in":
+		usage = "Usage: /in DURATION MESSAGE, for example /in 2h check whether the deploy finished"
+		d, prompt, _ := strings.Cut(arg, " ")
+		req.In, req.Prompt = days(d), prompt
+	case "at":
+		usage = "Usage: /at TIME MESSAGE, for example /at 9am summarise the overnight CI runs, or /at 2026-11-02 14:00 ..."
+		when, prompt, _ := strings.Cut(arg, " ")
+		// A date needs its time too: "2026-11-02 14:00 MESSAGE".
+		if clock, rest, ok := strings.Cut(prompt, " "); ok && len(when) == len("2006-01-02") && strings.Count(when, "-") == 2 {
+			when, prompt = when+" "+clock, rest
+		}
+		req.At, req.Prompt = when, prompt
+	case "every":
+		usage = "Usage: /every CRON: MESSAGE, for example /every 0 9 * * 1-5: check CI and tell me if anything failed"
+		cron, prompt, ok := strings.Cut(arg, ":")
+		if !ok {
+			reply(usage)
+			return
+		}
+		req.Cron, req.Prompt = strings.TrimSpace(cron), prompt
+	}
+	if strings.TrimSpace(req.Prompt) == "" || (req.In == "" && req.At == "" && req.Cron == "") {
+		reply(usage)
+		return
+	}
+	t, err := m.newTask(ctx, ag, chatRef{m: m, msg: msg}, req, store.TaskByOwner)
+	if err != nil {
+		reply("Not scheduled: " + err.Error() + ".\n\n" + usage)
+		return
+	}
+	m.refreshTasks(ctx, ag)
+	reply("📅 Scheduled: " + describeTask(t, m.location(ctx, ag)) + ". /tasks to see or cancel it.")
+}
+
+// days lets a duration be given in days, which time.ParseDuration does
+// not take: "2d" is "48h".
+func days(d string) string {
+	if n, err := strconv.Atoi(strings.TrimSuffix(d, "d")); err == nil && strings.HasSuffix(d, "d") && n > 0 {
+		return strconv.Itoa(n*24) + "h"
+	}
+	return d
 }
 
 // timezoneCommand handles /timezone.
