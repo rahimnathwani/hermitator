@@ -93,6 +93,10 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, v *viewer) {
 	_, hasPi := secrets[store.SecretPiAuth]
 	_, hasDeepSeek := secrets[store.SecretDeepSeekKey]
 	_, hasOpenRouter := secrets[store.SecretOpenRouterKey]
+	hasOwn := false
+	for name := range secrets {
+		hasOwn = hasOwn || strings.HasPrefix(name, store.SecretProviderPrefix)
+	}
 	var outdated []string
 	newest := ""
 	for _, a := range agents {
@@ -101,7 +105,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, v *viewer) {
 		}
 	}
 	done := 0
-	for _, ok := range []bool{len(accounts) > 0, hasClaude || hasPi || hasDeepSeek || hasOpenRouter, len(agents) > 0, linked} {
+	for _, ok := range []bool{len(accounts) > 0, hasClaude || hasPi || hasDeepSeek || hasOpenRouter || hasOwn, len(agents) > 0, linked} {
 		if ok {
 			done++
 		}
@@ -115,12 +119,12 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request, v *viewer) {
 		"CanCreate":   len(agents) < v.User.MaxAgents,
 		"MaxAgents":   v.User.MaxAgents,
 		"HasAccount":  len(accounts) > 0,
-		"HasModel":    hasClaude || hasPi || hasDeepSeek || hasOpenRouter,
+		"HasModel":    hasClaude || hasPi || hasDeepSeek || hasOpenRouter || hasOwn,
 		"HasAgent":    len(agents) > 0,
 		"HasLink":     linked,
 		"ShowGuide":   len(accounts) == 0 || len(agents) == 0 || !linked,
 		"HasClaude":   hasClaude,
-		"HasAnyPiKey": hasPi || hasDeepSeek || hasOpenRouter,
+		"HasAnyPiKey": hasPi || hasDeepSeek || hasOpenRouter || hasOwn,
 	})
 }
 
@@ -128,7 +132,7 @@ func (s *Server) newAgentPage(w http.ResponseWriter, r *http.Request, v *viewer)
 	agents, _ := s.Store.Agents(r.Context(), v.User.ID)
 	s.render(w, r, v, "new-agent.html", "New agent", "agents", map[string]any{
 		"Images":    s.Images.Families(),
-		"Fields":    newAgentFields(&store.Agent{Harness: store.HarnessClaude}, s.ready(r.Context(), v.User.ID)),
+		"Fields":    newAgentFields(&store.Agent{Harness: store.HarnessClaude}, s.Agents.Providers(r.Context(), v.User.ID), s.ready(r.Context(), v.User.ID)),
 		"CanCreate": len(agents) < v.User.MaxAgents,
 		"MaxAgents": v.User.MaxAgents,
 		"GitHub":    s.Agents.Secret(r.Context(), v.User.ID, store.SecretGitHubToken) != "",
@@ -236,7 +240,7 @@ func (s *Server) agentData(r *http.Request, a *store.Agent, tab string) map[stri
 		d["Turns"], _ = s.Store.Turns(ctx, a.ID, 30)
 		d["Tasks"] = s.taskViews(ctx, a)
 	case "settings":
-		d["Fields"] = newAgentFields(a, s.ready(ctx, a.UserID))
+		d["Fields"] = newAgentFields(a, s.Agents.Providers(ctx, a.UserID), s.ready(ctx, a.UserID))
 		d["Memory"] = memoryChoice(a.MemoryMB)
 		if s.Agents.Previews() {
 			ps, _ := s.Store.Previews(ctx, a.ID)

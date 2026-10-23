@@ -33,8 +33,9 @@ keep hundreds of them.
   those processes carry on when the next message arrives.
 - **Your own subscriptions.** Claude Code runs with a token from
   `claude setup-token`. pi runs with a ChatGPT subscription (through OpenAI's
-  device-code login, done from the panel), a DeepSeek key or an OpenRouter
-  key.
+  device-code login, done from the panel), a DeepSeek key, an OpenRouter
+  key, or any provider you add that speaks OpenAI's Responses or Chat
+  Completions API.
 - **WhatsApp as the interface.** hermitator links to a WhatsApp number the
   way WhatsApp Web does: ideally one that belongs to your agents, so you
   message them like a contact, though it can share your own too. Each chat

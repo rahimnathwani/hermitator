@@ -34,7 +34,8 @@ func Efforts(harness string) []string {
 	return ClaudeEfforts
 }
 
-// ModelSuggestions lists likely models for an agent.
+// ModelSuggestions lists likely models for an agent on Claude Code or one
+// of hermitator's own pi providers.
 func ModelSuggestions(harness, provider string) []string {
 	if harness == store.HarnessPi {
 		return PiModels[providerOrDefault(provider)]
@@ -46,11 +47,11 @@ func validEffort(harness, effort string) bool {
 	return effort == "" || slices.Contains(Efforts(harness), effort)
 }
 
-func knownModel(harness, provider, model string) bool {
+func knownModel(harness string, suggested []string, model string) bool {
 	if harness == store.HarnessClaude && strings.HasPrefix(model, "claude-") {
 		return true
 	}
-	return slices.Contains(ModelSuggestions(harness, provider), model)
+	return slices.Contains(suggested, model)
 }
 
 // fitHarness drops a model or effort that only made sense for the harness
@@ -67,14 +68,14 @@ func fitHarness(prev, next *store.Agent) {
 	}
 }
 
-func describeModel(ag *store.Agent) string {
+// describeModel says what an agent runs; def is its default model, if
+// hermitator knows it.
+func describeModel(ag *store.Agent, def string) string {
 	model := ag.Model
 	if model == "" {
 		model = "the default model"
-		if ag.Harness == store.HarnessPi {
-			if d := DefaultModelFor(ag.PiProvider); d != "" {
-				model = "the default model (" + d + ")"
-			}
+		if def != "" {
+			model = "the default model (" + def + ")"
 		}
 	}
 	effort := ag.Effort
@@ -96,13 +97,14 @@ func DefaultModelFor(provider string) string {
 
 // modelCommand handles /model.
 func (m *Manager) modelCommand(ctx context.Context, ag *store.Agent, arg string, reply func(string)) {
-	choices := strings.Join(ModelSuggestions(ag.Harness, ag.PiProvider), ", ")
+	suggested, def := m.modelChoices(ctx, ag)
+	choices := strings.Join(suggested, ", ")
 	if ag.Harness == store.HarnessClaude {
 		choices += ", or a full model ID"
 	}
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
-		reply(fmt.Sprintf("*%s* uses %s.\nChange it with /model NAME: %s. /model default goes back to the default.", ag.Name, describeModel(ag), choices))
+		reply(fmt.Sprintf("*%s* uses %s.\nChange it with /model NAME: %s. /model default goes back to the default.", ag.Name, describeModel(ag, def), choices))
 		return
 	}
 	model := arg
@@ -116,8 +118,8 @@ func (m *Manager) modelCommand(ctx context.Context, ag *store.Agent, arg string,
 		return
 	}
 	ag.Model = model
-	text := fmt.Sprintf("🧠 From the next message, *%s* uses %s. The conversation carries on.", ag.Name, describeModel(ag))
-	if model != "" && !knownModel(ag.Harness, ag.PiProvider, model) {
+	text := fmt.Sprintf("🧠 From the next message, *%s* uses %s. The conversation carries on.", ag.Name, describeModel(ag, def))
+	if model != "" && !knownModel(ag.Harness, suggested, model) {
 		text += fmt.Sprintf("\n\nI do not recognise %q; if it is wrong, the next turn will fail with the provider's own error. Usual choices: %s.", model, choices)
 	}
 	reply(text)
@@ -126,9 +128,10 @@ func (m *Manager) modelCommand(ctx context.Context, ag *store.Agent, arg string,
 // effortCommand handles /effort.
 func (m *Manager) effortCommand(ctx context.Context, ag *store.Agent, arg string, reply func(string)) {
 	levels := strings.Join(Efforts(ag.Harness), ", ")
+	_, def := m.modelChoices(ctx, ag)
 	arg = strings.ToLower(strings.TrimSpace(arg))
 	if arg == "" {
-		reply(fmt.Sprintf("*%s* uses %s.\nChange it with /effort LEVEL: %s. /effort default goes back to the default.", ag.Name, describeModel(ag), levels))
+		reply(fmt.Sprintf("*%s* uses %s.\nChange it with /effort LEVEL: %s. /effort default goes back to the default.", ag.Name, describeModel(ag, def), levels))
 		return
 	}
 	effort := arg
@@ -144,19 +147,19 @@ func (m *Manager) effortCommand(ctx context.Context, ag *store.Agent, arg string
 		return
 	}
 	ag.Effort = effort
-	reply(fmt.Sprintf("🧠 From the next message, *%s* uses %s.", ag.Name, describeModel(ag)))
+	reply(fmt.Sprintf("🧠 From the next message, *%s* uses %s.", ag.Name, describeModel(ag, def)))
 }
 
 // parseOnce splits "/once opus max: review this" into overrides and the
-// message. The colon is optional: leading words that name a model or an
-// effort level are taken as overrides.
-func parseOnce(ag *store.Agent, arg string) (model, effort, text string) {
+// message. The colon is optional: leading words that name a model the
+// agent is likely to run or an effort level are taken as overrides.
+func parseOnce(ag *store.Agent, suggested []string, arg string) (model, effort, text string) {
 	take := func(word string) bool {
 		w := strings.ToLower(word)
 		switch {
 		case effort == "" && validEffort(ag.Harness, w):
 			effort = w
-		case model == "" && (knownModel(ag.Harness, ag.PiProvider, w) || knownModel(ag.Harness, ag.PiProvider, word)):
+		case model == "" && (knownModel(ag.Harness, suggested, w) || knownModel(ag.Harness, suggested, word)):
 			model = word
 			if ag.Harness == store.HarnessClaude {
 				model = w

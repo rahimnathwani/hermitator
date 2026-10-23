@@ -532,6 +532,64 @@ func TestKeyHintsLinkToTheKey(t *testing.T) {
 	}
 }
 
+func TestOwnProviders(t *testing.T) {
+	f := setup(t)
+	alice := f.login(t, "alice@example.com")
+	id := alice.createAgent("bot")
+	add := url.Values{"name": {"explabs"}, "api": {"openai-responses"}, "base_url": {"https://api.experientiallabs.ai/v1/responses"},
+		"models": {"qwen3.8-27b\r\nqwen3.8-7b"}, "key": {"sk-explabs"}, "reasoning": {"1"}, "context_window": {"262,144"}}
+	alice.post("/settings/providers", add)
+	_, settings := alice.get("/settings")
+	for _, want := range []string{`id="custom-explabs"`, "Responses at https://api.experientiallabs.ai/v1 · qwen3.8-27b, qwen3.8-7b · key saved",
+		`href="/settings?provider=explabs#providers"`} {
+		if !strings.Contains(settings, want) {
+			t.Fatalf("settings lack %q", want)
+		}
+	}
+	if strings.Contains(settings, "sk-explabs") {
+		t.Fatal("the key is on the page")
+	}
+
+	// The agent form offers it, with its models and a hint linking back.
+	_, form := alice.get("/agents/" + id + "/settings")
+	for _, want := range []string{`name="provider" value="custom-explabs"`, `name="model:pi-custom-explabs" value="qwen3.8-7b"`,
+		`data-provider-hint="custom-explabs" hidden>Uses your explabs key from <a href="/settings#custom-explabs">`} {
+		if !strings.Contains(form, want) {
+			t.Fatalf("agent form lacks %q", want)
+		}
+	}
+	alice.post("/agents/"+id+"/settings", url.Values{"name": {"bot"}, "harness": {"pi"}, "provider": {"custom-explabs"},
+		"model:pi-custom-explabs": {"qwen3.8-7b"}, "idle_minutes": {"5"}, "memory_mb": {"4096"}})
+	if a, _ := f.store.Agent(context.Background(), id); a.PiProvider != "custom-explabs" || a.Model != "qwen3.8-7b" {
+		t.Fatalf("saved %q/%q", a.PiProvider, a.Model)
+	}
+	if _, page := alice.get("/agents/" + id); !strings.Contains(page, "explabs") {
+		t.Fatal("the agent page does not name its provider")
+	}
+
+	// Editing keeps the key when none is given; the form comes filled in.
+	_, edit := alice.get("/settings?provider=explabs")
+	if !strings.Contains(edit, `value="explabs"`) || !strings.Contains(edit, "qwen3.8-27b\nqwen3.8-7b</textarea>") || !strings.Contains(edit, `value="262144"`) {
+		t.Fatal("the edit form is not filled in")
+	}
+	add.Set("key", "")
+	add.Set("models", "qwen3.9-27b")
+	alice.post("/settings/providers", add)
+	p, _ := f.store.Provider(context.Background(), f.users["alice@example.com"].ID, "explabs")
+	if p == nil || strings.Join(p.Models, " ") != "qwen3.9-27b" || f.server.Agents.Secret(context.Background(), p.UserID, store.SecretProviderPrefix+"explabs") != "sk-explabs" {
+		t.Fatalf("after edit: %+v", p)
+	}
+
+	// Removing it says which agent stops answering.
+	if _, settings := alice.get("/settings"); !strings.Contains(settings, `<p>bot cannot answer until you choose another provider for it.`) {
+		t.Fatal("the remove dialog does not name the agent")
+	}
+	alice.post("/settings/providers/delete", url.Values{"name": {"explabs"}})
+	if _, err := f.store.Provider(context.Background(), p.UserID, "explabs"); err == nil {
+		t.Fatal("not removed")
+	}
+}
+
 func TestAgentTabs(t *testing.T) {
 	f := setup(t)
 	alice := f.login(t, "alice@example.com")

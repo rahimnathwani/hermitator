@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -195,7 +196,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		env[k] = v
 	}
 	// /once overrides the agent's model and effort for this turn.
-	model, effort := agent.Model, agent.Effort
+	model, effort := cmp.Or(agent.Model, creds.model), agent.Effort
 	for _, msg := range batch {
 		if msg.Model != "" {
 			model = msg.Model

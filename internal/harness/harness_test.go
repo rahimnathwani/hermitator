@@ -333,3 +333,21 @@ func TestClaudeReportsConversationSize(t *testing.T) {
 		t.Fatalf("context = %d", res.ContextTokens)
 	}
 }
+
+func TestPiModelsKeepsAFileItCannotRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "models.json")
+	// pi allows comments; Go's JSON does not, so the file is set aside.
+	agents := "{\n  // mine\n  \"providers\": {\"ollama\": {}}\n}"
+	os.WriteFile(path, []byte(agents), 0o600)
+	ours := `{"providers":{"custom-explabs":{"baseUrl":"https://api.experientiallabs.ai/v1"}}}`
+	if got := mergePiModels(path, ours); got != ours {
+		t.Fatalf("merged = %s", got)
+	}
+	if b, _ := os.ReadFile(path + ".bak"); string(b) != agents {
+		t.Fatalf("backup = %q", b)
+	}
+	// With no file yet, the host's providers are the whole of it.
+	if got := mergePiModels(filepath.Join(t.TempDir(), "models.json"), ours); got != ours {
+		t.Fatalf("fresh = %s", got)
+	}
+}

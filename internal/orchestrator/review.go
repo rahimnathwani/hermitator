@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -88,7 +89,7 @@ func (m *Manager) review(t *activeTurn, ag *store.Agent, th *store.Thread, syste
 	}
 	req := turn.Request{Harness: ag.Harness, SessionID: th.SessionID, Fork: true, Discard: true,
 		Prompt: fmt.Sprintf(reviewPrompt, memoryFiles[ag.Harness], time.Now().In(loc).Format("2006-01-02")),
-		Model:  ag.Model, Effort: ag.Effort, Provider: ag.PiProvider, SystemPrompt: system, Env: env, Files: creds.files,
+		Model:  cmp.Or(ag.Model, creds.model), Effort: ag.Effort, Provider: ag.PiProvider, SystemPrompt: system, Env: env, Files: creds.files,
 		MaxCostUSD: m.allowance(ctx, ag), SessionCostUSD: th.SessionCost}
 	stdin, _ := json.Marshal(req)
 	rec := &store.Turn{ID: t.id, AgentID: ag.ID, Harness: ag.Harness, SessionID: th.SessionID,

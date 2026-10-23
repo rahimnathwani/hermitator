@@ -34,6 +34,11 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, v *viewer)
 		uses[key] = append(uses[key], a.Name)
 	}
 	secretHosts, _ := s.Store.SecretHosts(ctx, v.User.ID)
+	// ?provider=NAME fills the provider form in to edit that one.
+	editProvider := &store.Provider{API: store.APIResponses}
+	if p, err := s.Store.Provider(ctx, v.User.ID, r.URL.Query().Get("provider")); err == nil {
+		editProvider = p
+	}
 	loc := v.User.Location()
 	now := time.Now().In(loc)
 	spentDay, _ := s.Store.SpentSince(ctx, v.User.ID, time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc))
@@ -60,6 +65,9 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, v *viewer)
 		"Codex":       s.Agents.HasPiProvider(ctx, v.User.ID, orchestrator.ProviderCodex),
 		"CodexSince":  times[store.SecretPiAuth],
 		"HasAgents":   len(agents) > 0,
+		"Providers":   s.providerViews(ctx, v.User.ID, times),
+		"Edit":        editProvider,
+		"APIs":        orchestrator.ProviderAPIs,
 	})
 }
 

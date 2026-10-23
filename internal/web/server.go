@@ -144,6 +144,8 @@ func (s *Server) Handler() (http.Handler, error) {
 	tenant("POST /accounts/{id}/delete", s.deleteAccount)
 	tenant("GET /settings", s.settingsPage)
 	tenant("POST /settings/secret", s.saveSecret)
+	tenant("POST /settings/providers", s.saveProvider)
+	tenant("POST /settings/providers/delete", s.deleteProvider)
 	tenant("POST /settings/numbers", s.addNumber)
 	tenant("POST /settings/numbers/delete", s.deleteNumber)
 	tenant("GET /settings/codex/login", s.codexLogin)

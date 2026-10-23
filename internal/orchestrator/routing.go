@@ -281,7 +281,8 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 	case "effort":
 		m.effortCommand(ctx, ag, cmd.Arg, reply)
 	case "once":
-		model, effort, text := parseOnce(ag, cmd.Arg)
+		suggested, _ := m.modelChoices(ctx, ag)
+		model, effort, text := parseOnce(ag, suggested, cmd.Arg)
 		if text == "" {
 			reply("Usage: /once [MODEL] [EFFORT]: MESSAGE, for example /once opus max: review this design")
 			return
@@ -335,7 +336,8 @@ func (m *Manager) statusText(ctx context.Context, ag *store.Agent, key store.Thr
 	if ag.Harness == store.HarnessPi {
 		fmt.Fprintf(&b, " (%s)", providerOrDefault(ag.PiProvider))
 	}
-	fmt.Fprintf(&b, "\nModel: %s", describeModel(ag))
+	_, def := m.modelChoices(ctx, ag)
+	fmt.Fprintf(&b, "\nModel: %s", describeModel(ag, def))
 	fmt.Fprintf(&b, "\nState: %s", describeState(state, st.Busy))
 	if st.Busy && !st.Since.IsZero() {
 		fmt.Fprintf(&b, " for %s", humanize(time.Since(st.Since)))

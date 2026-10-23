@@ -1185,13 +1185,13 @@ func TestParseOnce(t *testing.T) {
 		{"claude-opus-5-5 low: hi", "claude-opus-5-5", "low", "hi"},
 	}
 	for _, c := range cases {
-		m, e, text := parseOnce(claude, c.in)
+		m, e, text := parseOnce(claude, ClaudeModels, c.in)
 		if m != c.model || e != c.effort || text != c.text {
 			t.Errorf("parseOnce(%q) = %q, %q, %q; want %q, %q, %q", c.in, m, e, text, c.model, c.effort, c.text)
 		}
 	}
 	pi := &store.Agent{Harness: store.HarnessPi, PiProvider: ProviderDeepSeek}
-	if m, e, text := parseOnce(pi, "deepseek-flash minimal: hi"); m != "deepseek-flash" || e != "minimal" || text != "hi" {
+	if m, e, text := parseOnce(pi, PiModels[ProviderDeepSeek], "deepseek-flash minimal: hi"); m != "deepseek-flash" || e != "minimal" || text != "hi" {
 		t.Errorf("pi parseOnce = %q, %q, %q", m, e, text)
 	}
 }

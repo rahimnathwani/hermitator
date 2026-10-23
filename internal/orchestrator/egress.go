@@ -112,6 +112,14 @@ func (m *Manager) egressSecrets(ctx context.Context, u *store.User) []egress.Sec
 		}
 	}
 	out = append(out, m.codexSecrets(ctx, u.ID)...)
+	own, _ := m.store.Providers(ctx, u.ID)
+	for _, p := range own {
+		name := store.SecretProviderPrefix + p.Name
+		if v := m.Secret(ctx, u.ID, name); v != "" && providerHost(p.BaseURL) != "" {
+			out = append(out, egress.Secret{Name: name, Value: v, Hosts: []string{providerHost(p.BaseURL)},
+				Placeholder: egress.Placeholder(m.cfg.EgressKey, u.ID, name, "")})
+		}
+	}
 	hosts, _ := m.store.SecretHosts(ctx, u.ID)
 	for name, hs := range hosts {
 		if v := m.Secret(ctx, u.ID, store.SecretEnvPrefix+name); v != "" && len(hs) > 0 {

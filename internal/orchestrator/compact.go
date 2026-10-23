@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -137,7 +138,7 @@ func (m *Manager) compact(t *activeTurn, ag *store.Agent, th *store.Thread) *sto
 		env[k] = v
 	}
 	req := turn.Request{Harness: ag.Harness, SessionID: th.SessionID, Compact: true, Prompt: compactInstructions(time.Now().In(m.location(ctx, ag))),
-		Model: ag.Model, Provider: ag.PiProvider, Env: env, Files: creds.files}
+		Model: cmp.Or(ag.Model, creds.model), Provider: ag.PiProvider, Env: env, Files: creds.files}
 	stdin, _ := json.Marshal(req)
 	m.store.CreateTurn(ctx, rec)
 	client := spec.Spool()

@@ -101,6 +101,9 @@ func modelKey(harness, provider string) string {
 
 // providerName is a pi provider's short display name.
 func providerName(id string) string {
+	if name, ok := orchestrator.CustomName(id); ok {
+		return name
+	}
 	for _, p := range orchestrator.PiProviders {
 		if p.ID == providerOrCodex(id) {
 			return p.Short
@@ -116,9 +119,9 @@ func providerOrCodex(p string) string {
 	return p
 }
 
-// newAgentFields builds the controls for a; ready is what the owner has a
-// login or key for.
-func newAgentFields(a *store.Agent, ready map[string]bool) agentFields {
+// newAgentFields builds the controls for a; providers are the pi providers
+// its owner can choose, and ready is what they have a login or key for.
+func newAgentFields(a *store.Agent, providers []orchestrator.Provider, ready map[string]bool) agentFields {
 	f := agentFields{
 		ClaudeReady: ready[store.HarnessClaude],
 		Harness: seg("harness", a.Harness,
@@ -126,14 +129,18 @@ func newAgentFields(a *store.Agent, ready map[string]bool) agentFields {
 			option{Value: store.HarnessPi, Label: "pi"}),
 		ClaudeEffort: effortChoice(a, store.HarnessClaude, "effort_claude"),
 		PiEffort:     effortChoice(a, store.HarnessPi, "effort_pi"),
-		Models:       []modelSet{modelChoice(a, store.HarnessClaude, "", "")},
+		Models:       []modelSet{modelChoice(a, store.HarnessClaude, "", "", orchestrator.ClaudeModels)},
 	}
 	f.Provider = seg("provider", providerOrCodex(a.PiProvider))
-	for _, p := range orchestrator.PiProviders {
-		f.Provider.Options = append(f.Provider.Options, option{Value: p.ID, Label: p.Short, Title: p.Name})
+	for _, p := range providers {
+		title := p.Name
+		if p.Custom {
+			title = "Your own provider, " + p.Name
+		}
+		f.Provider.Options = append(f.Provider.Options, option{Value: p.ID, Label: p.Short, Title: title})
 		f.Keys = append(f.Keys, providerKey{Provider: p.ID, Name: p.Short, Login: p.ID == orchestrator.ProviderCodex,
 			Ready: ready[p.ID], Hidden: p.ID != f.Provider.Current})
-		f.Models = append(f.Models, modelChoice(a, store.HarnessPi, p.ID, p.DefaultModel))
+		f.Models = append(f.Models, modelChoice(a, store.HarnessPi, p.ID, p.DefaultModel, p.Models))
 	}
 	return f
 }
@@ -145,12 +152,18 @@ func (s *Server) ready(ctx context.Context, userID string) map[string]bool {
 	_, claude := times[store.SecretClaudeToken]
 	_, deepseek := times[store.SecretDeepSeekKey]
 	_, openrouter := times[store.SecretOpenRouterKey]
-	return map[string]bool{
+	ready := map[string]bool{
 		store.HarnessClaude:             claude,
 		orchestrator.ProviderCodex:      s.Agents.HasPiProvider(ctx, userID, orchestrator.ProviderCodex),
 		orchestrator.ProviderDeepSeek:   deepseek,
 		orchestrator.ProviderOpenRouter: openrouter,
 	}
+	for name := range times {
+		if own, ok := strings.CutPrefix(name, store.SecretProviderPrefix); ok {
+			ready[orchestrator.CustomProvider(own)] = true
+		}
+	}
+	return ready
 }
 
 func effortChoice(a *store.Agent, harness, name string) segmented {
@@ -165,10 +178,9 @@ func effortChoice(a *store.Agent, harness, name string) segmented {
 	return s
 }
 
-func modelChoice(a *store.Agent, harness, provider, def string) modelSet {
+func modelChoice(a *store.Agent, harness, provider, def string, suggested []string) modelSet {
 	key := modelKey(harness, provider)
 	active := key == modelKey(a.Harness, a.PiProvider)
-	suggested := orchestrator.ModelSuggestions(harness, provider)
 	set := modelSet{
 		Harness:  harness,
 		Provider: provider,

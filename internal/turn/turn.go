@@ -33,6 +33,14 @@ const (
 // PiAuthPath is where pi keeps credentials, relative to $HOME.
 const PiAuthPath = "~/.pi/agent/auth.json"
 
+// PiModelsPath is where pi reads extra providers from. The guest merges
+// what the host sends into it rather than replacing it.
+const PiModelsPath = "~/.pi/agent/models.json"
+
+// CustomProviderPrefix starts the names of the providers hermitator puts
+// in pi's models.json; the agent's own entries there are left alone.
+const CustomProviderPrefix = "custom-"
+
 // Harness names.
 const (
 	Claude = "claude"

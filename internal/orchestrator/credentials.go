@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -30,10 +31,10 @@ const (
 
 // PiProviders lists the pi providers offered in the UI, with their
 // default models.
-var PiProviders = []struct{ ID, Name, Short, DefaultModel string }{
-	{ProviderCodex, "ChatGPT subscription (Codex)", "ChatGPT", harness.DefaultModels[ProviderCodex]},
-	{ProviderDeepSeek, "DeepSeek API", "DeepSeek", harness.DefaultModels[ProviderDeepSeek]},
-	{ProviderOpenRouter, "OpenRouter API", "OpenRouter", harness.DefaultModels[ProviderOpenRouter]},
+var PiProviders = []Provider{
+	{ID: ProviderCodex, Name: "ChatGPT subscription (Codex)", Short: "ChatGPT", DefaultModel: harness.DefaultModels[ProviderCodex]},
+	{ID: ProviderDeepSeek, Name: "DeepSeek API", Short: "DeepSeek", DefaultModel: harness.DefaultModels[ProviderDeepSeek]},
+	{ID: ProviderOpenRouter, Name: "OpenRouter API", Short: "OpenRouter", DefaultModel: harness.DefaultModels[ProviderOpenRouter]},
 }
 
 // Secret returns a user's decrypted secret, or "" if it is unset.
@@ -69,6 +70,9 @@ type credentials struct {
 	redact []string
 	// placeholders says the sandbox holds placeholders, not credentials.
 	placeholders bool
+	// model is what to run when the agent names none, for a provider
+	// the harness has no default for.
+	model string
 }
 
 // credentials gathers what an agent's harness needs to talk to its model,
@@ -95,6 +99,15 @@ func (m *Manager) credentials(ctx context.Context, a *store.Agent) (credentials,
 		}
 		if openrouter != "" {
 			c.env["OPENROUTER_API_KEY"] = openrouter
+		}
+		own := m.ownProviders(ctx, a.UserID, &c)
+		if name, ok := CustomName(a.PiProvider); ok {
+			i := slices.IndexFunc(own, func(p *store.Provider) bool { return p.Name == name })
+			if i < 0 {
+				return c, fmt.Sprintf("This agent uses pi with your provider %s, but it has been removed or has no API key. Add it again at %s, or choose another provider at %s/agents/%s/settings",
+					name, settings, strings.TrimRight(m.cfg.PublicURL, "/"), a.ID)
+			}
+			c.model = ownProvider(own[i]).DefaultModel
 		}
 		switch providerOrDefault(a.PiProvider) {
 		case ProviderCodex:
@@ -156,6 +169,11 @@ func (m *Manager) extraCredentials(ctx context.Context, a *store.Agent, c *crede
 		}
 	}
 	for _, f := range c.files {
+		// pi's models.json names its keys rather than holding them, and its
+		// long strings are URLs and model IDs the agent may well mention.
+		if f.Path == turn.PiModelsPath {
+			continue
+		}
 		c.redact = append(c.redact, secretStrings(f.Content)...)
 	}
 }

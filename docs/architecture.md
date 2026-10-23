@@ -434,6 +434,7 @@ answered.
 | Claude subscription | `claude setup-token`, pasted into the panel | `CLAUDE_CODE_OAUTH_TOKEN` |
 | ChatGPT subscription | Device-code login, run inside a sandbox by pi's own code | `~/.pi/agent/auth.json`, synced back when pi refreshes it |
 | DeepSeek, OpenRouter | Pasted into the panel | `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY` |
+| The user's own providers | Base URL, API, models and key entered in the panel | `HERMITATOR_PROVIDER_<NAME>_KEY`, named by the provider's entry in `~/.pi/agent/models.json` |
 | GitHub | `gh auth token` or a fine-grained token, checked against GitHub when saved | `GH_TOKEN` and `GITHUB_TOKEN`, plus a git credential helper set through `GIT_CONFIG_*`, so git over https uses it without it touching the disk |
 | The user's own secrets | Name and value in the panel | An environment variable of that name; the agent's instructions list the names |
 
@@ -445,6 +446,19 @@ sandbox before it is suspended, so it is not left in the upper layer or a
 checkpoint image. Environment variables live only in the turn's processes,
 though background processes started during a turn inherit them.
 
+A user's own provider is any endpoint that speaks OpenAI's Responses or
+Chat Completions API. pi reads it from `models.json` as `custom-<name>`,
+so it cannot collide with a provider pi has built in. That file holds
+the base URL, the models and the name of the key's variable, never the
+key, so it is not scrubbed or redacted. The guest merges it into the file
+already in the sandbox: entries the agent added itself stay, and
+`custom-` entries are replaced, so editing or removing a provider in the
+panel takes effect on the next turn. A file that is not plain JSON (pi
+allows comments) is kept as `models.json.bak`. The first model listed is
+the default, which the host puts on the command line, since pi has none
+for an unknown provider. pi prices these models at nothing, so their
+turns do not count towards spending limits.
+
 ### Keeping credentials out (the egress proxy)
 
 A user can turn on **Keep them out of the sandbox** in Settings. Their
@@ -455,7 +469,8 @@ redirects those agents' HTTPS to public addresses to the egress proxy on
 the gateway (`internal/egress`). The proxy reads the server name from the
 TLS ClientHello. For a host that one of the user's credentials is for
 (`api.anthropic.com` for the Claude token, GitHub's hosts for the GitHub
-token, the hosts a user gives their own secret), it decrypts with a
+token, a user's own provider's base URL host for its key, the hosts a user
+gives their own secret), it decrypts with a
 certificate from hermitator's own CA, swaps placeholders for real values
 in headers, Basic credentials and the query, and sends the request on;
 a placeholder bound for another host is refused with a 403. Every other

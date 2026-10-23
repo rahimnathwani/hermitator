@@ -616,6 +616,7 @@ dialog.modal[open] { animation: modal-in .16s ease-out; }
 .task-main strong { display: block; font-weight: 550; overflow-wrap: anywhere; }
 .task-main .sub { display: block; color: var(--muted); font-size: 12.5px; }
 .inline input[type="number"] { width: 96px; }
+.inline input[type="checkbox"] { width: auto; }
 .hint button.link { color: var(--accent); padding: 0; font-size: inherit; vertical-align: baseline; }
 .modal-body ul.risk { color: var(--text); }
 .modal-body ul.risk:has(strong) { background: var(--warn-soft); border-radius: var(--radius-sm); padding: 8px 10px 8px 26px; }

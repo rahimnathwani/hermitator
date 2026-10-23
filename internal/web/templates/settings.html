@@ -113,6 +113,59 @@
       </div>
     </div>
   </div>
+
+  <div class="setting" id="providers">
+    <div class="about">
+      <h3>Your own providers</h3>
+      <p>Any service that speaks OpenAI's Responses or Chat Completions API, for pi agents. Add one here, then choose it as an agent's provider.</p>
+      <p class="hint">Turns on these count as $0 against your spending limits: hermitator does not know their prices.</p>
+    </div>
+    <div class="control">
+      {{with $d.Providers}}
+      <ul class="numbers">
+        {{range .}}
+        <li id="{{.ID}}"><span><span class="mono">{{.Name}}</span> <span class="muted small">{{.APIName}} at {{.BaseURL}} · {{join .Models ", "}}{{if .KeySaved.IsZero}} · no key{{else}} · key saved {{ago .KeySaved}}{{end}}</span></span>
+          <span class="form-row">
+          <a class="button small" href="/settings?provider={{.Name}}#providers">Edit</a>
+          <form method="post" action="/settings/providers/delete" data-confirm="Remove provider" data-confirm-title="Remove {{.Name}}?">
+            <input type="hidden" name="name" value="{{.Name}}">
+            <template data-confirm-body>
+              <p>{{with (index $d.Uses .ID)}}{{join . ", "}} cannot answer until you choose another provider for {{if gt (len .) 1}}them{{else}}it{{end}}{{else}}No agent uses it right now{{end}}. Its API key is deleted with it.</p>
+              <p>Adding it again under the same name, with its key, brings {{if (index $d.Uses .ID)}}them{{else}}it{{end}} back.</p>
+            </template>
+            <button class="small">Remove…</button>
+          </form>
+          </span>
+        </li>
+        {{end}}
+      </ul>
+      {{end}}
+      {{$e := $d.Edit}}
+      <form method="post" action="/settings/providers" class="narrow-form">
+        <label class="field"><span class="label">Name</span>
+          <input name="name" value="{{$e.Name}}" placeholder="explabs" required pattern="[a-z][a-z0-9\-]{0,29}" autocomplete="off" spellcheck="false" class="mono"{{if $e.Name}} readonly{{end}}>
+          <p class="hint">{{if $e.Name}}Editing {{$e.Name}}. <a href="/settings#providers">Add another instead</a>.{{else}}Lowercase letters, digits and dashes. Saving under a name you already use replaces that provider.{{end}}</p></label>
+        <fieldset class="field"><legend>API</legend>
+          <div class="seg">{{range $d.APIs}}<label><input type="radio" name="api" value="{{.ID}}"{{if eq .ID $e.API}} checked{{end}}><span>{{.Name}}</span></label>{{end}}</div></fieldset>
+        <label class="field"><span class="label">Base URL</span>
+          <input type="url" name="base_url" value="{{$e.BaseURL}}" placeholder="https://api.example.com/v1" required pattern="https://.*" autocomplete="off" spellcheck="false">
+          <p class="hint">The address the API's endpoints are under. Pasting the full <code>…/v1/responses</code> works too.</p></label>
+        <label class="field"><span class="label">API key</span>
+          <input type="password" name="key" placeholder="{{if $e.Name}}Leave empty to keep the saved key{{else}}sk-…{{end}}" autocomplete="off"{{if not $e.Name}} required{{end}}></label>
+        <label class="field"><span class="label">Models</span>
+          <textarea name="models" rows="3" placeholder="qwen3.8-27b" required autocomplete="off" spellcheck="false" class="mono">{{join $e.Models "\n"}}</textarea>
+          <p class="hint">The model IDs it serves, one per line. The first is the default.</p></label>
+        <fieldset class="field"><legend>The models</legend>
+          <label class="inline"><input type="checkbox" name="images" value="1"{{if $e.Images}} checked{{end}}> take images</label>
+          <label class="inline"><input type="checkbox" name="reasoning" value="1"{{if $e.Reasoning}} checked{{end}}> reason, so the Thinking setting applies</label>
+        </fieldset>
+        <label class="field"><span class="label">Context window</span>
+          <span class="inline"><input type="number" name="context_window" min="1" value="{{if $e.ContextWindow}}{{$e.ContextWindow}}{{end}}" placeholder="128000"> tokens</span>
+          <p class="hint">Leave it empty if you do not know; pi assumes 128,000.</p></label>
+        <div class="form-actions"><button>{{if $e.Name}}Save {{$e.Name}}{{else}}{{icon "plus"}}Add provider{{end}}</button></div>
+      </form>
+    </div>
+  </div>
 </section>
 
 <section class="card">
@@ -155,7 +208,7 @@
   <div class="setting">
     <div class="about">
       <h3>Keep them out of the sandbox {{if $d.Egress}}<span class="badge ok">On</span>{{else}}<span class="badge">Off</span>{{end}} <span class="badge info">Beta</span></h3>
-      <p>Your agents hold placeholders, and hermitator swaps in the real values only as a request leaves for that credential's own service: Claude's for the Claude token, ChatGPT's for pi's ChatGPT login, GitHub's for the GitHub token, and the hosts you give for your secrets. An agent tricked into sending its credentials anywhere else sends nothing of use.</p>
+      <p>Your agents hold placeholders, and hermitator swaps in the real values only as a request leaves for that credential's own service: Claude's for the Claude token, ChatGPT's for pi's ChatGPT login, GitHub's for the GitHub token, each of your own providers' for its key, and the hosts you give for your secrets. An agent tricked into sending its credentials anywhere else sends nothing of use.</p>
     </div>
     <div class="control">
       <form method="post" action="/settings/egress" class="inline-form" data-track>

@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -125,12 +126,60 @@ func writeFiles(files []turn.File) (map[string]string, error) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(path, []byte(f.Content), mode); err != nil {
+		content := f.Content
+		if f.Path == turn.PiModelsPath {
+			content = mergePiModels(path, content)
+		}
+		if err := os.WriteFile(path, []byte(content), mode); err != nil {
 			return nil, err
 		}
 		before[f.Path] = f.Content
 	}
 	return before, nil
+}
+
+// mergePiModels puts the host's providers into the models.json at path.
+// Providers the agent added itself stay; the host's from an earlier turn
+// are replaced, so one removed in the panel goes. A file that is not plain
+// JSON (pi allows comments) is kept beside it as models.json.bak.
+func mergePiModels(path, ours string) string {
+	var in struct {
+		Providers map[string]json.RawMessage `json:"providers"`
+	}
+	if json.Unmarshal([]byte(ours), &in) != nil {
+		return ours
+	}
+	old, err := os.ReadFile(path)
+	if err != nil {
+		return ours
+	}
+	doc := map[string]json.RawMessage{}
+	if json.Unmarshal(old, &doc) != nil {
+		os.WriteFile(path+".bak", old, 0o600)
+		return ours
+	}
+	providers := map[string]json.RawMessage{}
+	if raw, ok := doc["providers"]; ok && json.Unmarshal(raw, &providers) != nil {
+		os.WriteFile(path+".bak", old, 0o600)
+		return ours
+	}
+	if providers == nil { // "providers": null
+		providers = map[string]json.RawMessage{}
+	}
+	for name := range providers {
+		if strings.HasPrefix(name, turn.CustomProviderPrefix) {
+			delete(providers, name)
+		}
+	}
+	for name, p := range in.Providers {
+		providers[name] = p
+	}
+	doc["providers"], _ = json.Marshal(providers)
+	b, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return ours
+	}
+	return string(b)
 }
 
 // syncFiles reports Sync files whose contents changed during the turn.
