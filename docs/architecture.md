@@ -215,6 +215,40 @@ share, and a subdomain can set cookies for its parents. The panel's
 cookies are therefore `__Host-` cookies over HTTPS, which browsers accept
 only from the panel's exact host.
 
+### The agent's browser
+
+Some sites need a person to sign in: a password, a CAPTCHA, a code sent to
+a phone. `hermitator-guest browser URL` starts a headless Chromium in the
+sandbox, with its profile in `~/.hermitator/browser`, and the agent sends
+the owner its Browser tab; the agent later drives the signed-in browser
+with Playwright's `connect_over_cdp`. The browser runs under a small daemon
+in a session of its own (`setsid`), so ending or aborting the turn that
+started it leaves it running; like any background process it is
+checkpointed with the sandbox, sessions and all, and Chrome's leftover
+profile lock is removed before each start, since after a crash its PID may
+name something else.
+
+Chrome serves DevTools on loopback only. The daemon forwards port 9223 on
+every interface to it, which the host can reach and other agents cannot
+(bridge ports are isolated, and new inbound connections are dropped for
+everyone but the host). The panel's Browser tab opens a WebSocket to
+hermitator, which holds the agent awake, runs `hermitator-guest browser`
+as a spool job to start it if needed, and relays over CDP
+(`internal/browser`): it attaches to a page in flat-session mode, sizes it
+like the phone (`Emulation.setDeviceMetricsOverride`, mobile), streams
+`Page.startScreencast` JPEGs to the page, acknowledging each frame at once
+and passing on only the newest, and plays taps, scrolls and typing back as
+`Input` events, scaled by the frame's own viewport. It follows new tabs and
+popups as they open (an OAuth window is one) and falls back to another page
+when the one shown closes.
+
+Cookies in that profile are real credentials in the agent's own files,
+unlike the placeholders the egress proxy swaps, so the agent can use them
+however it likes; the Browser tab says so, and *Forget this browser* on
+the agent's Settings deletes the profile. Chromium identifies itself with
+a desktop user agent of its own version, since sites refuse sign-ins from
+one that calls itself headless.
+
 ## Turns
 
 ### From message to reply
@@ -557,6 +591,9 @@ including symlinks pointing at host paths. So:
   credentials.
 - The web terminal's environment, which holds credentials, goes to runsc in
   a temporary 0600 process spec file rather than in its arguments.
+- The agent's browser and its DevTools are the agent's: the host only
+  connects to them, and nothing it reads from them reaches host files.
+  What the owner signs in to there, the agent holds for real.
 
 Users are separated by ownership checks on every request (agents, accounts
 and routes all belong to one user). Admins manage users but cannot own

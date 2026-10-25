@@ -1,0 +1,25 @@
+{{define "content"}}
+{{$d := .Data}}{{$a := $d.Agent}}
+{{template "agent-head" $d}}
+<div class="callout warn">{{icon "alert"}}<span>Sign in here only where you would trust {{$a.Name}} with your password. This browser runs in its sandbox and keeps its cookies there: real credentials it can read and send anywhere, unlike the keys hermitator keeps out of the sandbox. <em>Forget this browser</em>, on the Settings tab, deletes them.</span></div>
+<div class="browser section" data-mount="browser" data-src="/agents/{{$a.ID}}/browser/ws">
+  <form class="browser-bar" data-bar>
+    <button type="button" class="ghost icon-only small" data-back title="Back" aria-label="Back">{{icon "back"}}</button>
+    <button type="button" class="ghost icon-only small" data-reload title="Reload" aria-label="Reload">{{icon "restart"}}</button>
+    <input name="url" data-url type="text" inputmode="url" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Address" aria-label="Address">
+  </form>
+  <select data-tabs hidden aria-label="Tabs"></select>
+  <div class="browser-screen">
+    <canvas data-screen aria-label="The agent's browser"></canvas>
+    <input data-keys class="browser-keys" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Type into the page">
+  </div>
+  <div class="browser-keyrow">
+    <button type="button" class="small" data-type>{{icon "key"}}Keyboard</button>
+    <button type="button" class="small ghost" data-key="Enter">Enter</button>
+    <button type="button" class="small ghost" data-key="Backspace">Delete</button>
+    <button type="button" class="small ghost" data-key="Tab">Tab</button>
+  </div>
+  <p data-message role="status" class="hint">Starting the browser inside the sandbox…</p>
+  <p class="hint">The agent stays awake while this page is open. Tap to click, drag to scroll, and use <em>Keyboard</em> to type into the field you tapped. Tell the agent in the chat when you are done.</p>
+</div>
+{{end}}

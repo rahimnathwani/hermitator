@@ -38,6 +38,7 @@
   <a href="/agents/{{$a.ID}}/chats"{{if eq .Tab "chats"}} aria-current="page"{{end}}>Chats{{with $a.Routes}} <span class="count">{{len .}}</span>{{end}}</a>
   <a href="/agents/{{$a.ID}}/settings"{{if eq .Tab "settings"}} aria-current="page"{{end}}>Settings</a>
   <a href="/agents/{{$a.ID}}/terminal"{{if eq .Tab "terminal"}} aria-current="page"{{end}}>Terminal</a>
+  <a href="/agents/{{$a.ID}}/browser"{{if eq .Tab "browser"}} aria-current="page"{{end}}>Browser</a>
 </nav>
 {{end}}
 

@@ -562,6 +562,16 @@ tr.suspended td { color: var(--muted); }
 /* Terminal */
 .terminal { color-scheme: dark; height: calc(100vh - 280px); min-height: 360px; background: #0b0d0f; border-radius: var(--radius-lg); padding: 10px; border: 1px solid var(--border); }
 
+/* The agent's browser */
+.browser-bar { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.browser-bar input { flex: 1; min-width: 0; }
+.browser [data-tabs] { width: 100%; margin-bottom: 8px; }
+.browser-screen { position: relative; border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: #fff; }
+.browser-screen canvas { display: block; touch-action: none; }
+/* Focusable, so the phone raises its keyboard, but out of sight. */
+.browser-keys { position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; font-size: 16px; }
+.browser-keyrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
 /* Odds and ends */
 .how { margin: 12px 0 0; padding-left: 18px; display: grid; gap: 6px; color: var(--text-2); font-size: 13.5px; }
 .how + .hint { margin-top: 10px; }

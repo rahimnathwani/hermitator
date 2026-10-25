@@ -11,6 +11,7 @@ const mounts = {
   codex: mountCodex,
   claude: mountClaude,
   terminal: mountTerminal,
+  browser: mountBrowser,
 };
 
 function mountAll(root) {
@@ -474,6 +475,133 @@ function loadScript(url) {
     s.onerror = reject;
     document.head.append(s);
   });
+}
+
+// The agent's browser: the server streams JPEGs of the page and takes
+// taps, scrolls and typing back (see internal/browser.Relay). Taps go as
+// fractions of the picture, so they land right whatever its scale.
+function mountBrowser(el) {
+  const canvas = el.querySelector("[data-screen]");
+  const keys = el.querySelector("[data-keys]");
+  const address = el.querySelector("[data-url]");
+  const tabs = el.querySelector("[data-tabs]");
+  const message = el.querySelector("[data-message]");
+  const ctx2d = canvas.getContext("2d");
+  const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${scheme}//${location.host}${el.dataset.src}`);
+  ws.binaryType = "blob";
+  const send = (msg) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(msg));
+
+  const size = () => {
+    const width = Math.round(canvas.parentElement.clientWidth);
+    const height = Math.max(360, Math.round(window.innerHeight - canvas.getBoundingClientRect().top - 120));
+    const scale = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+    canvas.style.width = width + "px";
+    canvas.style.height = height + "px";
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
+    send({ type: "size", width, height, scale });
+  };
+  let resizing;
+  const onResize = () => {
+    clearTimeout(resizing);
+    resizing = setTimeout(size, 250);
+  };
+
+  let drawing = false;
+  ws.onopen = () => size();
+  ws.onmessage = async (e) => {
+    if (typeof e.data !== "string") {
+      // Only the newest frame matters; one still decoding is skipped past.
+      if (drawing) return;
+      drawing = true;
+      try {
+        const img = await createImageBitmap(e.data);
+        ctx2d.drawImage(img, 0, 0, canvas.width, canvas.height);
+        img.close();
+        message.textContent = "";
+      } catch {}
+      drawing = false;
+      return;
+    }
+    const ev = JSON.parse(e.data);
+    if (ev.type === "error") {
+      message.textContent = ev.message;
+    } else if (ev.type === "page") {
+      if (document.activeElement !== address) address.value = ev.url === "about:blank" ? "" : ev.url;
+      tabs.replaceChildren(...ev.tabs.map((t) => {
+        const o = h("option", { value: t.id }, t.title || t.url || "New tab");
+        o.selected = t.current;
+        return o;
+      }));
+      tabs.hidden = ev.tabs.length < 2;
+    }
+  };
+  ws.onclose = () => {
+    if (!message.textContent) message.textContent = "Disconnected. Reload the page to connect again.";
+  };
+
+  // A tap clicks; a drag scrolls the page under it.
+  let start = null;
+  const at = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height, cy: e.clientY };
+  };
+  canvas.addEventListener("pointerdown", (e) => {
+    start = { ...at(e), last: e.clientY, moved: false };
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!start) return;
+    if (Math.abs(e.clientY - start.cy) > 8) start.moved = true;
+    if (start.moved) {
+      send({ type: "scroll", x: start.x, y: start.y, dy: start.last - e.clientY });
+      start.last = e.clientY;
+    }
+  });
+  canvas.addEventListener("pointerup", (e) => {
+    if (start && !start.moved) {
+      const p = at(e);
+      send({ type: "tap", x: p.x, y: p.y });
+      // With a mouse, typing goes straight to the page; on a phone the
+      // keyboard waits for the Keyboard button, or every tap would raise it.
+      if (e.pointerType === "mouse") keys.focus({ preventScroll: true });
+    }
+    start = null;
+  });
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const p = at(e);
+    send({ type: "scroll", x: p.x, y: p.y, dy: e.deltaY });
+  }, { passive: false });
+
+  // The hidden field only collects typing; it is emptied as it goes.
+  const special = new Set(["Enter", "Backspace", "Tab", "Escape", "Delete", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]);
+  keys.addEventListener("keydown", (e) => {
+    if (special.has(e.key) && !keys.value) {
+      e.preventDefault();
+      send({ type: "key", key: e.key });
+    }
+  });
+  keys.addEventListener("input", () => {
+    if (keys.value) send({ type: "text", text: keys.value });
+    keys.value = "";
+  });
+  el.querySelector("[data-type]").addEventListener("click", () => keys.focus({ preventScroll: true }));
+  for (const b of el.querySelectorAll("[data-key]")) b.addEventListener("click", () => send({ type: "key", key: b.dataset.key }));
+  el.querySelector("[data-back]").addEventListener("click", () => send({ type: "back" }));
+  el.querySelector("[data-reload]").addEventListener("click", () => send({ type: "reload" }));
+  el.querySelector("[data-bar]").addEventListener("submit", (e) => {
+    e.preventDefault();
+    send({ type: "navigate", url: address.value });
+    address.blur();
+  });
+  tabs.addEventListener("change", () => send({ type: "tab", id: tabs.value }));
+  window.addEventListener("resize", onResize);
+  return () => {
+    window.removeEventListener("resize", onResize);
+    ws.close();
+  };
 }
 
 async function mountTerminal(el) {

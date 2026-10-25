@@ -20,6 +20,8 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"github.com/rahimnathwani/hermitator/internal/auth"
 	"github.com/rahimnathwani/hermitator/internal/gateway"
 	"github.com/rahimnathwani/hermitator/internal/orchestrator"
@@ -212,12 +214,12 @@ func TestUsersCannotSeeEachOthersAgents(t *testing.T) {
 	if code, body := alice.get("/agents/" + id); code != http.StatusOK || !strings.Contains(body, "secret-project") {
 		t.Fatalf("owner view: %d", code)
 	}
-	for _, path := range []string{"/agents/" + id, "/agents/" + id + "/card", "/agents/" + id + "/terminal"} {
+	for _, path := range []string{"/agents/" + id, "/agents/" + id + "/card", "/agents/" + id + "/terminal", "/agents/" + id + "/browser"} {
 		if code, _ := bob.get(path); code != http.StatusNotFound {
 			t.Errorf("bob GET %s: %d", path, code)
 		}
 	}
-	for _, path := range []string{"/agents/" + id + "/delete", "/agents/" + id + "/settings", "/agents/" + id + "/prompt", "/agents/" + id + "/wake"} {
+	for _, path := range []string{"/agents/" + id + "/delete", "/agents/" + id + "/settings", "/agents/" + id + "/prompt", "/agents/" + id + "/wake", "/agents/" + id + "/browser/delete"} {
 		if code, _ := bob.post(path, url.Values{"confirm": {"secret-project"}, "name": {"x"}}); code != http.StatusNotFound {
 			t.Errorf("bob POST %s: %d", path, code)
 		}
@@ -595,7 +597,7 @@ func TestAgentTabs(t *testing.T) {
 	alice := f.login(t, "alice@example.com")
 	bob := f.login(t, "bob@example.com")
 	id := alice.createAgent("bot")
-	for _, tab := range []string{"", "/chats", "/settings", "/terminal"} {
+	for _, tab := range []string{"", "/chats", "/settings", "/terminal", "/browser"} {
 		code, body := alice.get("/agents/" + id + tab)
 		if code != http.StatusOK || !strings.Contains(body, `href="/agents/`+id+tab+`" aria-current="page"`) {
 			t.Fatalf("tab %q: %d, or not marked current", tab, code)
@@ -911,6 +913,32 @@ func TestNewAgentRejectsABadRepository(t *testing.T) {
 	}
 	if _, body := alice.get("/agents/new"); !strings.Contains(body, `name="repo"`) {
 		t.Fatal("the form has no repository field")
+	}
+}
+
+// Opening the Browser tab wakes the agent and starts its browser there;
+// when that fails, the page is told why rather than left blank.
+func TestBrowserSocketSaysWhyItCannotStart(t *testing.T) {
+	t.Setenv("PLAYWRIGHT_BROWSERS_PATH", t.TempDir())
+	t.Setenv("HERMITATOR_CHROMIUM", "")
+	f := setup(t)
+	alice := f.login(t, "alice@example.com")
+	id := alice.createAgent("bot")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	ws := "ws" + strings.TrimPrefix(f.srv.URL, "http") + "/agents/" + id + "/browser/ws"
+	conn, _, err := websocket.Dial(ctx, ws, &websocket.DialOptions{HTTPClient: alice.http})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+	_, msg, err := conn.Read(ctx)
+	if err != nil || !strings.Contains(string(msg), `"type":"error"`) || !strings.Contains(string(msg), "no Playwright Chromium") {
+		t.Fatalf("first message = %s, %v", msg, err)
+	}
+	bob := f.login(t, "bob@example.com")
+	if _, resp, err := websocket.Dial(ctx, ws, &websocket.DialOptions{HTTPClient: bob.http}); err == nil || resp == nil || resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("someone else's browser: %v %v", resp, err)
 	}
 }
 

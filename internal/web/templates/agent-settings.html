@@ -86,6 +86,21 @@
 </section>
 {{end}}
 
+<section class="card">
+  <div class="card-head"><div><h2>Browser</h2><p>{{$a.Name}}'s own Chromium, where you sign in to sites for it from the <a href="/agents/{{$a.ID}}/browser">Browser</a> tab. It keeps cookies and saved logins in the sandbox, and {{$a.Name}} can use them.</p></div></div>
+  <form method="post" action="/agents/{{$a.ID}}/browser/delete" class="form-actions" data-confirm="Forget browser" data-confirm-title="Forget {{$a.Name}}'s browser?">
+    <template data-confirm-body>
+      <p>The browser closes and its profile is deleted.</p>
+      <ul>
+        <li>Every site you signed in to there is signed out, for {{$a.Name}} too.</li>
+        <li>Cookies, saved logins and history in it are gone; nothing else in the sandbox changes.</li>
+        <li>To use a site again, sign in again from the Browser tab.</li>
+      </ul>
+    </template>
+    <button class="danger">{{icon "trash"}}Forget this browser…</button>
+  </form>
+</section>
+
 <section class="card danger-zone">
   <div class="card-head"><div><h2>Delete agent</h2><p>Deletes the sandbox and every file in it. This cannot be undone.</p></div></div>
   <form method="post" action="/agents/{{$a.ID}}/delete" data-confirm="Delete agent" data-confirm-title="Delete {{$a.Name}}?"

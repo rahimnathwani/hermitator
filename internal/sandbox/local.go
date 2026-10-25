@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,6 +12,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/rahimnathwani/hermitator/internal/turn"
 )
 
 // Local runs the guest as an ordinary host process with no isolation at
@@ -51,6 +54,7 @@ func (l *Local) env(s *Spec) []string {
 		"HERMITATOR_SPOOL="+s.SpoolDir(),
 		"HERMITATOR_SHARED="+s.SharedDir(),
 		"HERMITATOR_WORKSPACE="+s.localWorkspace(),
+		turn.BrowserListenEnv+"="+net.JoinHostPort("127.0.0.1", strconv.Itoa(turn.BrowserPort)),
 	)
 }
 

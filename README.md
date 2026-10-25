@@ -85,6 +85,12 @@ keep hundreds of them.
 - **Preview links.** With a preview domain set up, an agent running a dev
   server sends you a link (`/preview 3000`, or the agent asks for one) that
   opens it on your phone, waking the agent if it was asleep.
+- **Sign in for your agent.** When a site wants a login, a CAPTCHA or a code
+  from your phone, the agent opens it in its own browser and sends you the
+  agent's Browser tab, where you see the page and tap and type into it from
+  your phone. The agent then uses the signed-in session. Its cookies are
+  real, so sign in only where you would trust the agent with the password;
+  *Forget this browser* deletes them.
 - **A control panel.** Live activity per agent, a console for talking to it
   from the browser, a terminal inside the sandbox, users with an admin who can
   act as them, and an audit log.

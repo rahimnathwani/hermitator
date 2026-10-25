@@ -78,6 +78,13 @@ func (m *Manager) agentPrompt(spec *sandbox.Spec, loc *time.Location, last Messa
 	if m.canSpeak() {
 		prompt += "\n- To answer out loud, run: whatsapp-send --voice \"what to say\". It arrives as a voice note. Do that when the user sent a voice note and asked for voice back, or is plainly away from a screen; keep it short and plain, with nothing that only makes sense written down, and send anything they will need to read as text. An .ogg file sent with whatsapp-send also arrives as a voice note."
 	}
+	if m.newGuest(spec) {
+		where := "the Browser tab of your page in hermitator"
+		if m.cfg.PublicURL != "" {
+			where = strings.TrimSuffix(m.cfg.PublicURL, "/") + BrowserPath(spec.ID)
+		}
+		prompt += "\n- When a site needs the user to sign in (a login, a CAPTCHA, a code sent to their phone), run: hermitator-guest browser URL. It opens URL in your own Chromium, which keeps its cookies; send the user " + where + ", where they can see and use it, and end your turn. When they say they are done, use the signed-in session from Playwright with chromium.connect_over_cdp(\"http://127.0.0.1:9222\") and browser.contexts[0]. Leave the browser running while you need the session (it sleeps with the machine; closing it ends sessions that last only until the browser closes); hermitator-guest browser --close quits it."
+	}
 	if m.Previews() {
 		prompt += "\n- To let the user open a web server you run (a dev server, a demo), have it listen on 0.0.0.0 (vite --host, next dev -H 0.0.0.0) and run: hermitator-guest preview PORT. It prints a link to send them; it works from their phone, and opening it wakes this machine. Anyone with the link can see the page, so offer it for things meant to be seen."
 	}

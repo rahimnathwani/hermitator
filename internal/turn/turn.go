@@ -33,6 +33,19 @@ const (
 	TasksFile = "tasks.json"
 )
 
+// The agent's browser, for signing in to websites from the panel. Chrome
+// serves DevTools on BrowserDebugPort on loopback only; the guest forwards
+// BrowserPort on every interface to it, so the host can reach it while
+// other agents cannot (their bridge ports are isolated from each other).
+const (
+	BrowserDebugPort = 9222
+	BrowserPort      = 9223
+	// BrowserListenEnv overrides the forwarder's address. The unsandboxed
+	// runtime sets it to loopback, since there it would be on the host's
+	// own interfaces.
+	BrowserListenEnv = "HERMITATOR_BROWSER_LISTEN"
+)
+
 // PiAuthPath is where pi keeps credentials, relative to $HOME.
 const PiAuthPath = "~/.pi/agent/auth.json"
 
