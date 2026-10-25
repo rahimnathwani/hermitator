@@ -6,5 +6,5 @@ import "embed"
 
 // FS contains the files.
 //
-//go:embed *.mjs
+//go:embed *.mjs *.py
 var FS embed.FS

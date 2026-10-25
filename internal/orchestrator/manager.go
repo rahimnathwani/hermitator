@@ -78,6 +78,7 @@ type Manager struct {
 	msgr    Messenger
 	egress  egressCache
 	codex   codexState
+	claude  claudeLogins
 	replies sentReplies
 	// bg counts background deliveries in flight, and loops the goroutines
 	// that run until the context ends (actors, the reaper, the scheduler,
@@ -156,6 +157,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	m.goLoop(m.scheduler)
 	m.goLoop(m.resender)
+	m.goLoop(m.noticeLoop)
 	m.tellRestarted()
 	agents, err := m.store.Agents(ctx, "")
 	if err != nil {

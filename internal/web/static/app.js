@@ -9,6 +9,7 @@ const mounts = {
   log: mountLog,
   pair: mountPair,
   codex: mountCodex,
+  claude: mountClaude,
   terminal: mountTerminal,
 };
 
@@ -408,6 +409,59 @@ function mountCodex(el) {
       start.disabled = false;
       message.textContent = data(e).message;
     });
+  });
+  return () => src?.close();
+}
+
+// The Claude sign-in: the stream gives the link and the login's ID, the
+// code pasted from the sign-in page goes back by POST, and the stream says
+// whether it worked.
+function mountClaude(el) {
+  const start = el.querySelector("[data-start]");
+  const signin = el.querySelector("[data-signin]");
+  const form = el.querySelector("[data-code-form]");
+  const message = el.querySelector("[data-message]");
+  let src, login;
+  const reset = (text) => {
+    src?.close();
+    signin.hidden = true;
+    start.disabled = false;
+    form.querySelector("button").disabled = false;
+    message.textContent = text;
+  };
+  start.addEventListener("click", () => {
+    start.disabled = true;
+    message.textContent = "Starting claude setup-token inside your sandbox…";
+    src = new EventSource(el.dataset.src);
+    src.addEventListener("url", (e) => {
+      const ev = data(e);
+      login = ev.login;
+      signin.querySelector("[data-url]").href = ev.verification_uri;
+      signin.hidden = false;
+      message.textContent = "";
+      form.querySelector("input").focus();
+    });
+    src.addEventListener("done", () => {
+      src.close();
+      signin.hidden = true;
+      message.textContent = "Claude is connected.";
+      setTimeout(() => location.reload(), 800);
+    });
+    src.addEventListener("error", (e) => {
+      if (!e.data) return;
+      reset(data(e).message);
+    });
+  });
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const body = new URLSearchParams({ login, code: form.elements.code.value });
+    form.querySelector("button").disabled = true;
+    message.textContent = "Checking the code…";
+    const res = await fetch(el.dataset.code, { method: "POST", body });
+    if (!res.ok) {
+      form.querySelector("button").disabled = false;
+      message.textContent = (await res.text()).trim();
+    }
   });
   return () => src?.close();
 }

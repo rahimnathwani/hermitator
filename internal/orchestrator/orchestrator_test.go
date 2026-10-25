@@ -14,9 +14,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"testing/fstest"
 	"time"
 
+	"github.com/rahimnathwani/hermitator/internal/guestfiles"
 	"github.com/rahimnathwani/hermitator/internal/sandbox"
 	"github.com/rahimnathwani/hermitator/internal/secrets"
 	"github.com/rahimnathwani/hermitator/internal/store"
@@ -256,7 +256,7 @@ func setup(t *testing.T) *env {
 	images := filepath.Join(root, "images")
 	os.MkdirAll(filepath.Join(images, "universal-test", "rootfs"), 0o755)
 	os.Symlink("universal-test", filepath.Join(images, "universal"))
-	tools, err := sandbox.InstallTools(filepath.Join(root, "tools"), guestBinary, fstest.MapFS{"pi-login.mjs": {Data: []byte("")}})
+	tools, err := sandbox.InstallTools(filepath.Join(root, "tools"), guestBinary, guestfiles.FS)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -348,7 +348,7 @@ func TestTurnEndToEnd(t *testing.T) {
 	// Without a token, the agent explains what is missing.
 	e.link(t, chat)
 	e.m.HandleMessage(ctx, e.msg(chat, "hello", true))
-	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "claude setup-token") || !strings.Contains(got.body, "https://hermitator.example.com/settings") {
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "Sign in with Claude") || !strings.Contains(got.body, "https://hermitator.example.com/settings") {
 		t.Fatalf("missing-token reply = %q", got.body)
 	}
 	if got := e.rec.wait(t, "react"); got.body != "❌" {

@@ -13,9 +13,23 @@
   <div class="setting" id="claude">
     <div class="about">
       <h3>Claude Code {{if $d.Claude.IsZero}}<span class="badge">Not set</span>{{else}}<span class="badge ok">Saved {{ago $d.Claude}}</span>{{end}}</h3>
-      <p>Uses your Claude subscription. On your own computer, run <code class="copy">claude setup-token</code> and paste the token it prints.</p>
+      <p>Uses your Claude subscription. Sign in here, which runs <code>claude setup-token</code> in one of your sandboxes, or run <code class="copy">claude setup-token</code> on a computer and paste the token it prints. Tokens last a year; you are told on WhatsApp a month before.</p>
     </div>
     <div class="control">
+      {{if $d.HasAgents}}
+      <div data-mount="claude" data-src="/settings/claude/login" data-code="/settings/claude/code" class="section">
+        <button data-start>{{icon "external"}}{{if $d.Claude.IsZero}}Sign in with Claude{{else}}Sign in again{{end}}</button>
+        <div data-signin hidden>
+          <p>1. Open <a data-url target="_blank" rel="noopener">Claude's sign-in page</a> and approve.</p>
+          <p>2. Copy the code it shows, and paste it here.</p>
+          <form data-code-form class="inline-form">
+            <input type="text" name="code" placeholder="Code from the sign-in page" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Code from Claude's sign-in page" required>
+            <button>Connect</button>
+          </form>
+        </div>
+        <p data-message role="status" class="hint"></p>
+      </div>
+      {{end}}
       <div class="form-row">
       <form method="post" action="/settings/secret" class="inline-form">
         <input type="hidden" name="field" value="claude">

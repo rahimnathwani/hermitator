@@ -447,7 +447,7 @@ answered.
 
 | Credential | Comes from | Reaches the sandbox as |
 |---|---|---|
-| Claude subscription | `claude setup-token`, pasted into the panel | `CLAUDE_CODE_OAUTH_TOKEN` |
+| Claude subscription | `claude setup-token`, run inside a sandbox from the panel, or pasted in | `CLAUDE_CODE_OAUTH_TOKEN` |
 | ChatGPT subscription | Device-code login, run inside a sandbox by pi's own code | `~/.pi/agent/auth.json`, synced back when pi refreshes it |
 | DeepSeek, OpenRouter | Pasted into the panel | `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY` |
 | The user's own providers | Base URL, API, models and key entered in the panel | `HERMITATOR_PROVIDER_<NAME>_KEY`, named by the provider's entry in `~/.pi/agent/models.json` |
@@ -461,6 +461,23 @@ it), never on a command line. pi's credential file is removed from the
 sandbox before it is suspended, so it is not left in the upper layer or a
 checkpoint image. Environment variables live only in the turn's processes,
 though background processes started during a turn inherit them.
+
+Signing in with Claude from the panel runs Claude Code's own
+`setup-token` in one of the user's sandboxes, through
+`internal/guestfiles/claude-login.py`: it gives the command a pseudo-terminal
+1000 columns wide (so the sign-in link is never wrapped), a throwaway HOME
+and none of the agent's credentials, and reports the link as a JSON line.
+setup-token then waits for the code the sign-in page shows; the user pastes
+it into the panel, the host writes it under `/shared/login/` (whole, then
+renamed, since the helper takes the file the moment it appears), and the
+helper types it in and reports the token, which is stored like a pasted
+one. hermitator keeps no copy of Anthropic's OAuth flow. Like the ChatGPT
+login, the token passes through the sandbox on its way, where the agent
+could read it; it is the user's own agent, which is given the token on
+every turn anyway. A token lasts a year from when it was made, which
+hermitator takes to be when it was saved: a month and three days before
+that, and once after, the owner is told on WhatsApp (a `notices` row makes
+each warning go once).
 
 A user's own provider is any endpoint that speaks OpenAI's Responses or
 Chat Completions API. pi reads it from `models.json` as `custom-<name>`,

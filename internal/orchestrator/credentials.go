@@ -84,7 +84,7 @@ func (m *Manager) credentials(ctx context.Context, a *store.Agent) (credentials,
 	case store.HarnessClaude:
 		tok := m.Secret(ctx, a.UserID, store.SecretClaudeToken)
 		if tok == "" {
-			return c, "This agent runs Claude Code, but no Claude token is set up. Run `claude setup-token` on your own computer and paste the token at " + settings
+			return c, "This agent runs Claude Code, but no Claude token is set up. Sign in with Claude at " + settings + "#claude, which works from your phone."
 		}
 		c.env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
 	case store.HarnessPi:
@@ -327,21 +327,22 @@ func (m *Manager) Terminal(ctx context.Context, agentID string) (cmd *exec.Cmd, 
 	return cmd, done, nil
 }
 
-// LoginEvent reports progress of a ChatGPT (Codex) login.
+// LoginEvent reports progress of a ChatGPT (Codex) or Claude login.
 type LoginEvent struct {
-	Type            string `json:"type"` // device_code, info, done, error
+	Type            string `json:"type"` // device_code, url, info, done, error
 	UserCode        string `json:"user_code,omitempty"`
 	VerificationURI string `json:"verification_uri,omitempty"`
 	Message         string `json:"message,omitempty"`
+	// Login names a login that waits for a code, for ClaudeLoginCode.
+	Login string `json:"login,omitempty"`
 }
 
 // ErrNoAgent is returned when a user needs an agent for something.
 var ErrNoAgent = errors.New("create an agent first")
 
-// CodexLogin runs pi's device-code login for ChatGPT inside one of the
-// user's sandboxes and stores the resulting credential. The returned
-// channel closes when the login ends.
-func (m *Manager) CodexLogin(ctx context.Context, userID string) (<-chan LoginEvent, error) {
+// loginAgent picks the sandbox a login runs in: one already awake, else
+// the most recently used.
+func (m *Manager) loginAgent(ctx context.Context, userID string) (*store.Agent, error) {
 	agents, err := m.store.Agents(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -349,13 +350,23 @@ func (m *Manager) CodexLogin(ctx context.Context, userID string) (<-chan LoginEv
 	if len(agents) == 0 {
 		return nil, ErrNoAgent
 	}
-	// Prefer a sandbox that is already awake, then the most recently used.
 	ag := agents[0]
 	for _, a := range agents[1:] {
 		awake, agAwake := a.State == sandbox.Running, ag.State == sandbox.Running
 		if (awake && !agAwake) || (awake == agAwake && a.LastActive.After(ag.LastActive)) {
 			ag = a
 		}
+	}
+	return ag, nil
+}
+
+// CodexLogin runs pi's device-code login for ChatGPT inside one of the
+// user's sandboxes and stores the resulting credential. The returned
+// channel closes when the login ends.
+func (m *Manager) CodexLogin(ctx context.Context, userID string) (<-chan LoginEvent, error) {
+	ag, err := m.loginAgent(ctx, userID)
+	if err != nil {
+		return nil, err
 	}
 	spec, err := m.Spec(ag)
 	if err != nil {

@@ -940,3 +940,18 @@ func TestHostOperatorToggle(t *testing.T) {
 		t.Fatal("not withdrawn")
 	}
 }
+
+func TestClaudeSignIn(t *testing.T) {
+	f := setup(t)
+	alice := f.login(t, "alice@example.com")
+	if _, body := alice.get("/settings"); strings.Contains(body, `data-mount="claude"`) {
+		t.Fatal("sign-in offered with no sandbox to run it in")
+	}
+	alice.createAgent("bot")
+	if _, body := alice.get("/settings"); !strings.Contains(body, `data-mount="claude"`) || !strings.Contains(body, "Sign in with Claude") {
+		t.Fatal("no Claude sign-in on the settings page")
+	}
+	if code, _ := alice.post("/settings/claude/code", url.Values{"login": {"nope"}, "code": {"x#y"}}); code != http.StatusBadRequest {
+		t.Fatalf("code for no login: %d", code)
+	}
+}

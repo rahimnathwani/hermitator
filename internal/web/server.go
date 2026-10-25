@@ -149,6 +149,8 @@ func (s *Server) Handler() (http.Handler, error) {
 	tenant("POST /settings/numbers", s.addNumber)
 	tenant("POST /settings/numbers/delete", s.deleteNumber)
 	tenant("GET /settings/codex/login", s.codexLogin)
+	tenant("GET /settings/claude/login", s.claudeLogin)
+	tenant("POST /settings/claude/code", s.claudeCode)
 	tenant("POST /settings/codex/disconnect", s.codexDisconnect)
 
 	// Everyone can change their own password.

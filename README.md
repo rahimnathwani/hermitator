@@ -32,7 +32,9 @@ keep hundreds of them.
   with background processes (a dev server, a database) is checkpointed, and
   those processes carry on when the next message arrives.
 - **Your own subscriptions.** Claude Code runs with a token from
-  `claude setup-token`. pi runs with a ChatGPT subscription (through OpenAI's
+  `claude setup-token`, which the panel can make for you, from your phone,
+  by running it in a sandbox; you hear on WhatsApp a month before it
+  expires. pi runs with a ChatGPT subscription (through OpenAI's
   device-code login, done from the panel), a DeepSeek key, an OpenRouter
   key, or any provider you add that speaks OpenAI's Responses or Chat
   Completions API.
@@ -221,8 +223,10 @@ hermitator user add you@example.com            # prints a password
 Admins manage users but do not own agents themselves, so you will usually
 want both. Then log in as yourself and:
 
-1. **Settings:** paste the token from running `claude setup-token` on your own
-   computer, and/or connect ChatGPT or add API keys for pi.
+1. **Settings:** sign in with Claude (this works once you have an agent,
+   since it runs `claude setup-token` in its sandbox, so you may want step
+   3 first), or paste a token from running `claude setup-token` yourself;
+   and/or connect ChatGPT or add API keys for pi.
 2. **WhatsApp:** link the agents' number by scanning the QR code with the
    phone that has it, or by typing a code into that phone.
 3. **Agents:** create one.

@@ -95,6 +95,9 @@ func (s *Server) saveSecret(w http.ResponseWriter, r *http.Request, v *viewer) {
 		return
 	}
 	s.Agents.ForgetSecrets(v.User.ID)
+	if name == store.SecretClaudeToken {
+		s.Store.ClearNotice(r.Context(), v.User.ID, orchestrator.ClaudeExpiryNotice)
+	}
 	if value == "" {
 		s.audit(r, v, "secret.delete", name)
 		s.back(w, r, "/settings", "Removed.")
@@ -138,6 +141,56 @@ func (s *Server) codexLogin(w http.ResponseWriter, r *http.Request, v *viewer) {
 			st.ping()
 		}
 	}
+}
+
+// claudeLogin runs `claude setup-token` in a sandbox and streams its
+// progress: the sign-in link first, then done or an error. The code from
+// the sign-in page comes back through claudeCode. Leaving the page
+// cancels it.
+func (s *Server) claudeLogin(w http.ResponseWriter, r *http.Request, v *viewer) {
+	events, err := s.Agents.ClaudeLogin(r.Context(), v.User.ID)
+	st, serr := newStream(w)
+	if serr != nil {
+		return
+	}
+	if err != nil {
+		msg := err.Error()
+		if errors.Is(err, orchestrator.ErrNoAgent) {
+			msg = "The sign-in runs inside one of your agents' sandboxes. Create an agent first."
+		}
+		st.send("error", orchestrator.LoginEvent{Type: "error", Message: msg})
+		return
+	}
+	tick := time.NewTicker(pingInterval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			st.send(ev.Type, ev)
+			if ev.Type == "done" {
+				s.audit(r, v, "secret.set", store.SecretClaudeToken+" via setup-token")
+			}
+		case <-tick.C:
+			st.ping()
+		}
+	}
+}
+
+// claudeCode passes the code from Claude's sign-in page to a waiting
+// claudeLogin. The page sends it with fetch and reads the outcome from the
+// stream, so the answer here is only whether it was handed over.
+func (s *Server) claudeCode(w http.ResponseWriter, r *http.Request, v *viewer) {
+	err := s.Agents.ClaudeLoginCode(r.Context(), v.User.ID, formValue(r, "login"), r.FormValue("code"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) codexDisconnect(w http.ResponseWriter, r *http.Request, v *viewer) {
