@@ -15,6 +15,7 @@ One process on the host, `hermitator serve`, contains:
 | Sandbox runtime | `internal/sandbox` | runsc, OverlayFS, network namespaces and nftables. |
 | Panel | `internal/web` | Server-rendered pages, server-sent events and the terminal WebSocket. |
 | Store | `internal/store` | SQLite in WAL mode. |
+| Host operations | `internal/hostops` | `/host` and `hermitator doctor`: uptime, load, memory, disk, the journal, restarts. |
 
 Inside every sandbox, `hermitator-guest` runs as PID 1. It serves the job
 spool, runs turns by driving Claude Code or pi, and is also the
@@ -27,6 +28,7 @@ hermitator.db            users, agents, accounts, routes, turns, audit log
 whatsapp.db              whatsmeow's device keys
 images/universal         -> universal-20261017.1
 images/universal-*/      rootfs/ (read-only lower layer), ENV
+restart-notice.json      who asked for /host restart, until the next process tells them
 tools/<hash>/            guest binary and support files, mounted at /opt/hermitator
 agents/<id>/
   config.json            OCI bundle config
@@ -558,6 +560,15 @@ to check what was already done. Nothing is retried automatically, since a
 turn may have pushed code or sent something before it stopped. After a
 host reboot, every agent is stopped or checkpointed and wakes on its next
 message.
+
+### Restarting from the chat
+
+`/host restart`, for a host operator, writes who asked to
+`restart-notice.json` in the data directory and makes `hermitator serve`
+return an error once the reply is out. systemd's `Restart=on-failure`
+starts it again; the new process finds the notice (if it is less than 15
+minutes old), removes it, and tells that chat it is back once WhatsApp
+reconnects.
 
 ## Shared limits
 

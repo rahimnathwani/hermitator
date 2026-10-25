@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing/fstest"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/rahimnathwani/hermitator/internal/config"
 	"github.com/rahimnathwani/hermitator/internal/gateway"
 	"github.com/rahimnathwani/hermitator/internal/guestfiles"
+	"github.com/rahimnathwani/hermitator/internal/hostops"
 	"github.com/rahimnathwani/hermitator/internal/media"
 	"github.com/rahimnathwani/hermitator/internal/orchestrator"
 	"github.com/rahimnathwani/hermitator/internal/sandbox"
@@ -136,6 +138,7 @@ func serve() error {
 		PreviewDomain:   cfg.Preview,
 		PreviewKey:      derive(key, "preview links"),
 		PreviewLoopback: cfg.Runtime == "unsafe-local",
+		StateDir:        cfg.DataDir,
 	}, st, box, rt, log)
 	if egressKey != nil {
 		gateway := netip.PrefixFrom(cfg.Subnet.Masked().Addr().Next(), 0).Addr()
@@ -166,6 +169,26 @@ func serve() error {
 	}
 	gw.SetHandler(mgr.HandleMessage)
 	mgr.SetMessenger(gw)
+
+	// /host restart ends the process with an error, so systemd's
+	// Restart=on-failure starts it again.
+	restart := make(chan struct{})
+	var restartOnce sync.Once
+	mgr.SetHost(&hostops.Host{
+		Build:     version,
+		Config:    cfg,
+		Started:   time.Now(),
+		Exit:      func() { restartOnce.Do(func() { close(restart) }) },
+		Connected: gw.Connected,
+		Accounts: func(ctx context.Context) []string {
+			accounts, _ := st.Accounts(ctx, "")
+			ids := make([]string, len(accounts))
+			for i, a := range accounts {
+				ids[i] = a.ID
+			}
+			return ids
+		},
+	})
 
 	if err := mgr.Start(ctx); err != nil {
 		return err
@@ -199,6 +222,7 @@ func serve() error {
 	}()
 
 	errc := make(chan error, 1)
+	var exitErr error
 	go func() {
 		log.Info("hermitator listening", "addr", cfg.Listen, "url", cfg.PublicURL, "version", version, "runtime", cfg.Runtime)
 		errc <- httpServer.ListenAndServe()
@@ -207,14 +231,21 @@ func serve() error {
 	case err := <-errc:
 		return err
 	case <-ctx.Done():
+	case <-restart:
+		exitErr = errRestart
+		stop()
 	}
 	log.Info("shutting down; running sandboxes keep running")
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	httpServer.Shutdown(shutdown)
 	gw.Close()
-	return nil
+	return exitErr
 }
+
+// errRestart ends the process when /host restart asks; the exit status
+// is what makes systemd start it again.
+var errRestart = errors.New("restarting, as /host restart asked")
 
 // ensureLocalImage gives the unsandboxed runtime an (empty) image to pin,
 // since it runs agents on the host filesystem.

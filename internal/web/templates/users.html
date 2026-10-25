@@ -14,7 +14,7 @@
     {{range $d.Users}}
     <tr class="{{if .Suspended}}suspended{{end}}">
       <td class="lead wide"><strong>{{.Email}}</strong>{{if .Suspended}} <span class="badge danger">Suspended</span>{{end}}</td>
-      <td>{{if .IsAdmin}}<span class="badge info">Admin</span>{{else}}<span class="badge">User</span>{{end}}</td>
+      <td>{{if .IsAdmin}}<span class="badge info">Admin</span>{{else}}<span class="badge">User</span>{{if .HostOperator}} <span class="badge info" title="Can run /host from WhatsApp">Host</span>{{end}}{{end}}</td>
       <td class="num" data-label="agents">{{if .IsAdmin}}–{{else}}{{.Agents}}{{end}}</td>
       <td class="num" data-label="numbers">{{if .IsAdmin}}–{{else}}{{.Accounts}}{{end}}</td>
       <td>
@@ -41,6 +41,12 @@
               <p>Nothing is deleted.</p>
             </template>
             <button class="small">Suspend {{.Email}}…</button>
+          </form>
+          {{end}}
+          {{if not .IsAdmin}}
+          <form method="post" action="/admin/users/{{.ID}}/host">
+            {{if .HostOperator}}<input type="hidden" name="on" value="0"><button class="small">Stop {{.Email}} running /host</button>
+            {{else}}<input type="hidden" name="on" value="1"><button class="small" title="Server status, logs and restart from WhatsApp">Let {{.Email}} run /host</button>{{end}}
           </form>
           {{end}}
           <form method="post" action="/admin/users/{{.ID}}/password" class="inline-form" data-confirm="Reset password" data-confirm-title="Reset {{.Email}}'s password?">

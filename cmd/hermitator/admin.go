@@ -9,15 +9,12 @@ import (
 	"fmt"
 	"math/big"
 	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
 	"github.com/rahimnathwani/hermitator/internal/auth"
 	"github.com/rahimnathwani/hermitator/internal/config"
-	"github.com/rahimnathwani/hermitator/internal/media"
-	"github.com/rahimnathwani/hermitator/internal/sandbox"
+	"github.com/rahimnathwani/hermitator/internal/hostops"
 	"github.com/rahimnathwani/hermitator/internal/secrets"
 	"github.com/rahimnathwani/hermitator/internal/store"
 )
@@ -167,78 +164,23 @@ func doctor() error {
 	if err != nil {
 		return err
 	}
-	ctx := context.Background()
-	failed := false
-	check := func(name string, err error, hint string) {
-		if err == nil {
-			fmt.Printf("  ok    %s\n", name)
-			return
-		}
-		failed = true
-		fmt.Printf("  FAIL  %s: %v\n", name, err)
-		if hint != "" {
-			fmt.Printf("        %s\n", hint)
-		}
-	}
-	note := func(name, detail string) { fmt.Printf("  --    %s: %s\n", name, detail) }
-
 	fmt.Println("hermitator", version)
-	if cfg.MasterKey == "" {
-		check("master key", errors.New("HERMITATOR_MASTER_KEY is not set"), "run `hermitator keygen` and put the key in the service environment")
-	} else {
-		_, err := secrets.ParseKey(cfg.MasterKey)
-		check("master key", err, "")
-	}
-	_, err = os.Stat(cfg.Guest)
-	check("guest binary "+cfg.Guest, err, "install hermitator-guest next to hermitator, or set HERMITATOR_GUEST")
-
-	if cfg.Runtime == "runsc" {
-		r := &sandbox.Runsc{Binary: cfg.Runsc}
-		check("runsc", r.Check(ctx), "install gVisor: see deploy/install.sh")
-		check("overlayfs", hasFilesystem("overlay"), "load the overlay kernel module")
-		for _, tool := range []string{"ip", "bridge", "nft", "mount"} {
-			_, err := exec.LookPath(tool)
-			check(tool, err, "install iproute2 and nftables")
-		}
-		if os.Geteuid() != 0 {
-			check("root", errors.New("not running as root"), "hermitator needs root to mount filesystems and manage network namespaces")
-		}
-	} else {
-		note("runtime", "unsafe-local (no isolation)")
-	}
-
-	images := &sandbox.Images{Dir: cfg.ImagesDir()}
-	if fams := images.Families(); len(fams) == 0 {
-		check("base images", fmt.Errorf("none in %s", cfg.ImagesDir()), "build one with deploy/build-image.sh")
-	} else {
-		for _, f := range fams {
-			cur, _ := images.Current(f)
-			_, err := images.Resolve(cur)
-			check("image "+f+" → "+cur, err, "")
+	checks := hostops.Doctor(context.Background(), cfg)
+	for _, c := range checks {
+		switch {
+		case c.Note != "":
+			fmt.Printf("  --    %s: %s\n", c.Name, c.Note)
+		case c.Err == nil:
+			fmt.Printf("  ok    %s\n", c.Name)
+		default:
+			fmt.Printf("  FAIL  %s: %v\n", c.Name, c.Err)
+			if c.Hint != "" {
+				fmt.Printf("        %s\n", c.Hint)
+			}
 		}
 	}
-
-	w := &media.Whisper{Binary: cfg.Whisper, Model: cfg.Model}
-	if w.Available() {
-		check("voice transcription ("+filepath.Base(cfg.Model)+")", nil, "")
-	} else {
-		note("voice transcription", "disabled; install whisper-cli and a model to enable it")
-	}
-	if failed {
+	if hostops.Failed(checks) {
 		return errors.New("some checks failed")
 	}
 	return nil
-}
-
-func hasFilesystem(name string) error {
-	data, err := os.ReadFile("/proc/filesystems")
-	if err != nil {
-		return err
-	}
-	for line := range strings.SplitSeq(string(data), "\n") {
-		if strings.TrimSpace(strings.TrimPrefix(line, "nodev")) == name {
-			return nil
-		}
-	}
-	return fmt.Errorf("%s not listed in /proc/filesystems", name)
 }

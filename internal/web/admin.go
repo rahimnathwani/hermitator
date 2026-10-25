@@ -98,6 +98,27 @@ func (s *Server) setQuota(w http.ResponseWriter, r *http.Request, v *viewer) {
 	s.back(w, r, "/admin/users", "Saved.")
 }
 
+// setHostOperator lets a user run /host from WhatsApp, or stops them.
+func (s *Server) setHostOperator(w http.ResponseWriter, r *http.Request, v *viewer) {
+	u, err := s.userFor(r)
+	if err != nil || u.IsAdmin() {
+		http.NotFound(w, r)
+		return
+	}
+	on := formValue(r, "on") == "1"
+	if err := s.Store.SetHostOperator(r.Context(), u.ID, on); err != nil {
+		s.back(w, r, "/admin/users", "Could not save: "+err.Error())
+		return
+	}
+	if on {
+		s.audit(r, v, "user.host_operator", u.Email+" on")
+		s.back(w, r, "/admin/users", u.Email+" can now run /host from WhatsApp.")
+		return
+	}
+	s.audit(r, v, "user.host_operator", u.Email+" off")
+	s.back(w, r, "/admin/users", u.Email+" can no longer run /host.")
+}
+
 func (s *Server) resetPassword(w http.ResponseWriter, r *http.Request, v *viewer) {
 	u, err := s.userFor(r)
 	if err != nil {

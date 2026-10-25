@@ -913,3 +913,30 @@ func TestNewAgentRejectsABadRepository(t *testing.T) {
 		t.Fatal("the form has no repository field")
 	}
 }
+
+func TestHostOperatorToggle(t *testing.T) {
+	f := setup(t)
+	admin, alice := f.login(t, "admin@example.com"), f.login(t, "alice@example.com")
+	aliceID := f.users["alice@example.com"].ID
+	ctx := context.Background()
+
+	if code, _ := alice.post("/admin/users/"+aliceID+"/host", url.Values{"on": {"1"}}); code != http.StatusForbidden {
+		t.Fatalf("user granting themselves /host: %d", code)
+	}
+	if code, _ := admin.post("/admin/users/"+aliceID+"/host", url.Values{"on": {"1"}}); code != http.StatusSeeOther {
+		t.Fatalf("grant: %d", code)
+	}
+	if u, _ := f.store.User(ctx, aliceID); !u.HostOperator {
+		t.Fatal("not granted")
+	}
+	if _, body := admin.get("/admin/users"); !strings.Contains(body, "Stop alice@example.com running /host") {
+		t.Fatal("users page does not offer to withdraw /host")
+	}
+	if code, _ := admin.post("/admin/users/"+f.users["admin@example.com"].ID+"/host", url.Values{"on": {"1"}}); code != http.StatusNotFound {
+		t.Fatalf("granting an admin, who owns no WhatsApp number: %d", code)
+	}
+	admin.post("/admin/users/"+aliceID+"/host", url.Values{"on": {"0"}})
+	if u, _ := f.store.User(ctx, aliceID); u.HostOperator {
+		t.Fatal("not withdrawn")
+	}
+}

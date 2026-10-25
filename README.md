@@ -276,6 +276,7 @@ hermitator answers itself:
 | `/link CODE`, `/link NAME`, `/unlink` | Bind this chat to an agent (by name, for you), or unbind it |
 | `/agents` | Your agents, and which one this chat reaches |
 | `/help`, `/help COMMAND` | The list, or the lines about one command |
+| `/host`, `/host doctor`, `/host logs`, `/host restart` | The server itself, for host operators: see below |
 
 Model and effort changes apply from the next message, and the conversation
 carries on. Claude Code takes `fable`, `opus`, `sonnet`, `haiku` or a full
@@ -290,6 +291,20 @@ plain text. A command sent as a reply to a message still counts as one.
 Only you can use commands: messages from your own numbers
 (listed in Settings, and learnt from `/link`), or sent by the linked
 account itself when it is your own number.
+
+An admin can make a user a **host operator** (on the Users page), who can
+then look after the server with no SSH, from a chat linked to an agent, a
+direct chat with the agents' number, or their own chat with themselves
+(never one other people read):
+
+| Command | |
+|---|---|
+| `/host` | Version, uptime, load, memory, disk, agents awake and working, WhatsApp numbers connected |
+| `/host doctor` | `hermitator doctor`'s checks |
+| `/host logs`, `/host logs 50` | The last warnings and errors from the journal, with every stored secret removed |
+| `/host restart` | Restart hermitator, after asking; sandboxes keep running, and it says when it is back |
+
+The commands are fixed: nothing typed after `/host` reaches a shell.
 
 Each linked chat has two settings: which of **your** messages wake the agent,
 and which of **other people's** do. Each is *always*, *by mentioning it* or
@@ -399,6 +414,7 @@ running agents you do not trust.
 | [internal/harness](internal/harness) | Driving Claude Code and pi headlessly |
 | [internal/gateway](internal/gateway) | WhatsApp |
 | [internal/web](internal/web) | The panel |
+| [internal/hostops](internal/hostops) | `/host` and `hermitator doctor`: what the server itself is doing |
 | [image](image) | The agent image |
 | [deploy](deploy) | Installation |
 

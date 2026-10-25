@@ -61,6 +61,9 @@ type Config struct {
 	// PreviewLoopback sends preview requests to 127.0.0.1, for the
 	// unsafe-local runtime, where agents' servers run on the host.
 	PreviewLoopback bool
+	// StateDir holds the few files the manager keeps across restarts of
+	// its own, such as who asked for one; empty keeps none.
+	StateDir string
 }
 
 // Manager is the orchestrator.
@@ -85,6 +88,7 @@ type Manager struct {
 	stopped bool
 	stt     Transcriber
 	tts     Speaker
+	host    HostOps
 
 	ctx    context.Context
 	mu     sync.Mutex
@@ -152,6 +156,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	m.goLoop(m.scheduler)
 	m.goLoop(m.resender)
+	m.tellRestarted()
 	agents, err := m.store.Agents(ctx, "")
 	if err != nil {
 		return err

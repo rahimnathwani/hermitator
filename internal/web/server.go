@@ -159,6 +159,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	admin("POST /admin/users", s.createUser)
 	admin("POST /admin/users/{id}/suspend", s.suspendUser)
 	admin("POST /admin/users/{id}/quota", s.setQuota)
+	admin("POST /admin/users/{id}/host", s.setHostOperator)
 	admin("POST /admin/users/{id}/password", s.resetPassword)
 	admin("POST /admin/users/{id}/delete", s.deleteUser)
 	admin("POST /admin/impersonate/{id}", s.impersonate)

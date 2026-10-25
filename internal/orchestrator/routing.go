@@ -71,6 +71,14 @@ func (m *Manager) HandleMessage(ctx context.Context, msg Message) (queued bool) 
 		reply(m.agentsText(ctx, acct, msg))
 		return false
 	}
+	if isCmd && cmd.Name == "host" && owner {
+		// About the server, not an agent, so it works in any chat that is
+		// the owner's alone to read; see hostChat.
+		if m.hostChat(ctx, acct, msg) {
+			m.hostCommand(ctx, acct, msg, cmd.Arg, reply)
+		}
+		return false
+	}
 
 	route, err := m.store.Route(ctx, acct.ID, msg.Chat)
 	var agentID string

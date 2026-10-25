@@ -51,6 +51,7 @@ var commandAliases = map[string]string{
 	"remember": "remember",
 	"awake":    "awake",
 	"agents":   "agents",
+	"host":     "host",
 }
 
 // commandHelp is /help, or with a command named, the lines of it that
@@ -170,5 +171,6 @@ const helpText = `*hermitator commands*
 /link CODE or /link NAME: connect this chat to an agent; /agents lists yours
 /unlink: disconnect this chat from the agent
 /help [COMMAND]: this list, or the lines about one command
+/host: the server itself, for users an admin allows (/host help)
 
 Anything else goes to the agent; commands work as replies too.`
