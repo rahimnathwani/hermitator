@@ -16,6 +16,7 @@ One process on the host, `hermitator serve`, contains:
 | Panel | `internal/web` | Server-rendered pages, server-sent events and the terminal WebSocket. |
 | Store | `internal/store` | SQLite in WAL mode. |
 | Host operations | `internal/hostops` | `/host` and `hermitator doctor`: uptime, load, memory, disk, the journal, restarts. |
+| Image updater | `internal/imageupdate` | Builds a new agent image when its pinned packages have releases a week old, and prunes unused ones. |
 
 Inside every sandbox, `hermitator-guest` runs as PID 1. It serves the job
 spool, runs turns by driving Claude Code or pi, and is also the
@@ -27,7 +28,8 @@ Everything hermitator keeps lives under `/var/lib/hermitator`:
 hermitator.db            users, agents, accounts, routes, turns, audit log
 whatsapp.db              whatsmeow's device keys
 images/universal         -> universal-20261017.1
-images/universal-*/      rootfs/ (read-only lower layer), ENV
+images/universal-*/      rootfs/ (read-only lower layer), ENV, VERSIONS (its pins)
+images/.update-failed    pins whose build failed, not tried again on their own
 restart-notice.json      who asked for /host restart, until the next process tells them
 tools/<hash>/            guest binary and support files, mounted at /opt/hermitator
 agents/<id>/
@@ -586,6 +588,32 @@ return an error once the reply is out. systemd's `Restart=on-failure`
 starts it again; the new process finds the notice (if it is less than 15
 minutes old), removes it, and tells that chat it is back once WhatsApp
 reconnects.
+
+## Agent images
+
+`deploy/build-image.sh` builds an image with podman and exports it to a
+dated directory, `images/universal-YYYYMMDD[.N]`, with the pins it was
+built with in `VERSIONS`. New agents pin the newest; an agent moves only
+when its owner upgrades it, which stops its sandbox, since an OverlayFS
+upper layer must never see its lower layer change underneath it and a
+checkpoint cannot be restored over another image.
+
+`internal/imageupdate` keeps the newest current on the host. Once a day
+(the first look ten minutes after a start, so a restart does not start a
+build) it asks npm and PyPI for the releases `deploy/bump-image.sh` would
+choose: the newest that have been out for a week, never older than the
+pins in the installed `image/Containerfile`, with Python's and Node's
+Playwright on the same minor version. If any package pin differs from the
+current image's `VERSIONS`, it runs build-image.sh with them as
+`--build-arg`s. `RELEASED_BEFORE` is set at each build but is never on its
+own a reason for one, or every day would bring an image. A failed build
+leaves the current image alone, writes its pins to `images/.update-failed`
+so the same versions are not tried daily (`/host image update` tries
+anyway), and tells the host operators with the end of its output. A build
+cut off by a restart counts as neither. After a good build, versions of
+the family that no agent is pinned to are deleted, with their podman
+tags, except the current one and the one before; if the agents cannot be
+listed, nothing is deleted.
 
 ## Shared limits
 

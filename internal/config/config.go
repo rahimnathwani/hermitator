@@ -31,6 +31,13 @@ type Config struct {
 	Piper     string // HERMITATOR_PIPER
 	Voice     string // HERMITATOR_PIPER_VOICE
 	LogLevel  string // HERMITATOR_LOG
+	// ImageUpdates builds a new agent image on this host when its pinned
+	// packages have releases a week old: "on" or "off". Default on with
+	// runsc. HERMITATOR_IMAGE_UPDATES
+	ImageUpdates bool
+	// Source holds image/ and deploy/ for building images, as
+	// deploy/install.sh leaves them. HERMITATOR_SOURCE
+	Source string
 }
 
 func env(key, fallback string) string {
@@ -87,6 +94,7 @@ func Load() (*Config, error) {
 		Whisper:   env("HERMITATOR_WHISPER", "whisper-cli"),
 		Piper:     env("HERMITATOR_PIPER", "piper"),
 		LogLevel:  env("HERMITATOR_LOG", "info"),
+		Source:    env("HERMITATOR_SOURCE", "/usr/local/share/hermitator"),
 	}
 	// Paths derived from the data directory end up as mount sources and
 	// as commands run from other working directories.
@@ -117,6 +125,17 @@ func Load() (*Config, error) {
 	case "runsc", "unsafe-local":
 	default:
 		return nil, fmt.Errorf("HERMITATOR_RUNTIME must be runsc or unsafe-local, not %q", c.Runtime)
+	}
+	defaultUpdates := "off"
+	if c.Runtime == "runsc" {
+		defaultUpdates = "on"
+	}
+	switch v := strings.ToLower(env("HERMITATOR_IMAGE_UPDATES", defaultUpdates)); v {
+	case "on", "1", "true", "yes":
+		c.ImageUpdates = true
+	case "off", "0", "false", "no":
+	default:
+		return nil, fmt.Errorf("HERMITATOR_IMAGE_UPDATES must be on or off, not %q", v)
 	}
 	return c, nil
 }

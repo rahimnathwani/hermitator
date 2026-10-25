@@ -24,6 +24,7 @@ import (
 	"github.com/rahimnathwani/hermitator/internal/gateway"
 	"github.com/rahimnathwani/hermitator/internal/guestfiles"
 	"github.com/rahimnathwani/hermitator/internal/hostops"
+	"github.com/rahimnathwani/hermitator/internal/imageupdate"
 	"github.com/rahimnathwani/hermitator/internal/media"
 	"github.com/rahimnathwani/hermitator/internal/orchestrator"
 	"github.com/rahimnathwani/hermitator/internal/sandbox"
@@ -170,6 +171,34 @@ func serve() error {
 	gw.SetHandler(mgr.HandleMessage)
 	mgr.SetMessenger(gw)
 
+	var updater *imageupdate.Updater
+	if cfg.ImageUpdates {
+		updater = &imageupdate.Updater{
+			Images:  images,
+			Source:  cfg.Source,
+			DataDir: cfg.DataDir,
+			Keep:    1,
+			Log:     log,
+			Notify:  mgr.NotifyOperators,
+			InUse: func(ctx context.Context) (map[string]bool, error) {
+				agents, err := st.Agents(ctx, "")
+				if err != nil {
+					return nil, err
+				}
+				used := map[string]bool{}
+				for _, a := range agents {
+					used[a.Image] = true
+				}
+				return used, nil
+			},
+		}
+		if err := updater.Available(); err != nil {
+			log.Info("agent image updates off", "why", err)
+		} else {
+			go updater.Loop(ctx)
+		}
+	}
+
 	// /host restart ends the process with an error, so systemd's
 	// Restart=on-failure starts it again.
 	restart := make(chan struct{})
@@ -180,6 +209,7 @@ func serve() error {
 		Started:   time.Now(),
 		Exit:      func() { restartOnce.Do(func() { close(restart) }) },
 		Connected: gw.Connected,
+		Updater:   updater,
 		Accounts: func(ctx context.Context) []string {
 			accounts, _ := st.Accounts(ctx, "")
 			ids := make([]string, len(accounts))

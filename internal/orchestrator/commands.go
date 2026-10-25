@@ -52,6 +52,7 @@ var commandAliases = map[string]string{
 	"awake":    "awake",
 	"agents":   "agents",
 	"host":     "host",
+	"upgrade":  "upgrade",
 }
 
 // commandHelp is /help, or with a command named, the lines of it that
@@ -165,6 +166,7 @@ const helpText = `*hermitator commands*
 /effort [LEVEL]: show or change how hard it thinks
 /once [MODEL] [EFFORT]: MESSAGE: use them for one message only
 /switch claude|pi: change harness
+/upgrade: move the agent to the newest image, keeping its files; /upgrade all for all your agents
 
 *This chat*
 /listen: show or change which messages wake the agent here

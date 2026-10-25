@@ -112,7 +112,7 @@ func (s *Server) setHostOperator(w http.ResponseWriter, r *http.Request, v *view
 	}
 	if on {
 		s.audit(r, v, "user.host_operator", u.Email+" on")
-		s.back(w, r, "/admin/users", u.Email+" can now run /host from WhatsApp.")
+		s.back(w, r, "/admin/users", u.Email+" can now run /host from WhatsApp, and is told about new agent images.")
 		return
 	}
 	s.audit(r, v, "user.host_operator", u.Email+" off")

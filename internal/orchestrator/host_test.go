@@ -15,6 +15,7 @@ import (
 type fakeHost struct {
 	logs     string
 	restarts atomic.Int32
+	images   atomic.Int32
 }
 
 func (h *fakeHost) Version() string { return "v9.9.9" }
@@ -26,6 +27,10 @@ func (h *fakeHost) Doctor(context.Context) (string, bool) {
 }
 func (h *fakeHost) Logs(context.Context, int) (string, error) { return h.logs, nil }
 func (h *fakeHost) Restart()                                  { h.restarts.Add(1) }
+func (h *fakeHost) ImageStatus() string                       { return "Image: universal-test" }
+func (h *fakeHost) UpdateImage(context.Context) (bool, string) {
+	return h.images.Add(1) == 1, "a look is already running"
+}
 
 func TestHostCommandNeedsAnOperator(t *testing.T) {
 	e := setup(t)
@@ -62,6 +67,18 @@ func TestHostCommandNeedsAnOperator(t *testing.T) {
 	e.m.HandleMessage(ctx, e.from(me, "/host doctor"))
 	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "Some checks failed") || !strings.Contains(got.body, "overlayfs") {
 		t.Fatalf("/host doctor = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.from(me, "/host image"))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "Image: universal-test") || !strings.Contains(got.body, "/host image update") {
+		t.Fatalf("/host image = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.from(me, "/host image update"))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "building a new image") {
+		t.Fatalf("/host image update = %q", got.body)
+	}
+	e.m.HandleMessage(ctx, e.from(me, "/host image update"))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "already running") {
+		t.Fatalf("second /host image update = %q", got.body)
 	}
 	e.m.HandleMessage(ctx, e.from(me, "/host frobnicate"))
 	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "/host logs [N]") {

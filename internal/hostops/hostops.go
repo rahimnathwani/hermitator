@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/rahimnathwani/hermitator/internal/config"
+	"github.com/rahimnathwani/hermitator/internal/imageupdate"
 	"github.com/rahimnathwani/hermitator/internal/media"
 )
 
@@ -36,6 +37,30 @@ type Host struct {
 	Connected func(accountID string) bool
 	// Accounts lists every linked account's ID.
 	Accounts func(ctx context.Context) []string
+	// Updater keeps the agent image current; nil when updates are off.
+	Updater *imageupdate.Updater
+}
+
+// ImageStatus describes the agent image and its updates.
+func (h *Host) ImageStatus() string {
+	if h.Updater == nil {
+		return "Agent image updates are off on this host (HERMITATOR_IMAGE_UPDATES)."
+	}
+	return h.Updater.Status()
+}
+
+// UpdateImage looks for new releases now, in the background.
+func (h *Host) UpdateImage(ctx context.Context) (bool, string) {
+	if h.Updater == nil {
+		return false, "image updates are off on this host (HERMITATOR_IMAGE_UPDATES)"
+	}
+	if err := h.Updater.Available(); err != nil {
+		return false, err.Error()
+	}
+	if !h.Updater.Start(ctx, true) {
+		return false, "a look is already running"
+	}
+	return true, ""
 }
 
 // Version is the running build's.

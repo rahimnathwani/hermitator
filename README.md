@@ -186,12 +186,17 @@ such as `/etc/caddy/conf.d/myapp.caddy`, and `systemctl reload caddy`;
 reinstalling hermitator leaves it alone.
 
 The image pins exact versions of Claude Code, pi and Playwright, and
-their auto-updaters are off, so a new release changes nothing until you
-choose it. To move to the newest, run `make image-bump` (it rewrites the
-pins in `image/Containerfile`; review and commit the diff), then
-`make image`, which deploys and builds the image on the server. New agents
-get it; existing ones offer an upgrade, one at a time on their Settings tab
-or all at once from the agents page, and keep all their files. The
+their auto-updaters are off, so a new release changes nothing in a
+running agent until its owner chooses it. The server keeps the image
+itself current: once a day it looks for releases that have been out for a
+week, and when there are any, builds a new image with them (never older
+than the pins in `image/Containerfile`), removes old images no agent uses,
+and tells the host operators on WhatsApp what moved. New agents get it;
+existing ones offer an upgrade, from `/upgrade` in their chat, one at a
+time on their Settings tab or all at once from the agents page, and keep
+all their files. `HERMITATOR_IMAGE_UPDATES=off` turns this off. From a
+laptop, `make image-bump` still moves the repository's pins (review and
+commit the diff) and `make image` deploys and builds them. The
 install also builds whisper.cpp, so voice notes are transcribed on the
 host; `WITH_WHISPER=0` skips that. `WITH_TTS=1` installs
 [piper](https://github.com/rhasspy/piper), after which agents can answer
@@ -276,11 +281,12 @@ hermitator answers itself:
 | `/effort`, `/effort high`, `/effort default` | Show or change how hard it thinks |
 | `/once opus max: …` | Use another model or effort for this one message |
 | `/switch claude` or `/switch pi` | Change harness, same workspace |
+| `/upgrade`, `/upgrade all` | Move the agent, or all of yours, to the newest image; files are kept, background processes end, and it asks first |
 | `/listen` | Show or change which messages wake the agent in this chat |
 | `/link CODE`, `/link NAME`, `/unlink` | Bind this chat to an agent (by name, for you), or unbind it |
 | `/agents` | Your agents, and which one this chat reaches |
 | `/help`, `/help COMMAND` | The list, or the lines about one command |
-| `/host`, `/host doctor`, `/host logs`, `/host restart` | The server itself, for host operators: see below |
+| `/host`, `/host doctor`, `/host logs`, `/host image`, `/host restart` | The server itself, for host operators: see below |
 
 Model and effort changes apply from the next message, and the conversation
 carries on. Claude Code takes `fable`, `opus`, `sonnet`, `haiku` or a full
@@ -306,9 +312,11 @@ direct chat with the agents' number, or their own chat with themselves
 | `/host` | Version, uptime, load, memory, disk, agents awake and working, WhatsApp numbers connected |
 | `/host doctor` | `hermitator doctor`'s checks |
 | `/host logs`, `/host logs 50` | The last warnings and errors from the journal, with every stored secret removed |
+| `/host image`, `/host image update` | The agent image and its updates; build one now if there are new releases |
 | `/host restart` | Restart hermitator, after asking; sandboxes keep running, and it says when it is back |
 
-The commands are fixed: nothing typed after `/host` reaches a shell.
+Host operators also hear when a new agent image is built, or a build
+fails. The commands are fixed: nothing typed after `/host` reaches a shell.
 
 Each linked chat has two settings: which of **your** messages wake the agent,
 and which of **other people's** do. Each is *always*, *by mentioning it* or
@@ -419,6 +427,7 @@ running agents you do not trust.
 | [internal/gateway](internal/gateway) | WhatsApp |
 | [internal/web](internal/web) | The panel |
 | [internal/hostops](internal/hostops) | `/host` and `hermitator doctor`: what the server itself is doing |
+| [internal/imageupdate](internal/imageupdate) | Building new agent images on the host as their packages move on |
 | [image](image) | The agent image |
 | [deploy](deploy) | Installation |
 

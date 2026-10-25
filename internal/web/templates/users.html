@@ -46,7 +46,7 @@
           {{if not .IsAdmin}}
           <form method="post" action="/admin/users/{{.ID}}/host">
             {{if .HostOperator}}<input type="hidden" name="on" value="0"><button class="small">Stop {{.Email}} running /host</button>
-            {{else}}<input type="hidden" name="on" value="1"><button class="small" title="Server status, logs and restart from WhatsApp">Let {{.Email}} run /host</button>{{end}}
+            {{else}}<input type="hidden" name="on" value="1"><button class="small" title="Server status, logs and restart from WhatsApp, and notices about new agent images">Let {{.Email}} run /host</button>{{end}}
           </form>
           {{end}}
           <form method="post" action="/admin/users/{{.ID}}/password" class="inline-form" data-confirm="Reset password" data-confirm-title="Reset {{.Email}}'s password?">

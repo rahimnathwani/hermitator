@@ -28,6 +28,12 @@ type HostOps interface {
 	Logs(ctx context.Context, n int) (string, error)
 	// Restart ends the process for systemd to start again.
 	Restart()
+	// ImageStatus describes the agent image and its updates.
+	ImageStatus() string
+	// UpdateImage looks for new releases now, and builds an image with
+	// them, in the background; the operators hear how it went. It says
+	// why not when it cannot start.
+	UpdateImage(ctx context.Context) (started bool, why string)
 }
 
 // SetHost enables /host. Call it before Start, which tells whoever asked
@@ -132,6 +138,28 @@ func (m *Manager) hostCommand(ctx context.Context, acct *store.Account, msg Mess
 			}
 			reply("📜 *Recent warnings and errors*\n\n" + m.everySecret(m.ctx).apply(redactTokens(text)))
 		}()
+	case "image", "images":
+		audit(rest)
+		if rest == "update" {
+			if ok, why := m.host.UpdateImage(m.ctx); !ok {
+				reply("Cannot look for a new image now: " + why + ".")
+				return
+			}
+			reply("🔨 Looking for releases a week old, and building a new image if there are any. That takes a few minutes; every host operator hears how it went.")
+			return
+		}
+		text := "🧱 " + m.host.ImageStatus()
+		agents, _ := m.store.Agents(ctx, "")
+		behind := 0
+		for _, a := range agents {
+			if m.NewerImage(a) != "" {
+				behind++
+			}
+		}
+		if behind > 0 {
+			text += fmt.Sprintf("\n%s on older images; owners upgrade with /upgrade, or Upgrade on the agent's page.", count(behind, "agent"))
+		}
+		reply(text + "\n\n/host image update looks for new releases now.")
 	case "restart":
 		if rest != "yes" {
 			busy := m.busyAgents(ctx)
@@ -168,6 +196,7 @@ const hostHelp = `*/host*, for the server itself
 /host: version, uptime, load, memory, disk, agents and WhatsApp numbers
 /host doctor: hermitator doctor's checks
 /host logs [N]: the last N warnings and errors (default 20)
+/host image: the agent image and its updates; /host image update builds one now if there are new releases
 /host restart: restart hermitator; sandboxes keep running`
 
 func (m *Manager) hostStatus(ctx context.Context) string {
