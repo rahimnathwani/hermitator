@@ -16,6 +16,10 @@ of what must stay true:
   file, and are scrubbed from the sandbox before suspend.
 - **Agent state belongs to its actor** (`internal/orchestrator/actor.go`).
   Change it with `do` or `call`; never from another goroutine directly.
+- **The production server is shared** with two other apps (Timothy and
+  Alex, video-call tutors with kids). Reload Caddy, never restart it; keep
+  their Caddy files, ports and Podman containers alone; no firewall rule may
+  block their media ports. See [docs/neighbours.md](docs/neighbours.md).
 
 ## Commands
 

@@ -190,6 +190,8 @@ which the main Caddyfile imports along with anything else in that directory.
 To serve another app from the same server, give it a file of its own there,
 such as `/etc/caddy/conf.d/myapp.caddy`, and `systemctl reload caddy`;
 reinstalling hermitator leaves it alone.
+Two such apps run on the production server today; what they need from
+hermitator is in [docs/neighbours.md](docs/neighbours.md).
 
 The image pins exact versions of Claude Code, pi and Playwright, and
 their auto-updaters are off, so a new release changes nothing in a
