@@ -261,6 +261,13 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		m.store.Release(ctx, ids)
 	}
 
+	// A turn that runs on for a while gets one progress note in the chat,
+	// edited in place as the work moves on: edits make no sound on the
+	// phone, so the owner can glance without being nagged. Set before any
+	// goroutine below takes its copy of chat.
+	note := &progressNote{}
+	chat.note = note
+
 	// Deliver files as soon as the agent queues them.
 	var filesSent atomic.Int32
 	outboxDone := make(chan struct{})
@@ -301,11 +308,6 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		}
 	}()
 
-	// A turn that runs on for a while gets one progress note in the chat,
-	// edited in place as the work moves on: edits make no sound on the
-	// phone, so the owner can glance without being nagged.
-	note := &progressNote{}
-	chat.note = note
 	if chat.ok() && !chat.quiet {
 		go m.keepProgressNote(followCtx, chat, t, note)
 	}
