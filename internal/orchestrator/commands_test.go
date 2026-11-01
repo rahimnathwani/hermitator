@@ -403,9 +403,11 @@ func TestAwakeStillDeliversAndGetSendsOnlyItsFile(t *testing.T) {
 	e.m.HandleMessage(ctx, e.msg(chat, "/awake 2h", true))
 	e.rec.wait(t, "text")
 	e.m.HandleMessage(ctx, e.msg(chat, `/sh whatsapp-send --text "job done" >/dev/null`, true))
-	e.rec.wait(t, "text") // /sh's own reply
-	if got := e.rec.wait(t, "text"); got.body != "job done" {
-		t.Fatalf("background text while awake = %q", got.body)
+	// The job's text and /sh's own reply race each other out; either
+	// order is fine as long as the job's text arrives.
+	a, b := e.rec.wait(t, "text").body, e.rec.wait(t, "text").body
+	if a != "job done" && b != "job done" {
+		t.Fatalf("background text while awake: got %q and %q", a, b)
 	}
 
 	spec, _ := e.m.Spec(e.agent)
