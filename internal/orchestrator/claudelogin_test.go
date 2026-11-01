@@ -15,18 +15,35 @@ import (
 
 // fakeSetupToken stands in for `claude setup-token`: a sign-in link drawn
 // with escape sequences, a prompt for the code, and a token for the right
-// one.
-const fakeSetupToken = `#!/bin/sh
-if [ "$1" != setup-token ]; then exec "$HERMITATOR_REAL_CLAUDE" "$@"; fi
-printf '\033[2mWelcome to Claude Code\033[0m\n\033[1CBrowser\033[1Cdidn'"'"'t\033[1Copen?\n\nhttps://claude.com/cai/oauth/authorize?code=true&state=abc\n\nPaste code here if prompted > '
-read code
-if [ "$code" = "good#abc" ]; then
-	printf '\nYour OAuth token (valid for 1 year):\n\nsk-ant-oat01-abcdefghijklmnopqrstuvwxyz0123456789\n'
-	sleep 1
-	exit 0
-fi
-printf '\nOAuth error: Request failed with status code 400\nPress Enter to retry.\n'
-sleep 30
+// one. Like Claude Code it reads the terminal raw and takes a burst of
+// characters as a paste, ignoring an Enter inside it, so only an Enter
+// sent by itself submits the code.
+const fakeSetupToken = `#!/usr/bin/env python3
+import os, sys, time, tty
+if sys.argv[1:2] != ["setup-token"]:
+    real = os.environ["HERMITATOR_REAL_CLAUDE"]
+    os.execv(real, [real] + sys.argv[1:])
+out = sys.stdout
+out.write("\033[2mWelcome to Claude Code\033[0m\n\033[1CBrowser\033[1Cdidn't\033[1Copen?\n\n")
+out.write("https://claude.com/cai/oauth/authorize?code=true&state=abc\n\nPaste code here if prompted > ")
+out.flush()
+tty.setraw(0)
+code = ""
+while True:
+    chunk = os.read(0, 4096).decode()
+    if chunk == "\r":
+        break
+    code += chunk.replace("\r", "")
+    out.write("*" * len(chunk.replace("\r", "")))
+    out.flush()
+if code == "good#abc":
+    out.write("\r\nYour OAuth token (valid for 1 year):\r\n\r\nsk-ant-oat01-abcdefghijklmnopqrstuvwxyz0123456789\r\n")
+    out.flush()
+    time.sleep(1)
+    sys.exit(0)
+out.write("\r\nOAuth error: Request failed with status code 400\r\nPress Enter to retry.\r\n")
+out.flush()
+time.sleep(30)
 `
 
 func next(t *testing.T, ch <-chan LoginEvent) LoginEvent {

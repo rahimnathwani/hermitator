@@ -129,7 +129,13 @@ def main():
                     code = f.read().strip()
                 os.remove(code_file)
                 if code:
-                    os.write(fd, code.encode() + b"\r")
+                    # Claude Code takes a burst of characters as a paste and
+                    # ignores an Enter inside one, so a code of real length
+                    # typed with its Enter in one write is never submitted.
+                    # Enter goes on its own once the paste has landed.
+                    os.write(fd, code.encode())
+                    time.sleep(0.5)
+                    os.write(fd, b"\r")
                     sent_code_at = time.time()
     finally:
         try:
