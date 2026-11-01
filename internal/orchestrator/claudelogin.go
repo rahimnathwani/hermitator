@@ -39,15 +39,25 @@ type claudeLogins struct {
 type claudeLogin struct {
 	userID string
 	spec   *sandbox.Spec
+	// result gets the login's outcome, "done" or "error", for the
+	// ClaudeLoginCode that is waiting on it.
+	result chan LoginEvent
 }
 
 // ErrNoLogin is returned for a code sent to a login that is not waiting.
 var ErrNoLogin = errors.New("that sign-in has ended; start again")
 
+// ErrCodeFormat is returned for a code that cannot be right; the login
+// still waits for one that might be.
+var ErrCodeFormat = errors.New("paste the code exactly as the sign-in page shows it")
+
 // ClaudeLogin starts `claude setup-token` in one of the user's sandboxes.
 // The first event carries the sign-in URL and the login's ID, to send the
-// code to with ClaudeLoginCode. The channel closes when the login ends;
-// cancelling ctx ends it.
+// code to with ClaudeLoginCode. The channel closes when the login ends.
+//
+// ctx covers only starting it. The login then outlives the caller, for up
+// to claudeLoginLife: on a phone the user leaves the panel to sign in, and
+// the browser may drop the panel's connection meanwhile.
 func (m *Manager) ClaudeLogin(ctx context.Context, userID string) (<-chan LoginEvent, error) {
 	ag, err := m.loginAgent(ctx, userID)
 	if err != nil {
@@ -90,7 +100,8 @@ func (m *Manager) ClaudeLogin(ctx context.Context, userID string) (<-chan LoginE
 	if m.claude.pending == nil {
 		m.claude.pending = map[string]claudeLogin{}
 	}
-	m.claude.pending[login] = claudeLogin{userID: userID, spec: spec}
+	result := make(chan LoginEvent, 1)
+	m.claude.pending[login] = claudeLogin{userID: userID, spec: spec, result: result}
 	m.claude.mu.Unlock()
 
 	ch := make(chan LoginEvent, 8)
@@ -110,14 +121,21 @@ func (m *Manager) ClaudeLogin(ctx context.Context, userID string) (<-chan LoginE
 			forget()
 			removeShared(spec, path.Join(claudeLoginDir, login), path.Join(claudeLoginDir, login+".part"))
 		}()
-		lctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+		lctx, cancel := context.WithTimeout(m.ctx, claudeLoginLife)
 		defer cancel()
-		defer context.AfterFunc(m.ctx, cancel)()
 		var finished bool
+		// Nobody may be reading ch any more; it holds more events than a
+		// login sends, so this never blocks.
 		send := func(ev LoginEvent) {
+			if ev.Type == "done" || ev.Type == "error" {
+				select {
+				case result <- ev:
+				default:
+				}
+			}
 			select {
 			case ch <- ev:
-			case <-lctx.Done():
+			default:
 			}
 		}
 		_, err := client.Follow(lctx, jobID, func(line []byte) {
@@ -172,12 +190,21 @@ func (m *Manager) ClaudeLogin(ctx context.Context, userID string) (<-chan LoginE
 	return ch, nil
 }
 
+// claudeLoginLife is how long a login waits, all told; the helper gives up
+// waiting for a code a little sooner.
+const claudeLoginLife = 20 * time.Minute
+
+// claudeCodeWait is how long ClaudeLoginCode waits for setup-token to
+// answer a code; the helper gives up after a minute.
+var claudeCodeWait = 90 * time.Second
+
 // ClaudeLoginCode hands the code from Claude's sign-in page to a waiting
-// login of the user's.
+// login of the user's, and waits for the outcome: nil once the token is
+// saved, or why it was not.
 func (m *Manager) ClaudeLoginCode(ctx context.Context, userID, login, code string) error {
 	code = strings.TrimSpace(code)
 	if code == "" || len(code) > 1024 || strings.ContainsAny(code, "\r\n") {
-		return errors.New("paste the code exactly as the sign-in page shows it")
+		return ErrCodeFormat
 	}
 	m.claude.mu.Lock()
 	p, ok := m.claude.pending[login]
@@ -185,6 +212,23 @@ func (m *Manager) ClaudeLoginCode(ctx context.Context, userID, login, code strin
 	if !ok || p.userID != userID {
 		return ErrNoLogin
 	}
+	if err := m.sendClaudeCode(p, login, code); err != nil {
+		return err
+	}
+	select {
+	case ev := <-p.result:
+		if ev.Type == "done" {
+			return nil
+		}
+		return errors.New(ev.Message)
+	case <-time.After(claudeCodeWait):
+		return errors.New("setup-token did not answer; start again")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *Manager) sendClaudeCode(p claudeLogin, login, code string) error {
 	// Written whole and renamed into place: the helper takes the file the
 	// moment it appears.
 	name := path.Join(claudeLoginDir, login)

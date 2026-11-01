@@ -510,7 +510,10 @@ setup-token then waits for the code the sign-in page shows; the user pastes
 it into the panel, the host writes it under `/shared/login/` (whole, then
 renamed, since the helper takes the file the moment it appears), and the
 helper types it in and reports the token, which is stored like a pasted
-one. hermitator keeps no copy of Anthropic's OAuth flow. Like the ChatGPT
+one. The login does not depend on the panel's connection: on a phone the
+user leaves the page to sign in and the browser may drop it, so the panel
+closes its stream once it has the link, the login waits on its own for up
+to 20 minutes, and the request that hands over the code gets the outcome. hermitator keeps no copy of Anthropic's OAuth flow. Like the ChatGPT
 login, the token passes through the sandbox on its way, where the agent
 could read it; it is the user's own agent, which is given the token on
 every turn anyway. A token lasts a year from when it was made, which

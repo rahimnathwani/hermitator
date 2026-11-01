@@ -172,9 +172,6 @@ func (s *Server) claudeLogin(w http.ResponseWriter, r *http.Request, v *viewer) 
 				return
 			}
 			st.send(ev.Type, ev)
-			if ev.Type == "done" {
-				s.audit(r, v, "secret.set", store.SecretClaudeToken+" via setup-token")
-			}
 		case <-tick.C:
 			st.ping()
 		}
@@ -182,15 +179,21 @@ func (s *Server) claudeLogin(w http.ResponseWriter, r *http.Request, v *viewer) 
 }
 
 // claudeCode passes the code from Claude's sign-in page to a waiting
-// claudeLogin. The page sends it with fetch and reads the outcome from the
-// stream, so the answer here is only whether it was handed over.
+// claudeLogin and answers with the outcome. The outcome comes here, not on
+// the stream, because a phone may have dropped the stream while the user
+// was on the sign-in page. 400 means try another code; 409 means the login
+// is over and must be started again.
 func (s *Server) claudeCode(w http.ResponseWriter, r *http.Request, v *viewer) {
 	err := s.Agents.ClaudeLoginCode(r.Context(), v.User.ID, formValue(r, "login"), r.FormValue("code"))
-	if err != nil {
+	switch {
+	case errors.Is(err, orchestrator.ErrCodeFormat):
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	case err != nil:
+		http.Error(w, err.Error(), http.StatusConflict)
+	default:
+		s.audit(r, v, "secret.set", store.SecretClaudeToken+" via setup-token")
+		w.WriteHeader(http.StatusNoContent)
 	}
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) codexDisconnect(w http.ResponseWriter, r *http.Request, v *viewer) {

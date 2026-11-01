@@ -436,17 +436,15 @@ function mountClaude(el) {
     src = new EventSource(el.dataset.src);
     src.addEventListener("url", (e) => {
       const ev = data(e);
+      // The stream's work is done. Closed now, it cannot reconnect while
+      // the user is on the sign-in page, which would start another login
+      // the code would not fit. The outcome comes back from the code.
+      src.close();
       login = ev.login;
       signin.querySelector("[data-url]").href = ev.verification_uri;
       signin.hidden = false;
       message.textContent = "";
       form.querySelector("input").focus();
-    });
-    src.addEventListener("done", () => {
-      src.close();
-      signin.hidden = true;
-      message.textContent = "Claude is connected.";
-      setTimeout(() => location.reload(), 800);
     });
     src.addEventListener("error", (e) => {
       if (!e.data) return;
@@ -458,10 +456,26 @@ function mountClaude(el) {
     const body = new URLSearchParams({ login, code: form.elements.code.value });
     form.querySelector("button").disabled = true;
     message.textContent = "Checking the code…";
-    const res = await fetch(el.dataset.code, { method: "POST", body });
-    if (!res.ok) {
+    let res;
+    try {
+      res = await fetch(el.dataset.code, { method: "POST", body });
+    } catch {
       form.querySelector("button").disabled = false;
-      message.textContent = (await res.text()).trim();
+      message.textContent = "Could not reach hermitator; check your connection and press Connect again.";
+      return;
+    }
+    if (res.ok) {
+      signin.hidden = true;
+      message.textContent = "Claude is connected.";
+      setTimeout(() => location.reload(), 800);
+      return;
+    }
+    const text = (await res.text()).trim();
+    if (res.status === 400) {
+      form.querySelector("button").disabled = false;
+      message.textContent = text;
+    } else {
+      reset(text);
     }
   });
   return () => src?.close();

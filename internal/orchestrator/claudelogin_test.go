@@ -61,7 +61,6 @@ func TestClaudeLoginFromThePanel(t *testing.T) {
 	e.st.MarkNotice(ctx, e.user.ID, ClaudeExpiryNotice+"-30d")
 
 	lctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	ch, err := e.m.ClaudeLogin(lctx, e.user.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -70,6 +69,10 @@ func TestClaudeLoginFromThePanel(t *testing.T) {
 	if ev.Type != "url" || ev.Login == "" || ev.VerificationURI != "https://claude.com/cai/oauth/authorize?code=true&state=abc" {
 		t.Fatalf("first event = %+v", ev)
 	}
+	// The panel's stream ends once it has the link, and a phone drops it
+	// anyway while the user is on the sign-in page; the login waits on.
+	cancel()
+	time.Sleep(300 * time.Millisecond)
 
 	// Only the user who started it can answer it.
 	other := &store.User{Email: "b@example.com", PasswordHash: "x", Role: store.RoleUser}
@@ -77,14 +80,11 @@ func TestClaudeLoginFromThePanel(t *testing.T) {
 	if err := e.m.ClaudeLoginCode(ctx, other.ID, ev.Login, "good#abc"); !errors.Is(err, ErrNoLogin) {
 		t.Fatalf("someone else's code: %v", err)
 	}
-	if err := e.m.ClaudeLoginCode(ctx, e.user.ID, ev.Login, "good#abc\nmore"); err == nil {
-		t.Fatal("a code with a newline in it was typed in")
+	if err := e.m.ClaudeLoginCode(ctx, e.user.ID, ev.Login, "good#abc\nmore"); !errors.Is(err, ErrCodeFormat) {
+		t.Fatalf("a code with a newline in it: %v", err)
 	}
 	if err := e.m.ClaudeLoginCode(ctx, e.user.ID, ev.Login, " good#abc "); err != nil {
 		t.Fatal(err)
-	}
-	if ev := next(t, ch); ev.Type != "done" {
-		t.Fatalf("after the code = %+v", ev)
 	}
 	if got := e.m.Secret(ctx, e.user.ID, store.SecretClaudeToken); got != "sk-ant-oat01-abcdefghijklmnopqrstuvwxyz0123456789" {
 		t.Fatalf("stored token = %q", got)
@@ -97,15 +97,14 @@ func TestClaudeLoginFromThePanel(t *testing.T) {
 	}
 
 	// A wrong code is reported without waiting for setup-token to give up.
-	ch, err = e.m.ClaudeLogin(lctx, e.user.ID)
+	ch, err = e.m.ClaudeLogin(ctx, e.user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ev = next(t, ch)
-	e.m.ClaudeLoginCode(ctx, e.user.ID, ev.Login, "bad#abc")
 	start := time.Now()
-	if ev := next(t, ch); ev.Type != "error" || !strings.Contains(ev.Message, "not accepted") || strings.Contains(ev.Message, "sk-ant") {
-		t.Fatalf("wrong code = %+v", ev)
+	if err := e.m.ClaudeLoginCode(ctx, e.user.ID, ev.Login, "bad#abc"); err == nil || !strings.Contains(err.Error(), "not accepted") || strings.Contains(err.Error(), "sk-ant") {
+		t.Fatalf("wrong code: %v", err)
 	}
 	if time.Since(start) > 10*time.Second {
 		t.Fatal("a refused code took too long to report")
