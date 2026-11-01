@@ -127,6 +127,16 @@ func (m *Manager) ClaudeLogin(ctx context.Context, userID string) (<-chan LoginE
 		// Nobody may be reading ch any more; it holds more events than a
 		// login sends, so this never blocks.
 		send := func(ev LoginEvent) {
+			// The outcome goes to the log too: the panel that showed it
+			// may be gone, and it is the only record of why a login
+			// failed. Error messages carry screen text with any token
+			// already replaced by the helper; "done" carries none.
+			switch ev.Type {
+			case "done":
+				m.log.Info("claude login", "agent", ag.ID, "login", login, "outcome", "token saved")
+			case "error":
+				m.log.Warn("claude login", "agent", ag.ID, "login", login, "outcome", redactTokens(ev.Message))
+			}
 			if ev.Type == "done" || ev.Type == "error" {
 				select {
 				case result <- ev:
