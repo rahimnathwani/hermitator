@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rahimnathwani/hermitator/internal/guestfiles"
 	"github.com/rahimnathwani/hermitator/internal/ids"
 	"github.com/rahimnathwani/hermitator/internal/sandbox"
 	"github.com/rahimnathwani/hermitator/internal/spool"
@@ -60,13 +61,23 @@ func (m *Manager) ClaudeLogin(ctx context.Context, userID string) (<-chan LoginE
 	if err != nil {
 		return nil, err
 	}
+	script, err := guestfiles.FS.ReadFile("claude-login.py")
+	if err != nil {
+		release()
+		return nil, err
+	}
 	login := ids.New()
 	jobID := "claude-login-" + login
 	codeFile := path.Join(m.rt.GuestShared(spec), claudeLoginDir, login)
 	client := spec.Spool()
+	// The helper goes in on stdin rather than from the sandbox's tools
+	// bundle: a sandbox keeps the bundle it booted with, so one that booted
+	// before the helper existed would not have it. The helper reads the
+	// code from codeFile and never reads stdin itself.
 	job := spool.Job{
-		ID:   jobID,
-		Argv: []string{"python3", path.Join(m.rt.GuestTools(spec), "lib", "claude-login.py"), codeFile},
+		ID:    jobID,
+		Argv:  []string{"python3", "-", codeFile},
+		Stdin: script,
 	}
 	// The directory must exist before the code is written, and an agent may
 	// have put something else there.
@@ -143,6 +154,8 @@ func (m *Manager) ClaudeLogin(ctx context.Context, userID string) (<-chan LoginE
 				send(LoginEvent{Type: "done", Message: "Claude is connected."})
 			}
 		})
+		// Read before Cancel or Remove, which delete the job's stderr.
+		detail := strings.TrimSpace(client.Stderr(jobID, 300))
 		if err != nil {
 			client.Cancel(jobID, 15*time.Second)
 		} else {
@@ -150,7 +163,7 @@ func (m *Manager) ClaudeLogin(ctx context.Context, userID string) (<-chan LoginE
 		}
 		if !finished {
 			msg := "the sign-in did not finish"
-			if detail := strings.TrimSpace(client.Stderr(jobID, 300)); detail != "" {
+			if detail != "" {
 				msg += ": " + detail
 			}
 			send(LoginEvent{Type: "error", Message: msg})

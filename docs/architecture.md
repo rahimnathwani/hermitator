@@ -500,7 +500,10 @@ though background processes started during a turn inherit them.
 
 Signing in with Claude from the panel runs Claude Code's own
 `setup-token` in one of the user's sandboxes, through
-`internal/guestfiles/claude-login.py`: it gives the command a pseudo-terminal
+`internal/guestfiles/claude-login.py`. The host sends that script as the
+job's stdin (`python3 -`) instead of running it from the tools bundle,
+because a sandbox keeps the bundle it booted with and one booted before the
+helper existed would not have it. The helper gives the command a pseudo-terminal
 1000 columns wide (so the sign-in link is never wrapped), a throwaway HOME
 and none of the agent's credentials, and reports the link as a JSON line.
 setup-token then waits for the code the sign-in page shows; the user pastes

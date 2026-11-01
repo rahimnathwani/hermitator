@@ -49,6 +49,11 @@ func TestClaudeLoginFromThePanel(t *testing.T) {
 	}
 	e := setup(t)
 	ctx := context.Background()
+	// Like a sandbox that booted before the helper existed: it keeps that
+	// bundle until a cold boot, so the login must not depend on it.
+	if err := os.Remove(filepath.Join(e.m.cfg.Tools, "lib", "claude-login.py")); err != nil {
+		t.Fatal(err)
+	}
 	fake := filepath.Join(t.TempDir(), "claude")
 	os.WriteFile(fake, []byte(fakeSetupToken), 0o755)
 	t.Setenv("HERMITATOR_REAL_CLAUDE", os.Getenv("HERMITATOR_CLAUDE_BIN"))
