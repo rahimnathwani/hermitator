@@ -36,3 +36,24 @@ func TestDestructiveFormsAskFirst(t *testing.T) {
 		return nil
 	})
 }
+
+// The body boosts every form with htmx, which submits a form even when
+// the page's own script has called preventDefault. A form with no method
+// is one that script handles, so htmx would also send it as a GET and
+// swap the page out from under it (and put its fields in the address
+// bar). Such forms must opt out.
+func TestScriptFormsAreNotBoosted(t *testing.T) {
+	open := regexp.MustCompile(`<form\b[^>]*>`)
+	fs.WalkDir(assets, "templates", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		src, _ := fs.ReadFile(assets, path)
+		for _, tag := range open.FindAllString(string(src), -1) {
+			if !strings.Contains(tag, "method=") && !strings.Contains(tag, `hx-boost="false"`) {
+				t.Errorf("%s: %s has no method and is boosted; add hx-boost=\"false\"", path, tag)
+			}
+		}
+		return nil
+	})
+}
