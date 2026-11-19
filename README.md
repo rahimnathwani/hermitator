@@ -185,40 +185,12 @@ new master key, configures Caddy, builds the agent image (about 2.5 GB; the
 first build takes a few minutes) and starts the service. Run it again to
 upgrade. Running sandboxes keep running across upgrades.
 
-hermitator's Caddy site is its own file, `/etc/caddy/conf.d/hermitator.caddy`,
-which the main Caddyfile imports along with anything else in that directory.
-To serve another app from the same server, give it a file of its own there,
-such as `/etc/caddy/conf.d/myapp.caddy`, and `systemctl reload caddy`;
-reinstalling hermitator leaves it alone.
-Two such apps run on the production server today; what they need from
-hermitator is in [docs/neighbours.md](docs/neighbours.md).
-
-The image pins exact versions of Claude Code, pi and Playwright, and
-their auto-updaters are off, so a new release changes nothing in a
-running agent until its owner chooses it. The server keeps the image
-itself current: once a day it looks for releases that have been out for a
-week, and when there are any, builds a new image with them (never older
-than the pins in `image/Containerfile`), removes old images no agent uses,
-and tells the host operators on WhatsApp what moved. New agents get it;
-existing ones offer an upgrade, from `/upgrade` in their chat, one at a
-time on their Settings tab or all at once from the agents page, and keep
-all their files. `HERMITATOR_IMAGE_UPDATES=off` turns this off. From a
-laptop, `make image-bump` still moves the repository's pins (review and
-commit the diff) and `make image` deploys and builds them. The
-install also builds whisper.cpp, so voice notes are transcribed on the
+The install also builds whisper.cpp, so voice notes are transcribed on the
 host; `WITH_WHISPER=0` skips that. `WITH_TTS=1` installs
 [piper](https://github.com/rhasspy/piper), after which agents can answer
-in voice.
-
-Agents are told not to update Claude Code or pi themselves: a copy they
-install lands in their own layer and hides every later image version. If
-one does anyway, its Settings tab says so and can remove the copy.
-
-Claude Code plugins, pi extensions, skills and MCP servers need no image
-change. They live in each agent's home directory and survive sleep and
-image upgrades: install them from the agent's Terminal tab
-(`claude plugin install …`, `pi install …`), or ask the agent to. They
-take effect from the next message.
+in voice. Keeping the server going afterwards (agent images that update
+themselves and are checked first, plugins, other apps beside it, disk
+limits and backups) is in [docs/operating.md](docs/operating.md).
 
 Or, without Go, on the server itself: download a release from
 [GitHub](https://github.com/rahimnathwani/hermitator/releases), unpack it and
@@ -259,103 +231,23 @@ two weeks, so open WhatsApp on the agents' phone now and then.
 
 ## Using it
 
-Everything you send in a linked chat goes to its agent, except these, which
-hermitator answers itself:
+Everything you send in a linked chat goes to its agent. A few commands,
+which only you can use, are answered by hermitator itself, without the
+model:
 
 | Command | |
 |---|---|
 | `/status` | What the agent is doing, its state and disk use |
-| `/sleep` | Suspend it now (alias `/exit`) |
-| `/stop`, `/stop all` | Abort the current turn; `all` also withdraws the messages waiting for one |
-| `/awake 2h`, `/awake off` | Keep the sandbox from sleeping (up to 12 hours), so a background job runs on |
-| `/retry` | Run the last message again, after a failure or a restart |
-| `/sh COMMAND` | Run a shell command in the sandbox and get its output, without the model |
-| `/md`, `/md pdf`, `/md file` | The last reply again as a picture (a PDF when it is long), for tables and wide output; reply to an older one with `/md`, or react 🖼 to it, to pick it |
-| `/get PATH` | Send a file from the sandbox to this chat now; a folder comes zipped |
-| `/git`, `/git PATH` | Repositories with uncommitted or unpushed work; one repository's changes and recent commits |
-| `/tasks`, `/tasks pause N`, `/tasks resume N`, `/tasks run N`, `/tasks delete N` | Scheduled tasks; `run` starts one now, outside its schedule |
-| `/in 2h …`, `/at 9am …`, `/every 0 9 * * 1-5: …` | Schedule a message to the agent, without asking the model to |
-| `/plan` | The agent's own task list for what it is doing, without waking it |
-| `/usage` | Claude subscription use (5-hour and weekly, with pace) and spending |
-| `/sessions`, `/resume N` | Past conversations, and going back to one (`/new` keeps them) |
-| `/fork` | Branch the next message off this conversation (Claude Code) |
-| `/remember FACT` | Add a dated line to the agent's memory file, which it reads at the start of every conversation |
-| `/history on`, `/history off` | Keep this chat's messages, everyone's, in a file the agent can search |
-| `/preview PORT`, `/previews`, `/previews off` | A link to a web server the agent runs; list them; turn them all off |
-| `/timezone Europe/London` | The time zone schedules use (also in Settings) |
-| `/new` | Start a fresh conversation in this chat; files are kept (alias `/clear`) |
-| `/compact` | Summarise this conversation now, so the next messages re-read less |
-| `/model`, `/model opus`, `/model default` | Show or change the model |
-| `/effort`, `/effort high`, `/effort default` | Show or change how hard it thinks |
-| `/once opus max: …` | Use another model or effort for this one message |
-| `/switch claude` or `/switch pi` | Change harness, same workspace |
-| `/upgrade`, `/upgrade all` | Move the agent, or all of yours, to the newest image; files are kept, background processes end, and it asks first |
-| `/listen` | Show or change which messages wake the agent in this chat |
-| `/link CODE`, `/link NAME`, `/unlink` | Bind this chat to an agent (by name, for you), or unbind it |
-| `/agents` | Your agents, and which one this chat reaches |
-| `/help`, `/help COMMAND` | The list, or the lines about one command |
-| `/host`, `/host doctor`, `/host logs`, `/host image`, `/host restart` | The server itself, for host operators: see below |
+| `/stop` | Abort the current turn |
+| `/sh COMMAND` | Run a shell command in the sandbox and get its output |
+| `/new` | Start a fresh conversation in this chat; files are kept |
+| `/help` | All the others: scheduling, files, models, past conversations, the server |
 
-Model and effort changes apply from the next message, and the conversation
-carries on. Claude Code takes `fable`, `opus`, `sonnet`, `haiku` or a full
-model ID, with effort from `low` to `max`; pi takes its provider's models,
-with thinking from `off` to `max`. The agent's Settings tab has the same
-choices, and its Overview shows which model each turn actually ran on.
-
-A message that is only a slash word hermitator does not know, or that
-opens with one of Claude Code's or pi's own commands (`/cost`, `/mcp`),
-gets an explanation instead of a turn: the harness would have read it as
-plain text. A command sent as a reply to a message still counts as one.
-Only you can use commands: messages from your own numbers
-(listed in Settings, and learnt from `/link`), or sent by the linked
-account itself when it is your own number.
-
-An admin can make a user a **host operator** (on the Users page), who can
-then look after the server with no SSH, from a chat linked to an agent, a
-direct chat with the agents' number, or their own chat with themselves
-(never one other people read):
-
-| Command | |
-|---|---|
-| `/host` | Version, uptime, load, memory, disk, agents awake and working, WhatsApp numbers connected |
-| `/host doctor` | `hermitator doctor`'s checks |
-| `/host logs`, `/host logs 50` | The last warnings and errors from the journal, with every stored secret removed |
-| `/host image`, `/host image update` | The agent image and its updates; build one now if there are new releases |
-| `/host restart` | Restart hermitator, after asking; sandboxes keep running, and it says when it is back |
-
-Host operators also hear when a new agent image is built, or a build
-fails. The commands are fixed: nothing typed after `/host` reaches a shell.
-
-Each linked chat has two settings: which of **your** messages wake the agent,
-and which of **other people's** do. Each is *always*, *by mentioning it* or
-*never*. Mentioning means an @mention of the agent's number, a reply to one
-of its messages, or typing `@` and the agent's name. When you `/link` a
-direct chat, or a group with just you and the agent's number, your messages
-always wake it and other people's never do. In a group with other people,
-you wake it by mentioning it. Change this on the agent's Chats tab or with
-`/listen` (for example `/listen others all`).
-
-A message that does not wake the agent wakes nothing at all: no sandbox, no
-model call. hermitator keeps it, up to the last 200 per chat, and hands it
-to the agent as context with the next message that does. So in a group with
-a friend you can talk among yourselves and then ask *"@shop-frontend, can
-you do what Sam suggested?"*. Commands from you always work, and never wake
-the agent either.
-
-Messages sent in quick succession, a photo and then its caption say, become
-one turn. A message you send while a Claude Code agent is working ("actually,
-make it blue") reaches it in the middle of what it is doing, and gets 👀;
-with pi, it waits for the next turn, and gets 📥.
-
-Each turn's cost appears under Recent turns on the agent's Overview. It is what the model would
-have charged at API prices: on a Claude or ChatGPT subscription you are not
-billed per token, but it is a fair measure of how much of your allowance a
-turn used.
-
-Anyone who is not in a chat you linked is ignored, so strangers who find the
-agent's number get nothing. An account can also have a **fallback agent**,
-which answers your direct messages to the number without a `/link`. It
-listens only to your numbers, never to strangers or groups.
+[docs/commands.md](docs/commands.md) has the full list, and how a group
+chat decides which messages wake the agent. In short: in a direct chat
+your messages always do; in a group, mentioning the agent does; other
+people's messages are kept as context without waking anything; and anyone
+who is not in a chat you linked is ignored.
 
 ## Configuration
 
@@ -366,22 +258,10 @@ rest have sensible defaults. They are all listed in
 
 ## Backups
 
-```sh
-hermitator backup /var/backups/hermitator
-```
-
-writes a new folder there with a consistent copy of both databases (users,
-agents, chats, tasks and sealed credentials; WhatsApp's device keys) and
-the egress CA, safe to run while the service is up. It leaves out the
-master key, so keep `HERMITATOR_MASTER_KEY` somewhere else: without it the
-credentials in a backup cannot be read. Agents' own files, under
-`/var/lib/hermitator/agents`, are separate and much larger; copy them with
-restic or borg, ideally while the agents sleep. Images, the tools bundle
-and whisper's model are rebuilt by `deploy/install.sh`.
-
-A daily run from cron or a systemd timer, with the folder then copied off
-the server, covers a lost disk. To restore, stop the service, put the
-files back in `/var/lib/hermitator` and start it.
+`hermitator backup DIR` copies the databases and the egress CA into a new
+folder, safe while the service runs; keep the master key elsewhere. See
+[docs/operating.md](docs/operating.md#backups) for what it leaves out and
+how to restore.
 
 ## Security model
 
@@ -466,7 +346,17 @@ running agents you do not trust.
 - Processes started from the web terminal do not survive a checkpoint
   (gVisor drops `exec` sessions on restore). Ask the agent to start
   long-running things instead.
-- No per-agent disk quotas or egress allowlists yet.
+- Disk use is watched, not capped: an agent past 50 GiB of its own files
+  (`HERMITATOR_AGENT_DISK_GB`) is stopped and its turns wait until it is
+  cleaned up, and when the disk's free space falls under a reserve every
+  agent stops until there is room, but within one check (two minutes) an
+  agent can write as fast as the disk allows. No egress allowlists yet.
+- WhatsApp has no API for this: hermitator connects the way WhatsApp Web
+  does, through [whatsmeow](https://github.com/tulir/whatsmeow), which
+  WhatsApp does not endorse, and it can ban a number it thinks is
+  automated. Use a number you can lose, ideally one of its own for the
+  agents. If it is banned, the agents and their files are untouched, and
+  the panel's console still talks to them; link another number.
 - One host. There is no clustering, and no plan for it.
 
 Ideas not yet built are in [docs/ideas.md](docs/ideas.md).
