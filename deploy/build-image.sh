@@ -33,6 +33,24 @@ echo "building $tag from $context"
 # subnet is easy to clash with.
 podman build --pull=newer --network=host --tag "$tag" "$@" "$context"
 
+# Before any agent can use it: check, offline, that Claude Code and pi
+# still work the way hermitator drives them. A failure leaves the current
+# image as it was. HERMITATOR_IMAGE_CHECK=off skips it.
+if [ "${HERMITATOR_IMAGE_CHECK:-on}" != off ]; then
+	hermitator=${HERMITATOR_BIN:-$(command -v hermitator || true)}
+	if [ -z "$hermitator" ]; then
+		echo "no hermitator binary to check $tag with; set HERMITATOR_BIN, or HERMITATOR_IMAGE_CHECK=off" >&2
+		podman rmi "$tag" >/dev/null 2>&1 || true
+		exit 1
+	fi
+	echo "checking $tag"
+	if ! "$hermitator" check-image "$tag"; then
+		echo "$tag failed its check; the current image is unchanged" >&2
+		podman rmi "$tag" >/dev/null 2>&1 || true
+		exit 1
+	fi
+fi
+
 tmp=$dest.partial
 rm -rf "$tmp"
 mkdir -p "$tmp/rootfs"

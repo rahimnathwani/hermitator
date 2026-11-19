@@ -641,6 +641,20 @@ when its owner upgrades it, which stops its sandbox, since an OverlayFS
 upper layer must never see its lower layer change underneath it and a
 checkpoint cannot be restored over another image.
 
+Between the podman build and the export, the script runs `hermitator
+check-image`, which starts the new image with podman, no network and the
+tools bundle mounted, and runs `hermitator-guest selftest` in it. That
+runs a Claude Code turn and a pi turn for each provider with a default
+model, through `internal/harness` with the flags it always passes,
+against an API address nothing listens on: each must start and fail the
+way a harness that understood its input does (an init event and a result
+from Claude Code; pi refusing the prompt for want of a key), not with an
+unknown option or a model it no longer has. It also runs
+`claude-login.py` until `setup-token` shows its sign-in link. A failure
+removes the podman tag and exits before anything is exported, so the
+current image stays current and the updater reports a failed build.
+`HERMITATOR_IMAGE_CHECK=off` skips it.
+
 `internal/imageupdate` keeps the newest current on the host. Once a day
 (the first look ten minutes after a start, so a restart does not start a
 build) it asks npm and PyPI for the releases `deploy/bump-image.sh` would

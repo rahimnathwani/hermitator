@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -59,6 +60,7 @@ type fixture struct {
 	u      *Updater
 	images string
 	builds [][]string
+	envs   [][]string
 	notes  []string
 	inUse  map[string]bool
 	fail   bool
@@ -91,6 +93,7 @@ func newFixture(t *testing.T) *fixture {
 		Images:  &sandbox.Images{Dir: images},
 		Source:  src,
 		DataDir: root,
+		Binary:  "/usr/local/bin/hermitator",
 		Keep:    1,
 		NPM:     reg.URL,
 		PyPI:    reg.URL,
@@ -102,6 +105,7 @@ func newFixture(t *testing.T) *fixture {
 		InUse: func(context.Context) (map[string]bool, error) { return f.inUse, nil },
 		Build: func(_ context.Context, argv, env []string) ([]byte, error) {
 			f.builds = append(f.builds, argv)
+			f.envs = append(f.envs, env)
 			if f.fail {
 				return []byte("step 9/12\nE: unable to fetch\n"), errors.New("exit status 1")
 			}
@@ -147,6 +151,10 @@ func TestUpdaterBuildsWhatHasSettled(t *testing.T) {
 		if !strings.Contains(args, want) {
 			t.Fatalf("build args %q lack %s", args, want)
 		}
+	}
+	// build-image.sh checks the new image with this very binary.
+	if !slices.Contains(f.envs[0], "HERMITATOR_BIN=/usr/local/bin/hermitator") {
+		t.Fatalf("build env %q has no HERMITATOR_BIN", f.envs[0])
 	}
 	if len(f.notes) != 1 || !strings.Contains(f.notes[0], "Claude Code 2.1.302 → 2.1.310") || !strings.Contains(f.notes[0], "/upgrade") || strings.Contains(f.notes[0], "pi ") {
 		t.Fatalf("notice = %q", f.notes)

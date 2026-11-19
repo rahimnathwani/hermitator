@@ -33,6 +33,10 @@ type Updater struct {
 	// as deploy/install.sh leaves them in /usr/local/share/hermitator.
 	Source  string
 	DataDir string
+	// Binary is the hermitator binary build-image.sh checks a new image
+	// with before switching to it; empty leaves the script to find one
+	// on PATH.
+	Binary string
 	// MinAge is how long a release must have been out; a compromised one
 	// is usually caught and pulled within days.
 	MinAge time.Duration
@@ -241,7 +245,11 @@ func (u *Updater) run(ctx context.Context, force bool) Result {
 	}
 	bctx, cancel := context.WithTimeout(ctx, buildTimeout)
 	defer cancel()
-	out, err := u.Build(bctx, argv, []string{"HERMITATOR_DATA_DIR=" + u.DataDir})
+	env := []string{"HERMITATOR_DATA_DIR=" + u.DataDir}
+	if u.Binary != "" {
+		env = append(env, "HERMITATOR_BIN="+u.Binary)
+	}
+	out, err := u.Build(bctx, argv, env)
 	if err != nil && ctx.Err() != nil {
 		// hermitator is stopping; the versions did not fail, so the next
 		// process tries them again.

@@ -4,6 +4,7 @@
 //	hermitator-guest turn                  run one harness turn (request on stdin)
 //	hermitator-guest send FILE [CAPTION]   queue a file for WhatsApp (also: whatsapp-send)
 //	hermitator-guest browser [URL]         the agent's own browser, which the user can sign in with
+//	hermitator-guest selftest              check a new image's harnesses, offline, before agents use it
 //
 // The host mounts this binary read-only at /opt/hermitator/bin.
 package main
@@ -63,6 +64,8 @@ func main() {
 		os.Exit(browserCmd(os.Args[2:]))
 	case "recall":
 		os.Exit(recall(os.Args[2:], os.Stdout))
+	case "selftest":
+		os.Exit(selftest())
 	case "version":
 		fmt.Println(version)
 	default:
@@ -71,7 +74,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: hermitator-guest init | turn | send FILE [CAPTION] | schedule ... | unschedule ID | tasks | ask QUESTION OPTION... | preview PORT | browser [URL] | hold COMMAND | notify COMMAND | recall WORDS... | version")
+	fmt.Fprintln(os.Stderr, "usage: hermitator-guest init | turn | send FILE [CAPTION] | schedule ... | unschedule ID | tasks | ask QUESTION OPTION... | preview PORT | browser [URL] | hold COMMAND | notify COMMAND | recall WORDS... | selftest | version")
 	os.Exit(2)
 }
 

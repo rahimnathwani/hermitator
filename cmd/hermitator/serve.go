@@ -177,6 +177,7 @@ func serve() error {
 			Images:  images,
 			Source:  cfg.Source,
 			DataDir: cfg.DataDir,
+			Binary:  self(),
 			Keep:    1,
 			Log:     log,
 			Notify:  mgr.NotifyOperators,
