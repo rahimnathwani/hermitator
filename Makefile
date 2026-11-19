@@ -13,9 +13,14 @@ build: ## build both binaries for this machine into bin/
 test: ## run the test suite with the race detector
 	go test -race ./...
 
-lint: ## gofmt and go vet
+# The staticcheck CI runs, built with this Go: a copy installed with an
+# older Go cannot read this module and fails on every package.
+STATICCHECK := go run honnef.co/go/tools/cmd/staticcheck@v0.8.2
+
+lint: ## gofmt, go vet and staticcheck, as CI runs them
 	@test -z "$$(gofmt -l .)" || { gofmt -l .; echo "run gofmt -w ."; exit 1; }
 	go vet ./...
+	$(STATICCHECK) ./...
 
 dev: build ## run the panel locally with the unsandboxed runtime (no gVisor)
 	@mkdir -p $(DEV_DIR)

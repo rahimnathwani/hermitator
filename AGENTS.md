@@ -25,7 +25,7 @@ of what must stay true:
 
 ```sh
 make test     # go test -race ./...; includes end-to-end turns on the local runtime
-make lint     # gofmt and go vet; CI also runs staticcheck
+make lint     # gofmt, go vet and staticcheck, as CI runs them
 make dev      # panel on :8080 with HERMITATOR_RUNTIME=unsafe-local
 make deploy   # build for linux and install on DEPLOY_HOST (see .env.example)
 ```
