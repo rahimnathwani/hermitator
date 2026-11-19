@@ -64,6 +64,20 @@ type Config struct {
 	// StateDir holds the few files the manager keeps across restarts of
 	// its own, such as who asked for one; empty keeps none.
 	StateDir string
+	// AgentDiskLimit is how much disk, in bytes, an agent's own files may
+	// take before it is stopped and its turns wait (disk.go): 0 is 50 GiB,
+	// negative no limit.
+	AgentDiskLimit int64
+	// DiskReserve is the free space, in bytes, under which every agent is
+	// stopped and turns wait: 0 is the smaller of a tenth of the disk and
+	// 20 GiB, negative never.
+	DiskReserve int64
+	// DiskInterval is how often the disk guard looks; negative never.
+	DiskInterval time.Duration
+	// DiskFree and DiskUsed measure the agents' disk and one agent's use
+	// of it; tests replace them.
+	DiskFree func(dir string) (free, total int64, err error)
+	DiskUsed func(spec *sandbox.Spec) (int64, error)
 }
 
 // Manager is the orchestrator.
@@ -90,6 +104,7 @@ type Manager struct {
 	stt     Transcriber
 	tts     Speaker
 	host    HostOps
+	disk    diskGuard
 
 	ctx    context.Context
 	mu     sync.Mutex
@@ -127,6 +142,15 @@ func New(cfg Config, st *store.Store, box *secrets.Box, rt sandbox.Runtime, log 
 	}
 	if cfg.ResendInterval == 0 {
 		cfg.ResendInterval = 10 * time.Second
+	}
+	if cfg.DiskInterval == 0 {
+		cfg.DiskInterval = 2 * time.Minute
+	}
+	if cfg.DiskFree == nil {
+		cfg.DiskFree = statfsFree
+	}
+	if cfg.DiskUsed == nil {
+		cfg.DiskUsed = (*sandbox.Spec).DiskUsage
 	}
 	return &Manager{cfg: cfg, store: st, box: box, rt: rt, log: log, actors: map[string]*actor{}, checking: map[string]bool{}, msgr: nopMessenger{}}
 }
@@ -189,6 +213,7 @@ func (m *Manager) Start(ctx context.Context) error {
 		sandbox.PruneTools(filepath.Dir(m.cfg.Tools), m.cfg.Tools, dirs)
 	}
 	m.goLoop(func() { m.reapLoop(ctx) })
+	m.goLoop(func() { m.diskLoop(ctx) })
 	return nil
 }
 

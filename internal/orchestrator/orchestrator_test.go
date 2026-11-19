@@ -241,6 +241,8 @@ type env struct {
 	user  *store.User
 	agent *store.Agent
 	acct  *store.Account
+	// free and used are what the disk guard measures.
+	free, used atomic.Int64
 }
 
 func setup(t *testing.T) *env {
@@ -268,7 +270,16 @@ func setup(t *testing.T) *env {
 	box, _ := secrets.New(make([]byte, secrets.KeySize))
 	rt := &sandbox.Local{}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	// The disk guard sees a roomy disk and empty agents unless a test
+	// says otherwise; the machine running the tests may be nearly full.
+	e := &env{}
+	e.free.Store(1 << 40)
 	m := New(Config{
+		DiskInterval:   50 * time.Millisecond,
+		DiskReserve:    1 << 30,
+		AgentDiskLimit: 1 << 30,
+		DiskFree:       func(string) (int64, int64, error) { return e.free.Load(), 2 << 40, nil },
+		DiskUsed:       func(*sandbox.Spec) (int64, error) { return e.used.Load(), nil },
 		AgentsDir:      filepath.Join(root, "agents"),
 		Images:         &sandbox.Images{Dir: images},
 		Tools:          tools,
@@ -303,7 +314,8 @@ func setup(t *testing.T) *env {
 		}
 		st.Close()
 	})
-	return &env{m: m, st: st, rec: rec, user: user, agent: agent, acct: acct}
+	e.m, e.st, e.rec, e.user, e.agent, e.acct = m, st, rec, user, agent, acct
+	return e
 }
 
 func (e *env) msg(chat, text string, fromMe bool) Message {

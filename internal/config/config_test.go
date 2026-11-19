@@ -37,3 +37,20 @@ func TestBadSubnet(t *testing.T) {
 		t.Fatal("expected an error for a tiny subnet")
 	}
 }
+
+func TestDiskLimits(t *testing.T) {
+	t.Setenv("HERMITATOR_ENV_FILE", "/nonexistent")
+	t.Setenv("HERMITATOR_AGENT_DISK_GB", "80")
+	t.Setenv("HERMITATOR_DISK_RESERVE_GB", "off")
+	c, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.AgentDisk != 80<<30 || c.DiskReserve != -1 {
+		t.Fatalf("agent disk %d, reserve %d", c.AgentDisk, c.DiskReserve)
+	}
+	t.Setenv("HERMITATOR_AGENT_DISK_GB", "50GB")
+	if _, err := Load(); err == nil {
+		t.Fatal("accepted a size with a unit")
+	}
+}

@@ -31,6 +31,11 @@ type actor struct {
 	awake      *ownerHold
 	lastActive time.Time
 	state      string
+	// stopAfterTurn stops the sandbox once the turn the disk guard
+	// killed has ended; diskNoted holds the chats told their messages
+	// wait for disk space, until they no longer do.
+	stopAfterTurn bool
+	diskNoted     map[string]bool
 
 	// outbox serialises outbox delivery between a turn and the background
 	// tick, which run outside the actor; bgSent and wakes, under it,
@@ -130,6 +135,9 @@ func (a *actor) startTurn() {
 	if a.turn != nil || len(a.pending) == 0 {
 		return
 	}
+	if a.waitForDisk() {
+		return
+	}
 	// One turn answers one chat, in its conversation; messages from other
 	// chats wait their turn.
 	first := chatKey(a.pending[0])
@@ -159,6 +167,10 @@ func (a *actor) startTurn() {
 			a.lastActive = time.Now()
 			if ok {
 				a.setState(sandbox.Running)
+			}
+			if a.stopAfterTurn {
+				a.stopAfterTurn = false
+				a.stopForDisk()
 			}
 			if a.debounce == nil {
 				a.startTurn()

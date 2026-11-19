@@ -140,6 +140,8 @@ func serve() error {
 		PreviewKey:      derive(key, "preview links"),
 		PreviewLoopback: cfg.Runtime == "unsafe-local",
 		StateDir:        cfg.DataDir,
+		AgentDiskLimit:  cfg.AgentDisk,
+		DiskReserve:     cfg.DiskReserve,
 	}, st, box, rt, log)
 	if egressKey != nil {
 		gateway := netip.PrefixFrom(cfg.Subnet.Masked().Addr().Next(), 0).Addr()

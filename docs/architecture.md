@@ -680,3 +680,18 @@ host's total less a fifth (at least 1 GiB, at most 4 GiB kept back), and
 CPU weight at half the default. Agents that are each within their limit
 can then still not exhaust the host between them; if they try, the OOM
 killer chooses among sandboxes, never hermitator, Caddy or sshd.
+
+Disk has no such cap: an upper layer is plain directories on the host's
+filesystem, which hermitator's database, checkpoints and any other app
+on the server share. So a disk guard (`internal/orchestrator/disk.go`)
+measures every two minutes and acts once on each change. A running
+agent whose directory (allocated blocks, staying on its filesystem, so
+not the mounted image) passes `HERMITATOR_AGENT_DISK_GB` (default 50) is
+stopped, its owner told, and its turns wait until a later measurement
+finds it under; `/sh` and the Terminal tab still wake it to clean up,
+and staying over does not stop it again. When free space falls under
+`HERMITATOR_DISK_RESERVE_GB` (default the smaller of a tenth of the
+disk and 20 GiB), every running agent is stopped, not checkpointed,
+since a checkpoint writes more, the host operators get the largest
+agents, and all turns wait until a quarter more than the reserve is
+free. Waiting messages stay queued; each chat is told once why.

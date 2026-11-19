@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -38,6 +39,27 @@ type Config struct {
 	// Source holds image/ and deploy/ for building images, as
 	// deploy/install.sh leaves them. HERMITATOR_SOURCE
 	Source string
+	// AgentDisk and DiskReserve are in bytes: 0 is the orchestrator's
+	// default, negative off. HERMITATOR_AGENT_DISK_GB,
+	// HERMITATOR_DISK_RESERVE_GB
+	AgentDisk   int64
+	DiskReserve int64
+}
+
+// gib reads a whole number of GiB, or "off".
+func gib(key string) (int64, error) {
+	v := strings.ToLower(env(key, ""))
+	switch v {
+	case "":
+		return 0, nil
+	case "off", "0":
+		return -1, nil
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 || n > 1<<20 {
+		return 0, fmt.Errorf("%s must be a whole number of GiB or off, not %q", key, v)
+	}
+	return n << 30, nil
 }
 
 func env(key, fallback string) string {
@@ -136,6 +158,12 @@ func Load() (*Config, error) {
 	case "off", "0", "false", "no":
 	default:
 		return nil, fmt.Errorf("HERMITATOR_IMAGE_UPDATES must be on or off, not %q", v)
+	}
+	if c.AgentDisk, err = gib("HERMITATOR_AGENT_DISK_GB"); err != nil {
+		return nil, err
+	}
+	if c.DiskReserve, err = gib("HERMITATOR_DISK_RESERVE_GB"); err != nil {
+		return nil, err
 	}
 	return c, nil
 }

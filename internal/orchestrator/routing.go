@@ -464,6 +464,9 @@ func (m *Manager) statusText(ctx context.Context, ag *store.Agent, key store.Thr
 			fmt.Fprintf(&b, "\nDisk: %s of changes on top of %s", media.HumanSize(size), ag.Image)
 		}
 	}
+	if note := m.diskStatus(ag.ID); note != "" {
+		b.WriteString("\n" + note)
+	}
 	if !ag.LastActive.IsZero() {
 		fmt.Fprintf(&b, "\nLast active: %s ago", time.Since(ag.LastActive).Round(time.Second))
 	}
