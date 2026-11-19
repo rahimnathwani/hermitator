@@ -124,6 +124,7 @@ func (s *Server) Handler() (http.Handler, error) {
 	tenant("POST /agents/{id}/wake", s.wakeAgent)
 	tenant("POST /agents/{id}/upgrade-image", s.upgradeImage)
 	tenant("POST /agents/{id}/sleep", s.sleepAgent)
+	tenant("POST /agents/{id}/restart", s.restartAgent)
 	tenant("POST /agents/{id}/stop", s.stopTurn)
 	tenant("POST /agents/{id}/new-session", s.newSession)
 	tenant("POST /agents/{id}/link-code", s.newLinkCode)

@@ -987,3 +987,25 @@ func TestClaudeSignIn(t *testing.T) {
 		t.Fatalf("empty code: %d", code)
 	}
 }
+
+func TestRestartButton(t *testing.T) {
+	f := setup(t)
+	ctx := context.Background()
+	alice := f.login(t, "alice@example.com")
+	bob := f.login(t, "bob@example.com")
+	id := alice.createAgent("bot")
+	if err := f.server.Agents.Wake(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, body := alice.get("/agents/" + id); !strings.Contains(body, `action="/agents/`+id+`/restart"`) {
+		t.Fatal("no Restart button on the agent's page")
+	}
+	if code, _ := bob.post("/agents/"+id+"/restart", nil); code != http.StatusNotFound {
+		t.Fatalf("bob restarted alice's agent: %d", code)
+	}
+	alice.post("/agents/"+id+"/restart", nil)
+	ag, _ := f.server.Store.Agent(ctx, id)
+	if ag.State != sandbox.Stopped {
+		t.Fatalf("state after Restart = %s", ag.State)
+	}
+}

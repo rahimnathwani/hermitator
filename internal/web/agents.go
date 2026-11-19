@@ -469,6 +469,24 @@ func (s *Server) sleepAgent(w http.ResponseWriter, r *http.Request, v *viewer) {
 	}
 }
 
+func (s *Server) restartAgent(w http.ResponseWriter, r *http.Request, v *viewer) {
+	a, err := s.agentFor(r, v)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	was, err := s.Agents.Restart(r.Context(), a.ID)
+	switch {
+	case errors.Is(err, orchestrator.ErrBusy):
+		s.back(w, r, "/agents/"+a.ID, "The agent is busy (a turn, a terminal or a login is using it).")
+	case err != nil:
+		s.back(w, r, "/agents/"+a.ID, "Could not restart: "+err.Error())
+	default:
+		s.audit(r, v, "agent.restart", "agent="+a.ID+" was="+was)
+		s.back(w, r, "/agents/"+a.ID, "Stopped, checkpoint discarded. It boots fresh with the next message.")
+	}
+}
+
 func (s *Server) stopTurn(w http.ResponseWriter, r *http.Request, v *viewer) {
 	a, err := s.agentFor(r, v)
 	if err != nil {

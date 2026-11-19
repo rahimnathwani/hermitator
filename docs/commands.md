@@ -14,6 +14,7 @@ way, and `/help COMMAND` shows one.
 | `/plan` | The agent's own task list for what it is doing, without waking it |
 | `/usage` | Claude subscription use (5-hour and weekly, with pace) and spending |
 | `/sleep` | Suspend it now (alias `/exit`) |
+| `/restart` | Stop the sandbox and discard its checkpoint, after asking; background processes end, files are kept, and it boots fresh with the next message (alias `/reboot`; also Restart on its page) |
 | `/awake 2h`, `/awake off` | Keep the sandbox from sleeping (up to 12 hours), so a background job runs on |
 
 ## Without the model

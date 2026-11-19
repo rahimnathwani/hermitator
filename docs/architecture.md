@@ -113,6 +113,9 @@ as ordinary files instead of into gVisor's own in-sandbox overlay.
 The guest tools are mounted read-only from a content-addressed directory.
 A sandbox keeps the bundle it booted with until its next cold boot, so a
 checkpoint is always restored against exactly the binary that was running.
+An agent that always has something running in the background is always
+checkpointed, never stopped, so it would keep its bundle indefinitely;
+`/restart` (or Restart on its page) stops it and discards the checkpoint.
 Unreferenced bundles are deleted at startup.
 
 ### Network

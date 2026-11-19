@@ -29,6 +29,17 @@
     <div class="btn-group">
       <form method="post" action="/agents/{{$a.ID}}/wake"><button title="Boot or restore the sandbox now">{{icon "wake"}}Wake</button></form>
       <form method="post" action="/agents/{{$a.ID}}/sleep"><button title="Checkpoint or stop the sandbox now">{{icon "sleep"}}Sleep</button></form>
+      <form method="post" action="/agents/{{$a.ID}}/restart" data-confirm="Restart" data-confirm-title="Restart {{$a.Name}}?">
+        <template data-confirm-body>
+          <p>The sandbox stops now and its checkpoint is discarded. It boots fresh, with the current guest tools, at the next message.</p>
+          <ul>
+            <li>Every file the agent made is kept.</li>
+            <li>Everything running in the background ends: dev servers, the browser, and sign-ins that last only until it closes.</li>
+            <li>There is no undo; ask the agent to start its servers again.</li>
+          </ul>
+        </template>
+        <button title="Stop the sandbox and discard its checkpoint, so it boots fresh">{{icon "restart"}}Restart…</button>
+      </form>
     </div>
     <form method="post" action="/agents/{{$a.ID}}/stop" data-busy-only{{if not $a.Busy}} hidden{{end}}><button class="danger" title="Stop the turn in progress">{{icon "stop"}}Stop turn</button></form>
   </div>

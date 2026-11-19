@@ -87,3 +87,21 @@ func (m *Manager) upgradeCommand(ctx context.Context, acct *store.Account, ag *s
 	}
 	reply(text)
 }
+
+// restartCommand handles /restart [yes].
+func (m *Manager) restartCommand(ctx context.Context, acct *store.Account, ag *store.Agent, arg string, reply func(string)) {
+	if !strings.EqualFold(strings.TrimSpace(arg), "yes") {
+		reply(fmt.Sprintf("Restarting *%s* stops its sandbox now and discards its checkpoint, so everything running in the background ends (a dev server, the browser and its sign-ins that last only until it closes). Every file is kept, and it boots fresh, with the current guest tools, at the next message. There is no undo: start the servers again afterwards.\n\nSend /restart yes to go ahead.", ag.Name))
+		return
+	}
+	was, err := m.Restart(ctx, ag.ID)
+	switch {
+	case errors.Is(err, ErrBusy):
+		reply("*" + ag.Name + "* is busy (a turn, a terminal or a login is using it). Send /stop first, or wait for it to finish.")
+	case err != nil:
+		reply("⚠️ Could not restart: " + err.Error())
+	default:
+		m.store.Audit(ctx, acct.UserID, acct.UserID, "agent.restart", "agent="+ag.ID+" was="+was)
+		reply("🔄 *" + ag.Name + "* is stopped, its checkpoint discarded. It boots fresh with the next message.")
+	}
+}

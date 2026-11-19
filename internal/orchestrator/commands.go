@@ -53,6 +53,8 @@ var commandAliases = map[string]string{
 	"agents":   "agents",
 	"host":     "host",
 	"upgrade":  "upgrade",
+	"restart":  "restart",
+	"reboot":   "restart",
 }
 
 // commandHelp is /help, or with a command named, the lines of it that
@@ -139,6 +141,7 @@ const helpText = `*hermitator commands*
 /plan: its task list for what it is doing
 /usage: your Claude subscription use and spending
 /sleep: suspend the sandbox now (alias /exit)
+/restart: stop the sandbox and discard its checkpoint, ending background processes; files are kept (alias /reboot)
 /awake 2h: keep the sandbox from sleeping, for a background job (/awake off)
 
 *Without the model*

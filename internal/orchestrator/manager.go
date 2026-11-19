@@ -603,6 +603,38 @@ func (m *Manager) UpgradeImage(ctx context.Context, agentID string) (string, err
 	return latest, err
 }
 
+// Restart stops an agent's sandbox and discards its checkpoint, so its
+// next message boots it cold. Background processes end and files stay. A
+// checkpointed sandbox otherwise keeps the guest tools it booted with
+// forever, and the owner had no way to move it on. It returns the state
+// the sandbox was in.
+func (m *Manager) Restart(ctx context.Context, agentID string) (string, error) {
+	var was string
+	err := m.actor(agentID).call(func(a *actor) error {
+		if a.turn != nil || a.holds > 0 {
+			return ErrBusy
+		}
+		ag, err := m.store.Agent(ctx, agentID)
+		if err != nil {
+			return err
+		}
+		spec, err := m.Spec(ag)
+		if err != nil {
+			return err
+		}
+		was = a.state
+		if a.state == sandbox.Running {
+			m.scrubCredentials(ctx, spec)
+		}
+		if err := m.rt.Stop(ctx, spec); err != nil {
+			return err
+		}
+		a.setState(sandbox.Stopped)
+		return nil
+	})
+	return was, err
+}
+
 // OwnCopies lists the harnesses an agent installed over the image's.
 func (m *Manager) OwnCopies(ag *store.Agent) []sandbox.OwnCopy {
 	spec, err := m.Spec(ag)
