@@ -7,6 +7,7 @@
 //	hermitator user list                 list logins
 //	hermitator keygen                    print a new master key
 //	hermitator doctor                    check that this host can run agents
+//	hermitator backup DIR                copy what cannot be rebuilt into DIR
 //	hermitator version
 //
 // Configuration comes from HERMITATOR_* environment variables.
@@ -33,6 +34,8 @@ func main() {
 		err = keygen()
 	case "doctor":
 		err = doctor()
+	case "backup":
+		err = backupCmd(os.Args[2:])
 	case "version", "--version", "-v":
 		fmt.Println("hermitator", version)
 	case "help", "--help", "-h":
@@ -56,7 +59,8 @@ func usage() {
   user list                  list logins
   keygen                     print a new master key for HERMITATOR_MASTER_KEY
   doctor                     check that this host can run agents
-  version                    print the version
+  backup DIR                 copy the databases and egress CA into a new folder in DIR
+  version                   print the version
 `)
 	os.Exit(2)
 }

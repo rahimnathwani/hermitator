@@ -364,6 +364,25 @@ The service reads `HERMITATOR_*` variables from
 rest have sensible defaults. They are all listed in
 [.env.example](.env.example).
 
+## Backups
+
+```sh
+hermitator backup /var/backups/hermitator
+```
+
+writes a new folder there with a consistent copy of both databases (users,
+agents, chats, tasks and sealed credentials; WhatsApp's device keys) and
+the egress CA, safe to run while the service is up. It leaves out the
+master key, so keep `HERMITATOR_MASTER_KEY` somewhere else: without it the
+credentials in a backup cannot be read. Agents' own files, under
+`/var/lib/hermitator/agents`, are separate and much larger; copy them with
+restic or borg, ideally while the agents sleep. Images, the tools bundle
+and whisper's model are rebuilt by `deploy/install.sh`.
+
+A daily run from cron or a systemd timer, with the folder then copied off
+the server, covers a lost disk. To restore, stop the service, put the
+files back in `/var/lib/hermitator` and start it.
+
 ## Security model
 
 What the sandbox protects is the host, and other agents, from an agent:
