@@ -74,7 +74,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: hermitator-guest init | turn | send FILE [CAPTION] | schedule ... | unschedule ID | tasks | ask QUESTION OPTION... | preview PORT | browser [URL] | hold COMMAND | notify COMMAND | recall WORDS... | selftest | version")
+	fmt.Fprintln(os.Stderr, "usage: hermitator-guest init | turn | send FILE [CAPTION] | schedule ... | unschedule ID | tasks | ask QUESTION OPTION... | preview PORT [PATH] | preview URL | browser [URL] | hold COMMAND | notify COMMAND | recall WORDS... | selftest | version")
 	os.Exit(2)
 }
 

@@ -210,6 +210,14 @@ as Vite only answer the hosts they expect, and the server has to listen on
 0.0.0.0, which agents are told. The host may open connections to agents;
 agents still cannot open any to the host.
 
+Agents ask with `hermitator-guest preview PORT`, which first dials the
+port on the sandbox's own address and on loopback, and refuses when only
+loopback answers, since the link could not reach it. Apps such as
+showntell print a local link with their own path and token; given that
+URL (or `PORT PATH`), the guest puts its path, query and fragment on the
+link itself. Agents that spliced these by hand dropped the secret or the
+app's token, so the prompt tells them never to edit a link.
+
 Pages from agents are served from subdomains of a domain the panel may
 share, and a subdomain can set cookies for its parents. The panel's
 cookies are therefore `__Host-` cookies over HTTPS, which browsers accept

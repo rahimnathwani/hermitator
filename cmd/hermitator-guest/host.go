@@ -2,9 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,57 +33,184 @@ func ask(req turn.HostRequest, wait time.Duration) int {
 
 // askOr is ask with what to say when hermitator has not answered in time.
 func askOr(req turn.HostRequest, wait time.Duration, pending string) int {
-	dir := shared(turn.RequestsDir)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	a, answered, err := request(req, wait)
+	switch {
+	case err != nil:
 		fmt.Fprintln(os.Stderr, err)
 		return 1
+	case !answered:
+		fmt.Println(pending)
+		return 0
+	case !a.OK:
+		fmt.Fprintln(os.Stderr, a.Message)
+		return 1
+	}
+	fmt.Println(a.Message)
+	return 0
+}
+
+// request hands a request to the host and returns its answer, if one
+// came within wait.
+func request(req turn.HostRequest, wait time.Duration) (turn.HostAnswer, bool, error) {
+	var a turn.HostAnswer
+	dir := shared(turn.RequestsDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return a, false, err
 	}
 	id := fmt.Sprintf("%d-%d", time.Now().UnixNano(), os.Getpid())
 	req.Turn = os.Getenv(turn.EnvTurn)
 	data, _ := json.Marshal(req)
 	tmp := filepath.Join(dir, "."+id+".json")
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return a, false, err
 	}
 	if err := os.Rename(tmp, filepath.Join(dir, id+".json")); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		return a, false, err
 	}
 	answer := filepath.Join(dir, id+".answer.json")
 	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
 		if b, err := os.ReadFile(answer); err == nil {
 			os.Remove(answer)
-			var a turn.HostAnswer
 			if json.Unmarshal(b, &a) != nil {
-				fmt.Fprintln(os.Stderr, "hermitator answered with something unreadable")
-				return 1
+				return a, false, errors.New("hermitator answered with something unreadable")
 			}
-			if !a.OK {
-				fmt.Fprintln(os.Stderr, a.Message)
-				return 1
-			}
-			fmt.Println(a.Message)
-			return 0
+			return a, true, nil
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	fmt.Println(pending)
-	return 0
+	return a, false, nil
 }
+
+const previewUsage = `usage: hermitator-guest preview PORT [PATH]
+       hermitator-guest preview http://localhost:PORT/PATH?QUERY
+
+Prints a link the user can open to see what listens on PORT here. Given
+a path, or the local URL an app printed (with its own tokens), the link
+opens that page: send it exactly as printed, since it carries a secret
+the page cannot be opened without. The server must listen on 0.0.0.0,
+not localhost.`
 
 // preview asks for a link to a port, for the user to open.
 func preview(args []string) int {
-	port := 0
-	if len(args) == 1 {
-		port, _ = strconv.Atoi(args[0])
-	}
-	if port < 1 || port > 65535 {
-		fmt.Fprintln(os.Stderr, "usage: hermitator-guest preview PORT\n\nPrints a link the user can open to see what listens on PORT here.\nThe server must listen on 0.0.0.0, not localhost.")
+	port, page, err := previewTarget(args)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err.Error()+"\n\n"+previewUsage)
 		return 2
 	}
-	return askOr(turn.HostRequest{Op: "preview", Port: port}, 20*time.Second, "hermitator has not answered; try again in a moment.")
+	// Agents' servers default to localhost, which the host cannot reach;
+	// saying so here saves the owner a dead link and a round trip.
+	if ip := sandboxIP(); ip != nil {
+		outside, inside := listening(ip, port)
+		if !outside && inside {
+			fmt.Fprintf(os.Stderr, "Port %d answers on localhost only, so the link would not reach it. Restart the server listening on 0.0.0.0 (vite --host, next dev -H 0.0.0.0, python3 -m http.server --bind 0.0.0.0), then run this again.\n", port)
+			return 1
+		}
+		if !outside {
+			fmt.Fprintf(os.Stderr, "Nothing listens on port %d yet; start the server on 0.0.0.0 before sending the link.\n", port)
+		}
+	}
+	a, answered, err := request(turn.HostRequest{Op: "preview", Port: port}, 20*time.Second)
+	switch {
+	case err != nil:
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	case !answered:
+		fmt.Fprintln(os.Stderr, "hermitator has not answered; try again in a moment.")
+		return 1
+	case !a.OK:
+		fmt.Fprintln(os.Stderr, a.Message)
+		return 1
+	}
+	link, err := withPage(strings.TrimSpace(a.Message), page)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	fmt.Println(link)
+	return 0
+}
+
+// previewTarget reads PORT, PORT PATH, or a local URL such as the one a
+// dev server prints. page holds the path, query and fragment to open, or
+// is nil for the root.
+func previewTarget(args []string) (port int, page *url.URL, err error) {
+	if len(args) < 1 || len(args) > 2 {
+		return 0, nil, errors.New("give a port or a URL")
+	}
+	if p, err := strconv.Atoi(args[0]); err == nil {
+		if p < 1 || p > 65535 {
+			return 0, nil, fmt.Errorf("%d is not a port", p)
+		}
+		if len(args) == 1 {
+			return p, nil, nil
+		}
+		page, err := url.Parse(args[1])
+		if err != nil || page.Scheme != "" || page.Host != "" || !strings.HasPrefix(page.Path, "/") {
+			return 0, nil, fmt.Errorf("%q is not a path such as /app?x=1", args[1])
+		}
+		return p, page, nil
+	}
+	if len(args) != 1 {
+		return 0, nil, errors.New("give a port and a path, or one URL")
+	}
+	u, err := url.Parse(args[0])
+	if err != nil || u.Scheme != "http" || u.Host == "" {
+		return 0, nil, fmt.Errorf("%q is not a port or an http:// URL", args[0])
+	}
+	port = 80
+	if s := u.Port(); s != "" {
+		if port, err = strconv.Atoi(s); err != nil || port < 1 || port > 65535 {
+			return 0, nil, fmt.Errorf("%q has no usable port", args[0])
+		}
+	}
+	page = &url.URL{Path: u.Path, RawPath: u.RawPath, RawQuery: u.RawQuery, Fragment: u.Fragment}
+	if page.Path == "" {
+		page.Path = "/"
+	}
+	return port, page, nil
+}
+
+// withPage points a preview link at a page, keeping the link's secret
+// and the page's own query (tokens included) as they were.
+func withPage(link string, page *url.URL) (string, error) {
+	if page == nil {
+		return link, nil
+	}
+	u, err := url.Parse(link)
+	if err != nil || u.Host == "" {
+		return "", fmt.Errorf("hermitator answered with %q, not a link", link)
+	}
+	u.Path, u.RawPath, u.Fragment = page.Path, page.RawPath, page.Fragment
+	if page.RawQuery != "" {
+		u.RawQuery = page.RawQuery + "&" + u.RawQuery
+	}
+	return u.String(), nil
+}
+
+// sandboxIP is the address the host reaches this machine on: its first
+// address that is not loopback, or nil without one.
+func sandboxIP() net.IP {
+	addrs, _ := net.InterfaceAddrs()
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok && n.IP.To4() != nil && !n.IP.IsLoopback() && !n.IP.IsLinkLocalUnicast() {
+			return n.IP
+		}
+	}
+	return nil
+}
+
+// listening says whether port answers on ip, as the host would reach it,
+// and on localhost.
+func listening(ip net.IP, port int) (outside, inside bool) {
+	dial := func(host string) bool {
+		c, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), 2*time.Second)
+		if err == nil {
+			c.Close()
+		}
+		return err == nil
+	}
+	return dial(ip.String()), dial("127.0.0.1")
 }
 
 const scheduleUsage = `usage: hermitator-guest schedule (--cron EXPR | --at TIME | --in DURATION) [--name NAME] PROMPT...

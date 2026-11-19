@@ -87,6 +87,11 @@ func (m *Manager) agentPrompt(spec *sandbox.Spec, loc *time.Location, last Messa
 	}
 	if m.Previews() {
 		prompt += "\n- To let the user open a web server you run (a dev server, a demo), have it listen on 0.0.0.0 (vite --host, next dev -H 0.0.0.0) and run: hermitator-guest preview PORT. It prints a link to send them; it works from their phone, and opening it wakes this machine. Anyone with the link can see the page, so offer it for things meant to be seen."
+		if m.newGuest(spec) {
+			// Agents that spliced an app's own path and token into the
+			// link by hand dropped its secret, or the app's token.
+			prompt += " For a page other than the root, or an app that prints its own local link with a token, pass that instead (hermitator-guest preview http://localhost:4747/w/abc?t=xyz) and send the link it prints unchanged; never edit a preview link yourself."
+		}
 	}
 	return prompt
 }
