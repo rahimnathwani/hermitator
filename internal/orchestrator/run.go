@@ -97,20 +97,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	ctx, cancel := context.WithTimeout(m.ctx, m.cfg.MaxTurn)
 	defer cancel()
 	last := batch[len(batch)-1]
-	chat := chatRef{m: m, msg: last}
-	switch {
-	case last.TaskName != "":
-		chat.prefix = "⏰ *" + last.TaskName + "*\n\n"
-	case last.JobName != "":
-		chat.prefix = "🔔 *" + last.JobName + "*\n\n"
-	}
-	chat.quiet = true
-	for _, msg := range batch {
-		chat.quiet = chat.quiet && msg.TaskID != ""
-	}
-	if last.IsGroup || last.Queued {
-		chat.quote = quoteOf(last)
-	}
+	chat := m.turnChat(batch)
 
 	agent, err := m.store.Agent(ctx, a.id)
 	if err != nil {
@@ -194,42 +181,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	}
 	log.Info("turn started", "harness", agent.Harness, "wake", wake, "wake_ms", wakeMS, "messages", len(batch))
 
-	// The agent's clock shows the owner's time, which schedules use too.
-	loc := m.location(ctx, agent)
-	env := map[string]string{"TZ": loc.String()}
-	for k, v := range creds.env {
-		env[k] = v
-	}
-	for k, v := range m.turnEnv(ctx, spec, t.id, th) {
-		env[k] = v
-	}
-	// /once overrides the agent's model and effort for this turn.
-	model, effort := cmp.Or(agent.Model, creds.model), agent.Effort
-	for _, msg := range batch {
-		if msg.Model != "" {
-			model = msg.Model
-		}
-		if msg.Effort != "" {
-			effort = msg.Effort
-		}
-	}
-	req := turn.Request{
-		Harness:      agent.Harness,
-		SessionID:    th.SessionID,
-		Prompt:       prompt,
-		Images:       images,
-		Model:        model,
-		Effort:       effort,
-		Fork:         fork,
-		Provider:     agent.PiProvider,
-		SystemPrompt: m.agentPrompt(spec, loc, last) + credentialsNote(creds) + m.historyNote(ctx, spec, agent, last),
-		SteerID:      t.id,
-		Env:          env,
-		Files:        creds.files,
-		// overCap only looks before the turn; this stops a runaway in it.
-		MaxCostUSD:     m.allowance(ctx, agent),
-		SessionCostUSD: th.SessionCost,
-	}
+	req := m.turnRequest(ctx, t, agent, spec, th, batch, creds, prompt, images, fork)
 	m.writeTasks(ctx, spec, agent)
 	system := req.SystemPrompt
 	a.do(func(a *actor) {
@@ -251,15 +203,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 			}
 		})
 	}
-	if len(held) > 0 {
-		// The agent has them now; they are read, and no longer held.
-		ids := make([]string, len(held))
-		for i, h := range held {
-			ids[i] = h.ID
-			chatRef{m: m, msg: Message{AccountID: h.AccountID, Chat: h.ChatJID, Sender: h.Sender, ID: h.MessageID}}.markRead()
-		}
-		m.store.Release(ctx, ids)
-	}
+	m.releaseHeld(ctx, held)
 
 	// A turn that runs on for a while gets one progress note in the chat,
 	// edited in place as the work moves on: edits make no sound on the
@@ -268,125 +212,21 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	note := &progressNote{}
 	chat.note = note
 
-	// Deliver files as soon as the agent queues them.
 	var filesSent atomic.Int32
-	outboxDone := make(chan struct{})
-	outboxStopped := make(chan struct{})
-	go func() {
-		defer close(outboxStopped)
-		tick := time.NewTicker(time.Second)
-		defer tick.Stop()
-		for {
-			select {
-			case <-outboxDone:
-				return
-			case <-tick.C:
-				filesSent.Add(int32(m.deliverOutbox(ctx, spec, chat)))
-				m.handleRequests(ctx, spec, agent, chat)
-			}
-		}
-	}()
-
-	// If the sandbox dies mid-turn the job never writes an exit record, so
-	// watch the sandbox too.
+	stopOutbox := m.deliverDuringTurn(ctx, spec, agent, chat, &filesSent)
 	followCtx, stopFollow := context.WithCancel(ctx)
-	var died atomic.Bool
-	go func() {
-		tick := time.NewTicker(5 * time.Second)
-		defer tick.Stop()
-		for {
-			select {
-			case <-followCtx.Done():
-				return
-			case <-tick.C:
-				if st, err := m.rt.State(followCtx, spec); err == nil && st != sandbox.Running {
-					died.Store(true)
-					stopFollow()
-					return
-				}
-			}
-		}
-	}()
-
+	died := m.watchSandbox(followCtx, stopFollow, spec)
 	if chat.ok() && !chat.quiet {
 		go m.keepProgressNote(followCtx, chat, t, note)
 	}
+	t.progress.Store(&stallState{at: time.Now()})
+	go m.warnStall(followCtx, chat, &t.progress)
 
-	// A quiet turn may be a slow build, so this only ever warns, once.
-	progress := &t.progress
-	progress.Store(&stallState{at: time.Now()})
-	go func() {
-		tick := time.NewTicker(m.cfg.StallAfter / 10)
-		defer tick.Stop()
-		warned := false
-		for {
-			select {
-			case <-followCtx.Done():
-				return
-			case <-tick.C:
-				p := progress.Load()
-				if !warned && time.Since(p.at) >= m.cfg.StallAfter {
-					warned = true
-					last := ""
-					if p.doing != "" {
-						last = " (last step: " + clip(p.doing, 120) + ")"
-					}
-					chat.send(fmt.Sprintf("⏳ No sign of progress for %s%s. It may just be slow; /stop ends the turn.", humanize(time.Since(p.at)), last))
-				}
-			}
-		}
-	}()
-
-	var result *turn.Event
-	exit, err := client.Follow(followCtx, t.id, func(line []byte) {
-		var ev turn.Event
-		if json.Unmarshal(line, &ev) != nil {
-			return
-		}
-		ev.Text, ev.Detail = chat.redact.apply(ev.Text), chat.redact.apply(ev.Detail)
-		doing := progress.Load().doing
-		if ev.Type == turn.EventTool {
-			doing = strings.TrimSpace(ev.Tool + " " + ev.Detail)
-		}
-		progress.Store(&stallState{at: time.Now(), doing: doing})
-		if ev.Model != "" {
-			rec.Model = ev.Model
-		}
-		switch ev.Type {
-		case turn.EventTool:
-			rec.Tools++
-		case turn.EventFile:
-			m.syncFile(ctx, agent.UserID, ev)
-			return // never publish credentials
-		case turn.EventUsage:
-			m.recordUsage(ctx, agent, ev.Windows, chat)
-			return
-		case turn.EventReply:
-			chat.sendAgent(ev.Text)
-		case turn.EventTodos:
-			todos := ev.Todos
-			a.do(func(a *actor) { a.todos, a.todosAt, a.todosThread = todos, time.Now(), key })
-		case turn.EventResult, turn.EventError:
-			e := ev
-			result = &e
-		}
-		m.hub.publish(agent.ID, UIEvent{Kind: "event", TurnID: t.id, Event: &ev})
-	})
+	events := &turnEvents{ctx: ctx, m: m, a: a, t: t, agent: agent, rec: rec, chat: chat, key: key}
+	exit, err := client.Follow(followCtx, t.id, events.handle)
 	stopFollow()
-	// Messages from now on queue for the next turn; ones that reached the
-	// spool but not the harness join them.
-	a.call(func(a *actor) error { t.steerTo = ""; return nil })
-	t.steering.Wait()
-	for _, data := range client.Unsteered(t.id) {
-		var s turn.Steer
-		if json.Unmarshal(data, &s) == nil && s.Text != "" {
-			again := Message{AccountID: last.AccountID, Chat: last.Chat, ThreadAccount: last.ThreadAccount, ThreadChat: last.ThreadChat,
-				Sender: last.Sender, Owner: true, Time: time.Now(), Prompt: s.Text}
-			a.do(func(a *actor) { a.enqueue(again) })
-		}
-	}
-	close(outboxDone)
-	<-outboxStopped
+	m.requeueUnsteered(a, t, &client, last)
+	stopOutbox()
 	filesSent.Add(int32(m.deliverOutbox(ctx, spec, chat)))
 	m.handleRequests(ctx, spec, agent, chat)
 	if err != nil && !died.Load() {
@@ -395,6 +235,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		client.Remove(t.id)
 	}
 
+	result := events.result
 	m.store.TouchThread(ctx, key)
 	if result != nil && result.Type == turn.EventResult {
 		if reviewable(batch) {
@@ -433,6 +274,218 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		return m.finish(ctx, chat, rec, nil, "⚠️ The agent finished without replying. Send /retry to try again.", true)
 	}
 	return m.finish(ctx, chat, rec, result, "", true)
+}
+
+// turnChat is where a turn's replies go: the chat of its last message,
+// marked for a scheduled task or background job, quiet when only
+// scheduled runs asked, and quoting the message when that is unclear.
+func (m *Manager) turnChat(batch []Message) chatRef {
+	last := batch[len(batch)-1]
+	chat := chatRef{m: m, msg: last}
+	switch {
+	case last.TaskName != "":
+		chat.prefix = "⏰ *" + last.TaskName + "*\n\n"
+	case last.JobName != "":
+		chat.prefix = "🔔 *" + last.JobName + "*\n\n"
+	}
+	chat.quiet = true
+	for _, msg := range batch {
+		chat.quiet = chat.quiet && msg.TaskID != ""
+	}
+	if last.IsGroup || last.Queued {
+		chat.quote = quoteOf(last)
+	}
+	return chat
+}
+
+// turnRequest is what the guest is asked to run.
+func (m *Manager) turnRequest(ctx context.Context, t *activeTurn, agent *store.Agent, spec *sandbox.Spec, th *store.Thread, batch []Message,
+	creds credentials, prompt string, images []turn.Image, fork bool) turn.Request {
+	last := batch[len(batch)-1]
+	// The agent's clock shows the owner's time, which schedules use too.
+	loc := m.location(ctx, agent)
+	env := map[string]string{"TZ": loc.String()}
+	for k, v := range creds.env {
+		env[k] = v
+	}
+	for k, v := range m.turnEnv(ctx, spec, t.id, th) {
+		env[k] = v
+	}
+	// /once overrides the agent's model and effort for this turn.
+	model, effort := cmp.Or(agent.Model, creds.model), agent.Effort
+	for _, msg := range batch {
+		if msg.Model != "" {
+			model = msg.Model
+		}
+		if msg.Effort != "" {
+			effort = msg.Effort
+		}
+	}
+	return turn.Request{
+		Harness:      agent.Harness,
+		SessionID:    th.SessionID,
+		Prompt:       prompt,
+		Images:       images,
+		Model:        model,
+		Effort:       effort,
+		Fork:         fork,
+		Provider:     agent.PiProvider,
+		SystemPrompt: m.agentPrompt(spec, loc, last) + credentialsNote(creds) + m.historyNote(ctx, spec, agent, last),
+		SteerID:      t.id,
+		Env:          env,
+		Files:        creds.files,
+		// overCap only looks before the turn; this stops a runaway in it.
+		MaxCostUSD:     m.allowance(ctx, agent),
+		SessionCostUSD: th.SessionCost,
+	}
+}
+
+// releaseHeld marks held messages read once the agent has them: they are
+// no longer held.
+func (m *Manager) releaseHeld(ctx context.Context, held []*store.HeldMessage) {
+	if len(held) == 0 {
+		return
+	}
+	ids := make([]string, len(held))
+	for i, h := range held {
+		ids[i] = h.ID
+		chatRef{m: m, msg: Message{AccountID: h.AccountID, Chat: h.ChatJID, Sender: h.Sender, ID: h.MessageID}}.markRead()
+	}
+	m.store.Release(ctx, ids)
+}
+
+// deliverDuringTurn sends files as soon as the agent queues them, and
+// answers its requests, until the returned function is called; that
+// waits for the last delivery to finish.
+func (m *Manager) deliverDuringTurn(ctx context.Context, spec *sandbox.Spec, agent *store.Agent, chat chatRef, filesSent *atomic.Int32) (stop func()) {
+	done, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		tick := time.NewTicker(time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-tick.C:
+				filesSent.Add(int32(m.deliverOutbox(ctx, spec, chat)))
+				m.handleRequests(ctx, spec, agent, chat)
+			}
+		}
+	}()
+	return func() { close(done); <-stopped }
+}
+
+// watchSandbox reports a sandbox that stops mid-turn, cancelling the
+// follow: its job never writes an exit record then.
+func (m *Manager) watchSandbox(ctx context.Context, stopFollow context.CancelFunc, spec *sandbox.Spec) *atomic.Bool {
+	var died atomic.Bool
+	go func() {
+		tick := time.NewTicker(5 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				if st, err := m.rt.State(ctx, spec); err == nil && st != sandbox.Running {
+					died.Store(true)
+					stopFollow()
+					return
+				}
+			}
+		}
+	}()
+	return &died
+}
+
+// warnStall tells the chat once when a turn shows no sign of progress. A
+// quiet turn may be a slow build, so it only ever warns.
+func (m *Manager) warnStall(ctx context.Context, chat chatRef, progress *atomic.Pointer[stallState]) {
+	tick := time.NewTicker(m.cfg.StallAfter / 10)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			p := progress.Load()
+			if time.Since(p.at) >= m.cfg.StallAfter {
+				last := ""
+				if p.doing != "" {
+					last = " (last step: " + clip(p.doing, 120) + ")"
+				}
+				chat.send(fmt.Sprintf("⏳ No sign of progress for %s%s. It may just be slow; /stop ends the turn.", humanize(time.Since(p.at)), last))
+				return
+			}
+		}
+	}
+}
+
+// turnEvents takes in the guest's events for one turn as they arrive.
+type turnEvents struct {
+	ctx   context.Context
+	m     *Manager
+	a     *actor
+	t     *activeTurn
+	agent *store.Agent
+	rec   *store.Turn
+	chat  chatRef
+	key   store.ThreadKey
+	// result is the turn's result or error event, once one arrives.
+	result *turn.Event
+}
+
+func (e *turnEvents) handle(line []byte) {
+	var ev turn.Event
+	if json.Unmarshal(line, &ev) != nil {
+		return
+	}
+	m, ctx := e.m, e.ctx
+	ev.Text, ev.Detail = e.chat.redact.apply(ev.Text), e.chat.redact.apply(ev.Detail)
+	doing := e.t.progress.Load().doing
+	if ev.Type == turn.EventTool {
+		doing = strings.TrimSpace(ev.Tool + " " + ev.Detail)
+	}
+	e.t.progress.Store(&stallState{at: time.Now(), doing: doing})
+	if ev.Model != "" {
+		e.rec.Model = ev.Model
+	}
+	switch ev.Type {
+	case turn.EventTool:
+		e.rec.Tools++
+	case turn.EventFile:
+		m.syncFile(ctx, e.agent.UserID, ev)
+		return // never publish credentials
+	case turn.EventUsage:
+		m.recordUsage(ctx, e.agent, ev.Windows, e.chat)
+		return
+	case turn.EventReply:
+		e.chat.sendAgent(ev.Text)
+	case turn.EventTodos:
+		todos, key := ev.Todos, e.key
+		e.a.do(func(a *actor) { a.todos, a.todosAt, a.todosThread = todos, time.Now(), key })
+	case turn.EventResult, turn.EventError:
+		r := ev
+		e.result = &r
+	}
+	m.hub.publish(e.agent.ID, UIEvent{Kind: "event", TurnID: e.t.id, Event: &ev})
+}
+
+// requeueUnsteered stops steering into the turn: messages from now on
+// queue for the next one, and ones that reached the spool but not the
+// harness join them.
+func (m *Manager) requeueUnsteered(a *actor, t *activeTurn, client *spool.Client, last Message) {
+	a.call(func(a *actor) error { t.steerTo = ""; return nil })
+	t.steering.Wait()
+	for _, data := range client.Unsteered(t.id) {
+		var s turn.Steer
+		if json.Unmarshal(data, &s) == nil && s.Text != "" {
+			again := Message{AccountID: last.AccountID, Chat: last.Chat, ThreadAccount: last.ThreadAccount, ThreadChat: last.ThreadChat,
+				Sender: last.Sender, Owner: true, Time: time.Now(), Prompt: s.Text}
+			a.do(func(a *actor) { a.enqueue(again) })
+		}
+	}
 }
 
 // accountSession records which session the turn continued and turns the
