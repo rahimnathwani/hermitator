@@ -2419,3 +2419,21 @@ func TestTranscriptsSayWhatWasSent(t *testing.T) {
 		e.idle(t)
 	}
 }
+
+// A turn stopped for running too long is recorded as failed, not left
+// running: a restart would then tell its chat it had been cut short.
+func TestOverlongTurnIsRecorded(t *testing.T) {
+	e := setup(t, func(c *Config) { c.MaxTurn = time.Second })
+	ctx := context.Background()
+	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
+	chat := "self@s.whatsapp.net"
+	e.link(t, chat)
+	e.m.HandleMessage(ctx, e.msg(chat, "go quiet", true))
+	if got := e.rec.wait(t, "text"); !strings.Contains(got.body, "The turn ran for over 1s and was stopped") {
+		t.Fatalf("reply = %q", got.body)
+	}
+	e.idle(t)
+	if turns, _ := e.st.Turns(ctx, e.agent.ID, 1); turns[0].Status != store.TurnError || !strings.Contains(turns[0].Output, "ran for over") {
+		t.Fatalf("turn = %+v", turns[0])
+	}
+}

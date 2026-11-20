@@ -248,6 +248,11 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	events := &turnEvents{ctx: ctx, m: m, a: a, t: t, agent: agent, rec: rec, chat: chat, key: key}
 	exit, err := client.Follow(followCtx, t.id, events.handle)
 	stopFollow()
+	// A turn stopped at MaxTurn has used up ctx, and wrapping up with it
+	// failed silently: the turn stayed "running" in the database, and the
+	// next restart told its chat it had been cut short.
+	ctx, wrapUp := context.WithTimeout(m.ctx, time.Minute)
+	defer wrapUp()
 	m.requeueUnsteered(a, t, &client, last)
 	stopOutbox()
 	filesSent.Add(int32(m.deliverOutbox(ctx, spec, chat, others)))
