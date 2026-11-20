@@ -73,28 +73,31 @@ func (a *actor) compactFirst(ag *store.Agent, th *store.Thread) bool {
 	if th.ContextTokens < a.m.compactAbove() || th.SessionID == "" || time.Since(th.LastAt) > compactWarm {
 		return false
 	}
-	return a.beforeSleep(ag, "compact-", func(t *activeTurn) { a.m.compact(t, ag, th) })
+	return a.beforeSleep(ag, th.ThreadKey, "compact-", func(t *activeTurn) { a.m.compact(t, ag, th) })
 }
 
-// beforeSleep runs job, a look at the conversation while it is still
-// cached, in place of suspending the agent. It holds the turn slot, so
-// messages arriving meanwhile wait for it, and leaves the agent as idle
-// as it was, so the next reaper tick suspends it (or runs the next job).
-func (a *actor) beforeSleep(ag *store.Agent, prefix string, job func(*activeTurn)) bool {
+// beforeSleep runs job, a look at the conversation k while it is still
+// cached, in place of suspending the agent. It holds the conversation's
+// place among the running turns, so messages for it arriving meanwhile
+// wait. Unless another turn started while it ran, it leaves the agent
+// as idle as it was, so the next reaper tick suspends it (or runs the
+// next job).
+func (a *actor) beforeSleep(ag *store.Agent, k store.ThreadKey, prefix string, job func(*activeTurn)) bool {
 	if a.m.overCap(a.ctx, ag) != "" {
 		return false
 	}
-	t := &activeTurn{id: prefix + ids.New()}
-	a.turn = t
-	idleSince := a.lastActive
+	t := &activeTurn{id: prefix + ids.New(), key: k}
+	a.hold(t)
+	idleSince, begun := a.lastActive, a.begun
 	go func() {
 		job(t)
 		a.do(func(a *actor) {
-			a.turn = nil
-			if len(a.pending) > 0 {
+			a.release(t)
+			switch {
+			case len(a.pending) > 0:
 				a.lastActive = time.Now()
 				a.startTurn()
-			} else {
+			case a.begun == begun:
 				a.lastActive = idleSince
 			}
 		})
@@ -187,7 +190,8 @@ func (m *Manager) compact(t *activeTurn, ag *store.Agent, th *store.Thread) *sto
 }
 
 // compactCommand compacts a chat's conversation now, for /compact. It
-// takes the turn slot like a turn, so a message arriving meanwhile waits.
+// takes the conversation's place like a turn, so a message for it
+// arriving meanwhile waits.
 func (m *Manager) compactCommand(ctx context.Context, ag *store.Agent, key store.ThreadKey, reply func(string)) {
 	th, err := m.store.Thread(ctx, key)
 	if err != nil || th.SessionID == "" {
@@ -198,24 +202,30 @@ func (m *Manager) compactCommand(ctx context.Context, ag *store.Agent, key store
 		reply(over)
 		return
 	}
-	t := &activeTurn{id: "compact-" + ids.New()}
+	t := &activeTurn{id: "compact-" + ids.New(), key: key}
 	a := m.actor(ag.ID)
+	var here bool
 	if a.call(func(a *actor) error {
-		if a.turn != nil {
+		if a.mustWait(key) {
+			here = a.turns[key] != nil
 			return ErrBusy
 		}
-		a.turn = t
+		a.hold(t)
 		a.lastActive = time.Now()
 		return nil
 	}) != nil {
-		reply("*" + ag.Name + "* is busy. Send /stop first, or wait for it to finish.")
+		if here {
+			reply("*" + ag.Name + "* is busy. Send /stop first, or wait for it to finish.")
+		} else {
+			reply("*" + ag.Name + "* is working in another chat and cannot run more at once. Try again when it is done.")
+		}
 		return
 	}
 	reply("🗜 Compacting this conversation…")
 	go func() {
 		rec := m.compact(t, ag, th)
 		a.do(func(a *actor) {
-			a.turn = nil
+			a.release(t)
 			a.lastActive = time.Now()
 			if a.debounce == nil {
 				a.startTurn()

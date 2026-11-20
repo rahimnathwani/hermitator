@@ -238,7 +238,7 @@ model:
 | Command | |
 |---|---|
 | `/status` | What the agent is doing, its state and disk use |
-| `/stop` | Abort the current turn |
+| `/stop` | Abort this chat's turn |
 | `/sh COMMAND` | Run a shell command in the sandbox and get its output |
 | `/new` | Start a fresh conversation in this chat; files are kept |
 | `/help` | All the others: scheduling, files, models, past conversations, the server |

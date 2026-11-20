@@ -245,7 +245,11 @@ type env struct {
 	free, used atomic.Int64
 }
 
-func setup(t *testing.T) *env {
+// serial runs one turn at a time, as for a pi agent, so messages from
+// other chats wait behind a running turn.
+func serial(c *Config) { c.Parallel = 1 }
+
+func setup(t *testing.T, opts ...func(*Config)) *env {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	root := t.TempDir()
@@ -274,7 +278,7 @@ func setup(t *testing.T) *env {
 	// says otherwise; the machine running the tests may be nearly full.
 	e := &env{}
 	e.free.Store(1 << 40)
-	m := New(Config{
+	cfg := Config{
 		DiskInterval:   50 * time.Millisecond,
 		DiskReserve:    1 << 30,
 		AgentDiskLimit: 1 << 30,
@@ -290,7 +294,11 @@ func setup(t *testing.T) *env {
 		ProgressEvery:  100 * time.Millisecond,
 		ResendInterval: 100 * time.Millisecond,
 		PublicURL:      "https://hermitator.example.com",
-	}, st, box, rt, log)
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	m := New(cfg, st, box, rt, log)
 	rec := &recorder{ch: make(chan sent, 100)}
 	m.SetMessenger(rec)
 	if err := m.Start(ctx); err != nil {
@@ -573,7 +581,7 @@ func TestOutboxDoesNotFollowSymlinksOutOfTheSandbox(t *testing.T) {
 	os.WriteFile(filepath.Join(outbox, "1-loot.txt.meta.json"), []byte(`{"file":"1-loot.txt"}`), 0o644)
 
 	chat := chatRef{m: e.m, msg: e.msg("self@s.whatsapp.net", "", true)}
-	e.m.deliverOutbox(context.Background(), spec, chat)
+	e.m.deliverOutbox(context.Background(), spec, chat, nil)
 
 	e.rec.mu.Lock()
 	defer e.rec.mu.Unlock()
@@ -696,7 +704,7 @@ func TestEachChatGetsItsOwnTurn(t *testing.T) {
 
 // A message that has to wait for another chat's turn says it arrived.
 func TestQueuedMessagesAreMarked(t *testing.T) {
-	e := setup(t)
+	e := setup(t, serial)
 	ctx := context.Background()
 	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
 	e.link(t, "one@s.whatsapp.net")
@@ -842,7 +850,7 @@ func TestStatusWhileWorking(t *testing.T) {
 // unclear: in a group, or when the message waited behind another turn.
 // A quick answer in a direct chat does not.
 func TestRepliesQuoteWhenUnclear(t *testing.T) {
-	e := setup(t)
+	e := setup(t, serial)
 	ctx := context.Background()
 	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
 	chat := "self@s.whatsapp.net"
@@ -918,7 +926,7 @@ func TestProgressNote(t *testing.T) {
 // A ❌ from the owner on the message a turn is working on stops the
 // turn; on a message still waiting its turn, it withdraws the message.
 func TestStopReaction(t *testing.T) {
-	e := setup(t)
+	e := setup(t, serial)
 	ctx := context.Background()
 	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
 	chat, other := "self@s.whatsapp.net", "other@s.whatsapp.net"
@@ -974,7 +982,7 @@ func TestStopReaction(t *testing.T) {
 // Editing a message that is still waiting for a turn, or held as
 // context, changes what the agent will read.
 func TestEditedMessages(t *testing.T) {
-	e := setup(t)
+	e := setup(t, serial)
 	ctx := context.Background()
 	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
 	chat, other := "self@s.whatsapp.net", "other@s.whatsapp.net"
@@ -2368,7 +2376,7 @@ func TestCompactWithoutCredentialsSleeps(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 	a := e.m.actor(ag.ID)
 	reap := func() { a.call(func(a *actor) error { a.reap(); return nil }) }
-	busy := func() (b bool) { a.call(func(a *actor) error { b = a.turn != nil; return nil }); return }
+	busy := func() (b bool) { a.call(func(a *actor) error { b = a.busy(); return nil }); return }
 
 	reap() // tries to compact, and cannot
 	for deadline := time.Now().Add(10 * time.Second); busy(); time.Sleep(20 * time.Millisecond) {

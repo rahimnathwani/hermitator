@@ -345,7 +345,7 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		state, err := m.Sleep(ctx, agentID)
 		switch {
 		case errors.Is(err, ErrBusy):
-			reply("*" + ag.Name + "* is busy. Send /stop first, or wait for it to finish.")
+			reply("*" + ag.Name + "* is busy. Send /stop all first, or wait for it to finish.")
 		case err != nil:
 			reply("⚠️ Could not suspend: " + err.Error())
 		case state == sandbox.Checkpointed:
@@ -358,7 +358,7 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 			aborted, n := m.StopAll(agentID)
 			switch {
 			case aborted:
-				reply("⏹ Stopped the current turn and withdrew " + count(n, "waiting message") + ".")
+				reply("⏹ Stopped what was running and withdrew " + count(n, "waiting message") + ".")
 			case n > 0:
 				reply("⏹ Nothing was running; withdrew " + count(n, "waiting message") + ".")
 			default:
@@ -366,9 +366,14 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 			}
 			return false
 		}
-		if m.Abort(agentID) {
+		// Only this chat's: a turn in another chat is someone else's
+		// conversation, which /stop all ends too.
+		switch aborted, others := m.AbortIn(msg.thread(agentID)); {
+		case aborted:
 			reply("⏹ Stopping the current turn.")
-		} else {
+		case others > 0:
+			reply("Nothing is running in this chat. *" + ag.Name + "* is working in " + count(others, "other chat") + "; /stop all stops that too.")
+		default:
 			reply("Nothing is running.")
 		}
 	case "new":
@@ -413,7 +418,7 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 			return
 		}
 		err := m.actor(agentID).call(func(a *actor) error {
-			if a.turn != nil {
+			if a.busy() {
 				return ErrBusy
 			}
 			prev := *ag
@@ -449,11 +454,21 @@ func (m *Manager) statusText(ctx context.Context, ag *store.Agent, key store.Thr
 	_, def := m.modelChoices(ctx, ag)
 	fmt.Fprintf(&b, "\nModel: %s", describeModel(ag, def))
 	fmt.Fprintf(&b, "\nState: %s", describeState(state, st.Busy))
-	if st.Busy && !st.Since.IsZero() {
-		fmt.Fprintf(&b, " for %s", humanize(time.Since(st.Since)))
-		if st.Doing != "" {
-			fmt.Fprintf(&b, " (last step: %s)", clip(st.Doing, 120))
+	here, busyHere := st.In(key)
+	elsewhere := len(st.Turns)
+	if busyHere {
+		elsewhere--
+		if !here.Since.IsZero() {
+			fmt.Fprintf(&b, " for %s", humanize(time.Since(here.Since)))
 		}
+		if here.Doing != "" {
+			fmt.Fprintf(&b, " (last step: %s)", clip(here.Doing, 120))
+		}
+		if elsewhere > 0 {
+			fmt.Fprintf(&b, ", and in %s", count(elsewhere, "other chat"))
+		}
+	} else if elsewhere > 0 {
+		fmt.Fprintf(&b, " in %s, not this one", count(elsewhere, "other chat"))
 	}
 	if st.Queued > 0 {
 		fmt.Fprintf(&b, ", %d message(s) queued", st.Queued)

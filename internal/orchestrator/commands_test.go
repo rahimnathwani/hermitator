@@ -276,7 +276,7 @@ func TestRenderReplies(t *testing.T) {
 }
 
 func TestSmallCommands(t *testing.T) {
-	e := setup(t)
+	e := setup(t, serial)
 	ctx := context.Background()
 	e.m.PutSecret(ctx, e.user.ID, store.SecretClaudeToken, "tok")
 	chat := "self@s.whatsapp.net"
@@ -347,13 +347,14 @@ func TestSmallCommands(t *testing.T) {
 	for !e.m.Status(e.agent.ID).Busy {
 		time.Sleep(10 * time.Millisecond)
 	}
-	// From another chat, so they wait rather than steer the turn.
+	// From another chat, so they wait (one turn at a time) rather than
+	// steer the turn.
 	other := "other@s.whatsapp.net"
 	e.link(t, other)
 	e.m.HandleMessage(ctx, e.msg(other, "one", true))
 	e.m.HandleMessage(ctx, e.msg(other, "two", true))
 	e.m.HandleMessage(ctx, e.msg(chat, "/stop all", true))
-	if got := e.rec.wait(t, "text"); got.body != "⏹ Stopped the current turn and withdrew 2 waiting messages." {
+	if got := e.rec.wait(t, "text"); got.body != "⏹ Stopped what was running and withdrew 2 waiting messages." {
 		t.Fatalf("/stop all = %q", got.body)
 	}
 	e.idle(t)
@@ -417,7 +418,7 @@ func TestAwakeStillDeliversAndGetSendsOnlyItsFile(t *testing.T) {
 	os.WriteFile(filepath.Join(outbox, "1-other.txt.meta.json"), []byte(`{"file":"1-other.txt","turn":"someone-else"}`), 0o644)
 	os.WriteFile(filepath.Join(outbox, "2-mine.txt"), []byte("mine"), 0o644)
 	os.WriteFile(filepath.Join(outbox, "2-mine.txt.meta.json"), []byte(`{"file":"2-mine.txt","turn":"get-x"}`), 0o644)
-	if n := e.m.deliverQueued(ctx, spec, chatRef{m: e.m, msg: e.msg(chat, "", true)}, "get-x"); n != 1 {
+	if n := e.m.deliverQueued(ctx, spec, chatRef{m: e.m, msg: e.msg(chat, "", true)}, "get-x", nil); n != 1 {
 		t.Fatalf("delivered %d", n)
 	}
 	if got := e.rec.wait(t, "file"); got.body != "|mine" {

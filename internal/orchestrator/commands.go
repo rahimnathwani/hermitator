@@ -136,7 +136,7 @@ const helpText = `*hermitator commands*
 
 *The agent*
 /status: what it is doing
-/stop: abort the running turn; /stop all also drops the messages waiting
+/stop: abort this chat's running turn; /stop all stops every chat's and drops the messages waiting
 /retry: run the last message again, after a failure or a restart
 /plan: its task list for what it is doing
 /usage: your Claude subscription use and spending

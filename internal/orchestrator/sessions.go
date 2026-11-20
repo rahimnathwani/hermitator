@@ -69,7 +69,7 @@ func (m *Manager) resumeCommand(ctx context.Context, ag *store.Agent, k store.Th
 		return
 	}
 	err = m.actor(ag.ID).call(func(a *actor) error {
-		if a.turn != nil {
+		if a.turns[k] != nil {
 			return ErrBusy
 		}
 		a.forgetThread(k)

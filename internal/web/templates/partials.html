@@ -41,7 +41,7 @@
         <button title="Stop the sandbox and discard its checkpoint, so it boots fresh">{{icon "restart"}}Restart…</button>
       </form>
     </div>
-    <form method="post" action="/agents/{{$a.ID}}/stop" data-busy-only{{if not $a.Busy}} hidden{{end}}><button class="danger" title="Stop the turn in progress">{{icon "stop"}}Stop turn</button></form>
+    <form method="post" action="/agents/{{$a.ID}}/stop" data-busy-only{{if not $a.Busy}} hidden{{end}}><button class="danger" title="Stop every turn in progress">{{icon "stop"}}Stop turn</button></form>
   </div>
 </div>
 <nav class="tabs" aria-label="Agent">

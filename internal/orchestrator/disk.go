@@ -257,9 +257,9 @@ func (m *Manager) diskUsedOf(id string) int64 {
 // diskStop stops an agent's sandbox, after its turn if one is running.
 func (m *Manager) diskStop(ag *store.Agent) {
 	m.actor(ag.ID).do(func(a *actor) {
-		if a.turn != nil {
+		if a.busy() {
 			a.stopAfterTurn = true
-			a.turn.kill(m)
+			a.abort()
 			return
 		}
 		a.stopForDisk()

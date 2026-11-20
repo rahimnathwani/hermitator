@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -31,6 +33,10 @@ type Config struct {
 	ReapInterval time.Duration
 	// MaxTurn bounds a single turn.
 	MaxTurn time.Duration
+	// Parallel is how many turns one agent may run at once, each in a
+	// conversation of its own (see actor.parallel): 0 is 3, 1 is one at a
+	// time.
+	Parallel int
 	// RetryNoticeDelay is how long to wait between attempts to tell chats
 	// that a restart interrupted their turn.
 	RetryNoticeDelay time.Duration
@@ -124,6 +130,9 @@ func New(cfg Config, st *store.Store, box *secrets.Box, rt sandbox.Runtime, log 
 	}
 	if cfg.MaxTurn == 0 {
 		cfg.MaxTurn = 2 * time.Hour
+	}
+	if cfg.Parallel == 0 {
+		cfg.Parallel = 3
 	}
 	if cfg.RetryNoticeDelay == 0 {
 		cfg.RetryNoticeDelay = 15 * time.Second
@@ -375,9 +384,7 @@ func (m *Manager) DeleteAgent(ctx context.Context, agentID string) error {
 		return err
 	}
 	m.actor(agentID).call(func(a *actor) error {
-		if a.turn != nil {
-			a.turn.kill(a.m)
-		}
+		a.abort()
 		return nil
 	})
 	m.dropActor(agentID)
@@ -400,9 +407,36 @@ type Status struct {
 	Queued     int
 	Holds      int
 	LastActive time.Time
-	// Since is when the running turn started, and Doing its latest step.
+	// Since is when the longest-running turn started, and Doing its
+	// latest step.
 	Since time.Time
 	Doing string
+	// Turns are all the running turns, longest-running first.
+	Turns []TurnStatus
+}
+
+// TurnStatus is one running turn.
+type TurnStatus struct {
+	Thread store.ThreadKey
+	Since  time.Time
+	Doing  string
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// In is the turn running in conversation k, if there is one.
+func (s Status) In(k store.ThreadKey) (TurnStatus, bool) {
+	for _, t := range s.Turns {
+		if t.Thread == k {
+			return t, true
+		}
+	}
+	return TurnStatus{}, false
 }
 
 // Status reports what an agent is doing.
@@ -415,12 +449,23 @@ func (m *Manager) Status(agentID string) Status {
 		return st
 	}
 	a.call(func(a *actor) error {
-		st = Status{State: a.state, Busy: a.turn != nil, Queued: len(a.pending), Holds: a.holds, LastActive: a.lastActive}
-		if t := a.turn; t != nil {
-			st.Since = t.started
+		st = Status{State: a.state, Busy: a.busy(), Queued: len(a.pending), Holds: a.holds, LastActive: a.lastActive}
+		for _, t := range a.turns {
+			ts := TurnStatus{Thread: t.key, Since: t.started}
 			if p := t.progress.Load(); p != nil {
-				st.Doing = p.doing
+				ts.Doing = p.doing
 			}
+			st.Turns = append(st.Turns, ts)
+		}
+		// A compaction has no start time; real turns say more.
+		slices.SortFunc(st.Turns, func(x, y TurnStatus) int {
+			if x.Since.IsZero() != y.Since.IsZero() {
+				return cmp.Compare(boolInt(x.Since.IsZero()), boolInt(y.Since.IsZero()))
+			}
+			return x.Since.Compare(y.Since)
+		})
+		if len(st.Turns) > 0 {
+			st.Since, st.Doing = st.Turns[0].Since, st.Turns[0].Doing
 		}
 		return nil
 	})
@@ -456,7 +501,25 @@ func (m *Manager) Sleep(ctx context.Context, agentID string) (string, error) {
 	return state, err
 }
 
-// Abort stops an agent's running turn. It reports whether one was running.
+// AbortIn stops the turn running in conversation k. It reports whether
+// one was, and how many others are running in other conversations.
+func (m *Manager) AbortIn(k store.ThreadKey) (aborted bool, others int) {
+	m.actor(k.AgentID).call(func(a *actor) error {
+		if t := a.turns[k]; t != nil {
+			t.kill(m)
+			aborted = true
+		}
+		others = len(a.turns)
+		if aborted {
+			others--
+		}
+		return nil
+	})
+	return aborted, others
+}
+
+// Abort stops all of an agent's running turns. It reports whether any
+// was running.
 func (m *Manager) Abort(agentID string) bool {
 	var aborted bool
 	m.actor(agentID).call(func(a *actor) error {
@@ -466,7 +529,7 @@ func (m *Manager) Abort(agentID string) bool {
 	return aborted
 }
 
-// StopAll aborts an agent's running turn and withdraws every message
+// StopAll aborts an agent's running turns and withdraws every message
 // waiting for one, as after an outage, when they would each start a turn.
 // It reports whether a turn was running and how many it withdrew. A
 // scheduled run withdrawn this way runs again at its next time.
@@ -484,13 +547,14 @@ func (m *Manager) StopAll(agentID string) (aborted bool, withdrawn int) {
 	return aborted, len(dropped)
 }
 
-// ErrBusy is returned when an agent is in the middle of a turn.
+// ErrBusy is returned when an agent, or the conversation in question, is
+// in the middle of a turn.
 var ErrBusy = errors.New("the agent is in the middle of a turn")
 
 // NewSession makes a chat's next turn start a fresh conversation.
 func (m *Manager) NewSession(ctx context.Context, k store.ThreadKey) error {
 	return m.actor(k.AgentID).call(func(a *actor) error {
-		if a.turn != nil {
+		if a.turns[k] != nil {
 			return ErrBusy
 		}
 		a.forgetThread(k)
@@ -577,7 +641,7 @@ var ErrUpToDate = errors.New("the agent already runs the newest image")
 func (m *Manager) UpgradeImage(ctx context.Context, agentID string) (string, error) {
 	var latest string
 	err := m.actor(agentID).call(func(a *actor) error {
-		if a.turn != nil || a.holds > 0 {
+		if a.busy() || a.holds > 0 {
 			return ErrBusy
 		}
 		ag, err := m.store.Agent(ctx, agentID)
@@ -611,7 +675,7 @@ func (m *Manager) UpgradeImage(ctx context.Context, agentID string) (string, err
 func (m *Manager) Restart(ctx context.Context, agentID string) (string, error) {
 	var was string
 	err := m.actor(agentID).call(func(a *actor) error {
-		if a.turn != nil || a.holds > 0 {
+		if a.busy() || a.holds > 0 {
 			return ErrBusy
 		}
 		ag, err := m.store.Agent(ctx, agentID)
@@ -649,7 +713,7 @@ func (m *Manager) OwnCopies(ag *store.Agent) []sandbox.OwnCopy {
 // cannot change while mounted; files elsewhere are untouched.
 func (m *Manager) UseImageHarnesses(ctx context.Context, agentID string) error {
 	return m.actor(agentID).call(func(a *actor) error {
-		if a.turn != nil || a.holds > 0 {
+		if a.busy() || a.holds > 0 {
 			return ErrBusy
 		}
 		ag, err := m.store.Agent(ctx, agentID)
@@ -681,7 +745,7 @@ func (m *Manager) UpdateAgent(ctx context.Context, updated *store.Agent) error {
 			return err
 		}
 		switched := current.Harness != updated.Harness
-		if switched && a.turn != nil {
+		if switched && a.busy() {
 			return ErrBusy
 		}
 		fitHarness(current, updated)

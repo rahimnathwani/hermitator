@@ -494,7 +494,7 @@ func (s *Server) stopTurn(w http.ResponseWriter, r *http.Request, v *viewer) {
 		return
 	}
 	if s.Agents.Abort(a.ID) {
-		s.back(w, r, "/agents/"+a.ID, "Stopping the current turn.")
+		s.back(w, r, "/agents/"+a.ID, "Stopping what is running.")
 	} else {
 		s.back(w, r, "/agents/"+a.ID, "Nothing was running.")
 	}

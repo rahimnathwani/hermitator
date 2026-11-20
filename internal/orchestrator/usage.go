@@ -139,9 +139,8 @@ func (m *Manager) planText(ag *store.Agent, k store.ThreadKey) string {
 	var todos []turn.Todo
 	var at time.Time
 	m.actor(ag.ID).call(func(a *actor) error {
-		if a.todosThread == k {
-			todos, at = a.todos, a.todosAt
-		}
+		p := a.plans[k]
+		todos, at = p.todos, p.at
 		return nil
 	})
 	if len(todos) == 0 {

@@ -25,8 +25,19 @@ type actor struct {
 
 	pending  []Message
 	debounce *time.Timer
-	turn     *activeTurn
-	holds    int
+	// turns are the turns running now, one at most per conversation: two
+	// harness processes on one session would corrupt its transcript.
+	// Compactions and reviews before sleep take a conversation's place
+	// here too.
+	turns map[store.ThreadKey]*activeTurn
+	// begun counts turns started, so a look before sleep can tell
+	// whether anything else happened while it ran.
+	begun int
+	// live holds the IDs of running turns, for the goroutines delivering
+	// a turn's outbox and requests, which leave other turns' to them.
+	liveMu sync.Mutex
+	live   map[string]bool
+	holds  int
 	// awake is the owner's /awake, one of the holds.
 	awake      *ownerHold
 	lastActive time.Time
@@ -47,11 +58,9 @@ type actor struct {
 	// inBackground keeps one background delivery at a time per agent.
 	inBackground atomic.Bool
 
-	// todos is the agent's own task list from its latest turn, for /plan
-	// in the chat that turn answered.
-	todos       []turn.Todo
-	todosAt     time.Time
-	todosThread store.ThreadKey
+	// plans are the agent's own task lists, from each conversation's
+	// latest turn, for /plan in that conversation's chat.
+	plans map[store.ThreadKey]plan
 	// forkNext makes a chat's next turn branch off its conversation.
 	forkNext map[store.ThreadKey]bool
 	// lastSystem is the system prompt of each conversation's last turn: a
@@ -101,7 +110,7 @@ func (a *actor) call(f func(*actor) error) error {
 }
 
 func (a *actor) enqueue(msg Message) {
-	if t := a.turn; t != nil && t.steerTo != "" && t.steerTo == chatKey(msg) && msg.steerable() {
+	if t := a.turns[msg.thread(a.id)]; t != nil && t.steerTo != "" && t.steerTo == chatKey(msg) && msg.steerable() {
 		if msg.ID != "" {
 			t.messages = append(t.messages, msg.ID)
 		}
@@ -115,7 +124,7 @@ func (a *actor) enqueue(msg Message) {
 		a.lastActive = time.Now()
 		return
 	}
-	if a.turn != nil && msg.ID != "" {
+	if msg.ID != "" && a.mustWait(msg.thread(a.id)) {
 		// Behind a turn it may wait a while; say it arrived.
 		msg.Queued = true
 		go chatRef{m: a.m, msg: msg}.react(queuedReaction)
@@ -131,26 +140,76 @@ func (a *actor) enqueue(msg Message) {
 // queuedReaction marks a message waiting for the turn in progress.
 const queuedReaction = "📥"
 
+// mustWait reports whether work in conversation k would wait behind a
+// running turn: one in k itself, or as many as may run at once.
+func (a *actor) mustWait(k store.ThreadKey) bool {
+	if len(a.turns) == 0 {
+		return false
+	}
+	return a.turns[k] != nil || len(a.turns) >= a.parallel()
+}
+
+// parallel is how many turns the agent may run at once, each in a
+// conversation of its own. Only Claude Code agents run more than one:
+// pi rewrites its auth.json when it refreshes a ChatGPT token, and a
+// second turn would write the stale copy back over the fresh one. An
+// owner with a spending limit also gets one at a time, because each
+// turn is given all that is left under it.
+func (a *actor) parallel() int {
+	if a.m.cfg.Parallel <= 1 {
+		return 1
+	}
+	ag, err := a.m.store.Agent(a.ctx, a.id)
+	if err != nil || ag.Harness != store.HarnessClaude {
+		return 1
+	}
+	if u, err := a.m.store.User(a.ctx, ag.UserID); err != nil || u.DailyCap > 0 || u.MonthlyCap > 0 {
+		return 1
+	}
+	return a.m.cfg.Parallel
+}
+
+// startTurn starts turns for waiting messages, oldest first, in each
+// conversation with none running, up to as many as may run at once.
 func (a *actor) startTurn() {
-	if a.turn != nil || len(a.pending) == 0 {
+	if len(a.pending) == 0 {
 		return
 	}
 	if a.waitForDisk() {
 		return
 	}
-	// One turn answers one chat, in its conversation; messages from other
-	// chats wait their turn.
-	first := chatKey(a.pending[0])
+	limit := 0 // looked up only once a second turn would start
+	for len(a.pending) > 0 {
+		if len(a.turns) > 0 {
+			if limit == 0 {
+				limit = a.parallel()
+			}
+			if len(a.turns) >= limit {
+				return
+			}
+		}
+		i := slices.IndexFunc(a.pending, func(msg Message) bool { return a.turns[msg.thread(a.id)] == nil })
+		if i < 0 {
+			return
+		}
+		a.begin(chatKey(a.pending[i]))
+	}
+}
+
+// begin starts a turn for the waiting messages from one chat. One turn
+// answers one chat, in its conversation; messages from other chats wait
+// for turns of their own.
+func (a *actor) begin(chat string) {
 	var batch, rest []Message
 	for _, msg := range a.pending {
-		if chatKey(msg) == first {
+		if chatKey(msg) == chat {
 			batch = append(batch, msg)
 		} else {
 			rest = append(rest, msg)
 		}
 	}
 	a.pending = rest
-	t := &activeTurn{id: ids.New(), started: time.Now()}
+	t := &activeTurn{id: ids.New(), key: batch[0].thread(a.id), started: time.Now()}
 	for _, msg := range batch {
 		if msg.TaskID != "" {
 			t.tasks = append(t.tasks, msg.TaskID)
@@ -159,16 +218,16 @@ func (a *actor) startTurn() {
 			t.messages = append(t.messages, msg.ID)
 		}
 	}
-	a.turn = t
+	a.hold(t)
 	go func() {
 		ok := a.m.runTurn(a, t, batch)
 		a.do(func(a *actor) {
-			a.turn = nil
+			a.release(t)
 			a.lastActive = time.Now()
 			if ok {
 				a.setState(sandbox.Running)
 			}
-			if a.stopAfterTurn {
+			if a.stopAfterTurn && len(a.turns) == 0 {
 				a.stopAfterTurn = false
 				a.stopForDisk()
 			}
@@ -179,6 +238,57 @@ func (a *actor) startTurn() {
 	}()
 }
 
+// hold gives t its conversation's place among the running turns.
+func (a *actor) hold(t *activeTurn) {
+	if a.turns == nil {
+		a.turns = map[store.ThreadKey]*activeTurn{}
+	}
+	a.turns[t.key] = t
+	a.begun++
+	a.liveMu.Lock()
+	if a.live == nil {
+		a.live = map[string]bool{}
+	}
+	a.live[t.id] = true
+	a.liveMu.Unlock()
+}
+
+// release frees t's conversation for its next turn.
+func (a *actor) release(t *activeTurn) {
+	if a.turns[t.key] == t {
+		delete(a.turns, t.key)
+	}
+	a.liveMu.Lock()
+	delete(a.live, t.id)
+	a.liveMu.Unlock()
+}
+
+// othersLive returns a test for the IDs of running turns other than
+// self, safe to use from any goroutine.
+func (a *actor) othersLive(self string) func(id string) bool {
+	return func(id string) bool {
+		if id == "" || id == self {
+			return false
+		}
+		a.liveMu.Lock()
+		defer a.liveMu.Unlock()
+		return a.live[id]
+	}
+}
+
+// busy reports whether any turn is running.
+func (a *actor) busy() bool { return len(a.turns) > 0 }
+
+// turnWith is the running turn answering the chat message with that ID.
+func (a *actor) turnWith(msgID string) *activeTurn {
+	for _, t := range a.turns {
+		if slices.Contains(t.messages, msgID) {
+			return t
+		}
+	}
+	return nil
+}
+
 // hasTask reports whether a run of the task is queued or running.
 func (a *actor) hasTask(id string) bool {
 	for _, msg := range a.pending {
@@ -186,19 +296,24 @@ func (a *actor) hasTask(id string) bool {
 			return true
 		}
 	}
-	return a.turn != nil && slices.Contains(a.turn.tasks, id)
+	for _, t := range a.turns {
+		if slices.Contains(t.tasks, id) {
+			return true
+		}
+	}
+	return false
 }
 
+// abort stops every running turn; it reports whether any was running.
 func (a *actor) abort() bool {
-	if a.turn == nil {
-		return false
+	for _, t := range a.turns {
+		t.kill(a.m)
 	}
-	a.turn.kill(a.m)
-	return true
+	return len(a.turns) > 0
 }
 
 func (a *actor) reap() {
-	if a.turn != nil || a.state != sandbox.Running {
+	if a.busy() || a.state != sandbox.Running {
 		return
 	}
 	ag, err := a.m.store.Agent(a.ctx, a.id)
@@ -236,7 +351,7 @@ func (a *actor) reap() {
 
 // suspend frees the agent's memory unless something is using it.
 func (a *actor) suspend(ctx context.Context) (string, error) {
-	if a.turn != nil || a.holds > 0 {
+	if a.busy() || a.holds > 0 {
 		return a.state, ErrBusy
 	}
 	ag, err := a.m.store.Agent(ctx, a.id)
@@ -268,6 +383,8 @@ func (a *actor) setState(st string) {
 // goroutine running it.
 type activeTurn struct {
 	id string
+	// key is the conversation the turn continues.
+	key store.ThreadKey
 	// tasks are the scheduled tasks whose runs this turn answers.
 	tasks []string
 	// started is when the turn began; progress is its latest sign of
@@ -292,16 +409,20 @@ type activeTurn struct {
 // forgetThread drops what the actor kept about a conversation that is
 // starting afresh.
 func (a *actor) forgetThread(k store.ThreadKey) {
-	if a.todosThread == k {
-		a.todos = nil
-	}
+	delete(a.plans, k)
 	delete(a.forkNext, k)
 	delete(a.lastSystem, k)
 }
 
 // forgetThreads drops what the actor kept about every conversation.
 func (a *actor) forgetThreads() {
-	a.todos, a.forkNext, a.lastSystem = nil, nil, nil
+	a.plans, a.forkNext, a.lastSystem = nil, nil, nil
+}
+
+// plan is the task list a conversation's latest turn reported.
+type plan struct {
+	todos []turn.Todo
+	at    time.Time
 }
 
 func chatKey(m Message) string {

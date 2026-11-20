@@ -166,7 +166,7 @@ func (m *Manager) SetEgress(ctx context.Context, userID string, on bool) (waitin
 			continue
 		}
 		err = m.actor(ag.ID).call(func(a *actor) error {
-			if a.turn != nil || a.holds > 0 {
+			if a.busy() || a.holds > 0 {
 				return ErrBusy
 			}
 			if a.state == sandbox.Running {

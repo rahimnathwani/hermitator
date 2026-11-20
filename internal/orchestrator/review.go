@@ -62,7 +62,7 @@ func (a *actor) reviewFirst(ag *store.Agent, th *store.Thread) bool {
 		time.Since(th.LastAt) > compactWarm {
 		return false
 	}
-	return a.beforeSleep(ag, "review-", func(t *activeTurn) { a.m.review(t, ag, th, system) })
+	return a.beforeSleep(ag, th.ThreadKey, "review-", func(t *activeTurn) { a.m.review(t, ag, th, system) })
 }
 
 func (m *Manager) review(t *activeTurn, ag *store.Agent, th *store.Thread, system string) {

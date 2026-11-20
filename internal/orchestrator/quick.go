@@ -49,7 +49,7 @@ func (m *Manager) getFile(agentID string, chat chatRef, path string, reply func(
 		// Straight to this chat, rather than at the next background tick,
 		// and only this file: the rest of the outbox keeps to its cap.
 		// A failure to send says so itself.
-		m.deliverQueued(m.ctx, r.spec, chat, tag)
+		m.deliverQueued(m.ctx, r.spec, chat, tag, nil)
 	})
 }
 

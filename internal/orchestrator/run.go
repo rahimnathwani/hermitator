@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -175,7 +176,23 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		m.store.SetThreadSession(ctx, key, th.SessionID)
 	}
 	var fork bool
-	a.call(func(a *actor) error { fork = a.forkNext[key]; delete(a.forkNext, key); return nil })
+	var beside []time.Time
+	a.call(func(a *actor) error {
+		fork = a.forkNext[key]
+		delete(a.forkNext, key)
+		for _, o := range a.turns {
+			if o != t && !o.started.IsZero() { // not a look before sleep
+				beside = append(beside, o.started)
+			}
+		}
+		return nil
+	})
+	// The note goes to the agent only: /retry and /sessions keep what
+	// was asked.
+	sent := prompt
+	if note := alongside(beside, m.location(ctx, agent)); note != "" {
+		sent = note + "\n\n" + prompt
+	}
 
 	rec := &store.Turn{
 		ID: t.id, AgentID: agent.ID, AccountID: last.AccountID, ChatJID: last.Chat,
@@ -186,7 +203,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	}
 	log.Info("turn started", "harness", agent.Harness, "wake", wake, "wake_ms", wakeMS, "messages", len(batch))
 
-	req := m.turnRequest(ctx, t, agent, spec, th, batch, creds, prompt, images, fork)
+	req := m.turnRequest(ctx, t, agent, spec, th, batch, creds, sent, images, fork)
 	m.writeTasks(ctx, spec, agent)
 	system := req.SystemPrompt
 	a.do(func(a *actor) {
@@ -203,7 +220,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	t.submitted(&client)
 	if agent.Harness == store.HarnessClaude {
 		a.do(func(a *actor) {
-			if a.turn == t {
+			if a.turns[t.key] == t {
 				t.steerTo = chatKey(last)
 			}
 		})
@@ -218,7 +235,8 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	chat.note = note
 
 	var filesSent atomic.Int32
-	stopOutbox := m.deliverDuringTurn(ctx, spec, agent, chat, &filesSent)
+	others := a.othersLive(t.id)
+	stopOutbox := m.deliverDuringTurn(ctx, spec, agent, chat, &filesSent, others)
 	followCtx, stopFollow := context.WithCancel(ctx)
 	died := m.watchSandbox(followCtx, stopFollow, spec)
 	if chat.ok() && !chat.quiet {
@@ -232,8 +250,8 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 	stopFollow()
 	m.requeueUnsteered(a, t, &client, last)
 	stopOutbox()
-	filesSent.Add(int32(m.deliverOutbox(ctx, spec, chat)))
-	m.handleRequests(ctx, spec, agent, chat)
+	filesSent.Add(int32(m.deliverOutbox(ctx, spec, chat, others)))
+	m.handleRequests(ctx, spec, agent, chat, others)
 	if err != nil && !died.Load() {
 		client.Cancel(t.id, 15*time.Second)
 	} else {
@@ -279,6 +297,32 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		return m.finish(ctx, chat, rec, nil, "⚠️ The agent finished without replying. Send /retry to try again.", true)
 	}
 	return m.finish(ctx, chat, rec, result, "", true)
+}
+
+// alongside tells a turn about the others running beside it, started at
+// the given times. They share its machine, files and processes, and two
+// agents editing one checkout, or one resetting what the other builds
+// on, undo each other's work. It says nothing of what they were asked or
+// where: that may be another group's business, and the agent could
+// repeat it here.
+func alongside(started []time.Time, loc *time.Location) string {
+	if len(started) == 0 {
+		return ""
+	}
+	slices.SortFunc(started, time.Time.Compare)
+	times := make([]string, len(started))
+	for i, s := range started {
+		times[i] = s.In(loc).Format("15:04")
+	}
+	what := "something else in another of your conversations, started at " + times[0]
+	if len(started) > 1 {
+		what = fmt.Sprintf("%d other things in other conversations of yours, started at %s", len(started), strings.Join(times, ", "))
+	}
+	return "[From hermitator: you are also working on " + what + ", on this same machine. " +
+		"You share the workspace, files and running processes with that work, so files can change while you use them. " +
+		"Before changing a file or a git checkout, look at its current state rather than assume it is as you left it. " +
+		"Do not run git commands that would disturb other work in a checkout (checkout, switch, reset, stash, rebase, clean); " +
+		"for code changes of your own, work in a separate git worktree. Do not mention the other work unless asked.]"
 }
 
 // turnChat is where a turn's replies go: the chat of its last message,
@@ -362,7 +406,7 @@ func (m *Manager) releaseHeld(ctx context.Context, held []*store.HeldMessage) {
 // deliverDuringTurn sends files as soon as the agent queues them, and
 // answers its requests, until the returned function is called; that
 // waits for the last delivery to finish.
-func (m *Manager) deliverDuringTurn(ctx context.Context, spec *sandbox.Spec, agent *store.Agent, chat chatRef, filesSent *atomic.Int32) (stop func()) {
+func (m *Manager) deliverDuringTurn(ctx context.Context, spec *sandbox.Spec, agent *store.Agent, chat chatRef, filesSent *atomic.Int32, skip func(string) bool) (stop func()) {
 	done, stopped := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(stopped)
@@ -373,8 +417,8 @@ func (m *Manager) deliverDuringTurn(ctx context.Context, spec *sandbox.Spec, age
 			case <-done:
 				return
 			case <-tick.C:
-				filesSent.Add(int32(m.deliverOutbox(ctx, spec, chat)))
-				m.handleRequests(ctx, spec, agent, chat)
+				filesSent.Add(int32(m.deliverOutbox(ctx, spec, chat, skip)))
+				m.handleRequests(ctx, spec, agent, chat, skip)
 			}
 		}
 	}()
@@ -469,7 +513,12 @@ func (e *turnEvents) handle(line []byte) {
 		e.chat.sendAgent(ev.Text)
 	case turn.EventTodos:
 		todos, key := ev.Todos, e.key
-		e.a.do(func(a *actor) { a.todos, a.todosAt, a.todosThread = todos, time.Now(), key })
+		e.a.do(func(a *actor) {
+			if a.plans == nil {
+				a.plans = map[store.ThreadKey]plan{}
+			}
+			a.plans[key] = plan{todos: todos, at: time.Now()}
+		})
 	case turn.EventResult, turn.EventError:
 		r := ev
 		e.result = &r
@@ -749,13 +798,16 @@ func readShared(spec *sandbox.Spec, name string) ([]byte, error) {
 }
 
 // deliverOutbox sends every file the agent has queued.
-func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat chatRef) (sentFiles int) {
-	return m.deliverQueued(ctx, spec, chat, "")
+// deliverOutbox sends what is queued in the outbox, except what skip
+// (if set) says belongs to another running turn: that turn sends its
+// own, to its own chat.
+func (m *Manager) deliverOutbox(ctx context.Context, spec *sandbox.Spec, chat chatRef, skip func(turnID string) bool) (sentFiles int) {
+	return m.deliverQueued(ctx, spec, chat, "", skip)
 }
 
 // deliverQueued sends what is queued in the outbox; with only set, just
 // what was queued under that turn ID.
-func (m *Manager) deliverQueued(ctx context.Context, spec *sandbox.Spec, chat chatRef, only string) (sentFiles int) {
+func (m *Manager) deliverQueued(ctx context.Context, spec *sandbox.Spec, chat chatRef, only string, skip func(turnID string) bool) (sentFiles int) {
 	// A turn and the background tick may both look; only one at a time
 	// may, or a file could go out twice.
 	a := m.actor(spec.ID)
@@ -785,6 +837,9 @@ func (m *Manager) deliverQueued(ctx context.Context, spec *sandbox.Spec, chat ch
 			err = json.Unmarshal(raw, &meta)
 		}
 		if only != "" && (err != nil || meta.Turn != only) {
+			continue
+		}
+		if skip != nil && err == nil && skip(meta.Turn) {
 			continue
 		}
 		chat := m.originChat(ctx, spec.ID, meta.Turn, chat)

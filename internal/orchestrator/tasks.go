@@ -349,8 +349,10 @@ func (m *Manager) findTask(ctx context.Context, agentID, ref string) (*store.Tas
 	return nil, store.ErrNotFound
 }
 
-// handleRequests answers what guest commands asked of the host.
-func (m *Manager) handleRequests(ctx context.Context, spec *sandbox.Spec, ag *store.Agent, chat chatRef) {
+// handleRequests answers what guest commands asked of the host, except
+// what skip (if set) says another running turn asked: that turn answers
+// its own, in its own chat.
+func (m *Manager) handleRequests(ctx context.Context, spec *sandbox.Spec, ag *store.Agent, chat chatRef, skip func(turnID string) bool) {
 	root, err := spec.Shared()
 	if err != nil {
 		return
@@ -376,11 +378,14 @@ func (m *Manager) handleRequests(ctx context.Context, spec *sandbox.Spec, ag *st
 			continue
 		}
 		raw, err := readRegular(root, path)
-		root.Remove(path)
 		var req turn.HostRequest
 		if err == nil {
 			err = json.Unmarshal(raw, &req)
 		}
+		if skip != nil && err == nil && skip(req.Turn) {
+			continue
+		}
+		root.Remove(path)
 		answer := turn.HostAnswer{}
 		if err != nil {
 			answer.Message = "unreadable request: " + err.Error()

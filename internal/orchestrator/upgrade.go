@@ -97,7 +97,7 @@ func (m *Manager) restartCommand(ctx context.Context, acct *store.Account, ag *s
 	was, err := m.Restart(ctx, ag.ID)
 	switch {
 	case errors.Is(err, ErrBusy):
-		reply("*" + ag.Name + "* is busy (a turn, a terminal or a login is using it). Send /stop first, or wait for it to finish.")
+		reply("*" + ag.Name + "* is busy (a turn, a terminal or a login is using it). Send /stop all first, or wait for it to finish.")
 	case err != nil:
 		reply("⚠️ Could not restart: " + err.Error())
 	default:

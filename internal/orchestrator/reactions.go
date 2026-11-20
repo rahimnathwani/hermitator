@@ -31,8 +31,8 @@ func (m *Manager) reaction(ctx context.Context, agentID string, msg Message) {
 	}
 	var withdrawn *Message
 	m.actor(agentID).call(func(a *actor) error {
-		if t := a.turn; t != nil && slices.Contains(t.messages, msg.ReactsTo) {
-			a.abort() // the turn's end reacts ⏹ on its message
+		if t := a.turnWith(msg.ReactsTo); t != nil {
+			t.kill(a.m) // the turn's end reacts ⏹ on its message
 			return nil
 		}
 		for i, p := range a.pending {
@@ -65,7 +65,7 @@ func (m *Manager) edited(ctx context.Context, agentID string, msg Message) {
 				replaced = true
 			}
 		}
-		working = a.turn != nil && slices.Contains(a.turn.messages, msg.Edits)
+		working = a.turnWith(msg.Edits) != nil
 		return nil
 	})
 	if replaced {

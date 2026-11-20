@@ -9,7 +9,7 @@ way, and `/help COMMAND` shows one.
 | Command | |
 |---|---|
 | `/status` | What the agent is doing, its state and disk use |
-| `/stop`, `/stop all` | Abort the current turn; `all` also withdraws the messages waiting for one |
+| `/stop`, `/stop all` | Abort this chat's turn; `all` stops every chat's and withdraws the messages waiting for one |
 | `/retry` | Run the last message again, after a failure or a restart |
 | `/plan` | The agent's own task list for what it is doing, without waking it |
 | `/usage` | Claude subscription use (5-hour and weekly, with pace) and spending |

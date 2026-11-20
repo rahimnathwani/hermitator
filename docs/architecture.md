@@ -151,8 +151,8 @@ first and close to verbatim, then lasting effects and failures, then
 findings, tool steps last; names, ids, paths and errors copied exactly.
 Agents are also told that summaries keep little of tool output, so they
 say in their replies what they learned that will matter later. The
-compaction runs as a turn of its own, recorded with its cost, holding the
-turn slot so a message arriving meanwhile waits; the next reaper tick
+compaction runs as a turn of its own, recorded with its cost, holding its
+conversation's place so a message for it arriving meanwhile waits; the next reaper tick
 suspends the agent, or compacts the next. Afterwards the conversation's
 size is 0, or pi's estimate, so
 it is not compacted again until a turn measures it anew; that holds for a
@@ -304,7 +304,9 @@ one that calls itself headless.
    holds at most 200.
 4. The agent's actor collects triggering messages for 1.5 seconds, so a
    photo and the caption typed after it make one turn, then starts the turn
-   for that chat. Messages from another chat wait for the next turn. A
+   for that chat. Another chat's messages start a turn of their own
+   alongside it (see [Turns side by side](#turns-side-by-side)); a
+   message for a conversation with a turn running waits for it. A
    plain message from the same chat that arrives while Claude Code is
    working joins the running turn instead (it gets 👀): the host writes it
    to the spool's `steer/<turn>` directory, and the guest, which keeps
@@ -435,7 +437,7 @@ when hermitator is back. A resent text opens with a note that it may be
 a duplicate, since the first try may have arrived after all.
 
 Each agent is served by one goroutine (its actor) that owns the queue, the
-running turn and the holds keeping it awake, so none of that needs locks.
+running turns and the holds keeping it awake, so none of that needs locks.
 Turns themselves run on their own goroutine and report back to the actor.
 
 ### Harnesses
@@ -483,6 +485,35 @@ the console. Separation is of context, not a security boundary: the agent
 is root in a sandbox shared by all its chats, and `recall --all` and the
 memory file reach across them. Chats that must not share anything need
 separate agents.
+
+### Turns side by side
+
+A Claude Code agent runs up to three turns at once (`Config.Parallel`),
+one per conversation, so a long job in one chat does not hold up
+another, or the web console. Like several Claude Code sessions in one
+checkout, they share the workspace, files, processes and browser. A turn
+that starts while others run is told so in a note ahead of its prompt
+(not kept with the turn, so `/retry` resends what was asked): when they
+started, and to check files before changing them, leave other work's git
+checkouts alone and use a worktree of its own. The note does not say what
+the other turns were asked or where, since that may be another group's
+business.
+
+Some things still go one at a time:
+
+| What | Why |
+|---|---|
+| **One conversation** | Two harness processes on a session would corrupt its transcript; a console message continuing a chat's conversation waits for that chat's turn |
+| **pi agents** | pi rewrites `auth.json` when it refreshes a ChatGPT token, and a second turn would write the stale copy back over the fresh one |
+| **Owners with a spending limit** | Each turn is given all that is left under it, so two at once could spend twice that |
+
+A turn delivers its own outbox and answers its own requests (`whatsapp-send`,
+polls, schedules); while it runs, the others leave those to it, since a
+web console turn has no chat to route by and another turn would send its
+files to the wrong chat. `/stop` stops the turn in the chat it is sent
+in; `/stop all` and the panel's Stop stop them all. `/status` says what
+runs here and how many other chats are busy. The agent sleeps only when
+none is running.
 
 Session IDs are chosen by hermitator, so they are known before the first
 turn. `/new` clears a chat's; switching harness clears every chat's,

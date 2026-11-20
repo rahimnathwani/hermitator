@@ -23,7 +23,7 @@ func (m *Manager) background(spec *sandbox.Spec, ag *store.Agent) {
 	}
 	// Requests are answered even with no chat to talk to: a preview link,
 	// say, is printed for the job that asked.
-	m.handleRequests(m.ctx, spec, ag, chat)
+	m.handleRequests(m.ctx, spec, ag, chat, nil)
 	if !chat.ok() || !outboxPending(spec) {
 		return
 	}
@@ -47,7 +47,7 @@ func (m *Manager) background(spec *sandbox.Spec, ag *store.Agent) {
 	if full {
 		return // they wait in the outbox for the next turn or the next hour
 	}
-	if n := m.deliverOutbox(m.ctx, spec, chat); n > 0 {
+	if n := m.deliverOutbox(m.ctx, spec, chat, nil); n > 0 {
 		a.outbox.Lock()
 		for range n {
 			a.bgSent = append(a.bgSent, now)
