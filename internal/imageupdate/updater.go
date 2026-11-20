@@ -227,13 +227,14 @@ func (u *Updater) run(ctx context.Context, force bool) Result {
 	if err != nil {
 		have = floor
 	}
+	floor = raiseFloor(floor, have)
 	reg := registry{npm: u.NPM, pypi: u.PyPI, client: http.DefaultClient}
 	want, err := reg.settled(ctx, time.Now().Add(-u.MinAge), floor)
 	if err != nil {
 		return Result{Err: fmt.Errorf("looking up releases: %w", err)}
 	}
 	if samePackages(have, want) {
-		return Result{Skipped: current + " already has the newest releases a week old"}
+		return Result{Skipped: current + " already has the newest releases over a week old"}
 	}
 	if failed, err := ReadPins(filepath.Join(u.Images.Dir, failedFile)); err == nil && samePackages(failed, want) && !force {
 		return Result{Skipped: "the same versions failed to build before"}
@@ -265,6 +266,28 @@ func (u *Updater) run(ctx context.Context, force bool) Result {
 		return Result{Err: fmt.Errorf("the build finished but %s is still current\n%s", current, tail(string(out), 12))}
 	}
 	return Result{Built: built, Changes: changes(have, want), Pruned: u.prune(ctx, built)}
+}
+
+// raiseFloor keeps the pins from going below the image agents already
+// have, as well as below the repository's: a rule picking older releases
+// (waiting longer for dependencies, say) must not build a downgrade. The
+// two Playwrights move together, so they stay on one minor version.
+func raiseFloor(floor, have Pins) Pins {
+	out := Pins{}
+	for k, v := range floor {
+		out[k] = v
+	}
+	for _, k := range []string{pinClaude, pinPi} {
+		if later(have[k], out[k]) {
+			out[k] = have[k]
+		}
+	}
+	newer := later(have[pinNode], out[pinNode]) || later(have[pinPython], out[pinPython])
+	older := later(out[pinNode], have[pinNode]) || later(out[pinPython], have[pinPython])
+	if newer && !older && minorOf(have[pinNode]) == minorOf(have[pinPython]) {
+		out[pinNode], out[pinPython] = have[pinNode], have[pinPython]
+	}
+	return out
 }
 
 func (u *Updater) writePins(name string, p Pins) {

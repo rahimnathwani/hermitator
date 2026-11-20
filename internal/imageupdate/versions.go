@@ -27,6 +27,14 @@ const (
 
 var packagePins = []string{pinClaude, pinPi, pinNode, pinPython}
 
+// dependencyLag is how much longer than the pins the packages they depend
+// on get to have come out. A package can be published before its own
+// dependencies: playwright 1.65.1 came out 21 minutes before the
+// playwright-core it requires, and a build whose cutoff fell between the
+// two picked the one and could not install the other. So the pins come
+// out a day before the cutoff the build resolves everything else by.
+const dependencyLag = 24 * time.Hour
+
 var pinNames = map[string]string{
 	pinClaude: "Claude Code",
 	pinPi:     "pi",
@@ -192,23 +200,24 @@ func (r registry) pypiSettled(ctx context.Context, pkg string, cutoff time.Time)
 }
 
 // settled works out the pins deploy/bump-image.sh would: the newest
-// releases that have been out since cutoff, but never older than floor
+// releases that came out dependencyLag before cutoff, but never older than floor
 // (the repository's own pins), and the two Playwrights on the same minor
 // version, which is what makes them share a browser build.
 func (r registry) settled(ctx context.Context, cutoff time.Time, floor Pins) (Pins, error) {
-	claude, err := r.npmSettled(ctx, "@anthropic-ai/claude-code", cutoff, "")
+	pick := cutoff.Add(-dependencyLag)
+	claude, err := r.npmSettled(ctx, "@anthropic-ai/claude-code", pick, "")
 	if err != nil {
 		return nil, err
 	}
-	pi, err := r.npmSettled(ctx, "@earendil-works/pi-coding-agent", cutoff, "")
+	pi, err := r.npmSettled(ctx, "@earendil-works/pi-coding-agent", pick, "")
 	if err != nil {
 		return nil, err
 	}
-	python, err := r.pypiSettled(ctx, "playwright", cutoff)
+	python, err := r.pypiSettled(ctx, "playwright", pick)
 	if err != nil {
 		return nil, err
 	}
-	node, err := r.npmSettled(ctx, "playwright", cutoff, python[:strings.LastIndex(python, ".")])
+	node, err := r.npmSettled(ctx, "playwright", pick, python[:strings.LastIndex(python, ".")])
 	if err != nil {
 		return nil, err
 	}

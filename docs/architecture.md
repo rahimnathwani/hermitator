@@ -16,7 +16,7 @@ One process on the host, `hermitator serve`, contains:
 | Panel | `internal/web` | Server-rendered pages, server-sent events and the terminal WebSocket. |
 | Store | `internal/store` | SQLite in WAL mode. |
 | Host operations | `internal/hostops` | `/host` and `hermitator doctor`: uptime, load, memory, disk, the journal, restarts. |
-| Image updater | `internal/imageupdate` | Builds a new agent image when its pinned packages have releases a week old, and prunes unused ones. |
+| Image updater | `internal/imageupdate` | Builds a new agent image when its pinned packages have releases eight days old, and prunes unused ones. |
 
 Inside every sandbox, `hermitator-guest` runs as PID 1. It serves the job
 spool, runs turns by driving Claude Code or pi, and is also the
@@ -700,12 +700,17 @@ current image stays current and the updater reports a failed build.
 `internal/imageupdate` keeps the newest current on the host. Once a day
 (the first look ten minutes after a start, so a restart does not start a
 build) it asks npm and PyPI for the releases `deploy/bump-image.sh` would
-choose: the newest that have been out for a week, never older than the
-pins in the installed `image/Containerfile`, with Python's and Node's
-Playwright on the same minor version. If any package pin differs from the
-current image's `VERSIONS`, it runs build-image.sh with them as
-`--build-arg`s. `RELEASED_BEFORE` is set at each build but is never on its
-own a reason for one, or every day would bring an image. A failed build
+choose: the newest that have been out for eight days, never older than
+the pins in the installed `image/Containerfile` or the current image's,
+with Python's and Node's Playwright on the same minor version. If any
+package pin differs from the current image's `VERSIONS`, it runs
+build-image.sh with them as `--build-arg`s. Their dependencies are
+resolved as of a week ago (`RELEASED_BEFORE`): a day later than the pins,
+because a package can be published before what it depends on (playwright
+1.65.1 came out 21 minutes before its playwright-core), and a cutoff
+falling between the two fails the build. `RELEASED_BEFORE` is set at each
+build but is never on its own a reason for one, or every day would bring
+an image. A failed build
 leaves the current image alone, writes its pins to `images/.update-failed`
 so the same versions are not tried daily (`/host image update` tries
 anyway), and tells the host operators with the end of its output. A build

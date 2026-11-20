@@ -145,7 +145,7 @@ func (m *Manager) hostCommand(ctx context.Context, acct *store.Account, msg Mess
 				reply("Cannot look for a new image now: " + why + ".")
 				return
 			}
-			reply("🔨 Looking for releases a week old, and building a new image if there are any. That takes a few minutes; every host operator hears how it went.")
+			reply("🔨 Looking for releases over a week old, and building a new image if there are any. That takes a few minutes; every host operator hears how it went.")
 			return
 		}
 		text := "🧱 " + m.host.ImageStatus()

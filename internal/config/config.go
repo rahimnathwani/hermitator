@@ -33,7 +33,7 @@ type Config struct {
 	Voice     string // HERMITATOR_PIPER_VOICE
 	LogLevel  string // HERMITATOR_LOG
 	// ImageUpdates builds a new agent image on this host when its pinned
-	// packages have releases a week old: "on" or "off". Default on with
+	// packages have releases over a week old: "on" or "off". Default on with
 	// runsc. HERMITATOR_IMAGE_UPDATES
 	ImageUpdates bool
 	// Source holds image/ and deploy/ for building images, as

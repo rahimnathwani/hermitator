@@ -262,3 +262,41 @@ func TestStoppingMidBuildIsNotAFailure(t *testing.T) {
 		t.Fatal("versions marked failed because hermitator stopped")
 	}
 }
+
+// The pins come out a day before the cutoff their dependencies are
+// resolved by, since a package can be published before what it needs:
+// playwright 1.65.1 came out 21 minutes before its playwright-core, and a
+// cutoff between the two picked one and could not install the other.
+func TestPinsLeaveTheirDependenciesADay(t *testing.T) {
+	reg := fakeRegistry(t, map[string]map[string]int{
+		"@anthropic-ai/claude-code":       {"2.1.302": 30, "2.1.320": 7},
+		"@earendil-works/pi-coding-agent": {"1.3.0": 30},
+		"playwright":                      {"1.64.1": 30, "1.64.2": 7},
+	}, map[string]int{"1.64.0": 30})
+	defer reg.Close()
+	// Six and a half days ago: after the 7-day-old releases, but by less
+	// than a day.
+	cutoff := time.Now().Add(-156 * time.Hour)
+	pins, err := registry{npm: reg.URL, pypi: reg.URL, client: http.DefaultClient}.settled(context.Background(), cutoff, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pins[pinClaude] != "2.1.302" || pins[pinNode] != "1.64.1" {
+		t.Fatalf("pins = %v; releases within a day of the cutoff should be passed over", pins)
+	}
+	if want := cutoff.UTC().Format("2006-01-02T15:04:05.000Z"); pins[pinReleased] != want {
+		t.Fatalf("RELEASED_BEFORE = %s, want the cutoff %s", pins[pinReleased], want)
+	}
+}
+
+// An image whose pins are newer than what the rules now pick is kept,
+// not replaced by older releases: waiting a day longer for dependencies
+// would otherwise have built a downgrade.
+func TestUpdaterNeverGoesBelowTheCurrentImage(t *testing.T) {
+	f := newFixture(t)
+	f.addImage("universal-20261005", "CLAUDE_CODE_VERSION=2.1.311\nPI_VERSION=1.3.0\nPLAYWRIGHT_VERSION=1.66.0\nPLAYWRIGHT_PYTHON_VERSION=1.66.0\nRELEASED_BEFORE=2026-10-04T00:00:00.000Z")
+	r := f.u.Run(context.Background(), false)
+	if r.Built != "" || len(f.builds) != 0 || !strings.Contains(r.Skipped, "already has the newest") {
+		t.Fatalf("run = %+v, builds %v", r, f.builds)
+	}
+}

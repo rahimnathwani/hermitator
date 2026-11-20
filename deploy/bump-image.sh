@@ -7,30 +7,36 @@
 # in one step. Review the diff, then `make image` builds it on the server.
 #
 # A release younger than MIN_AGE_DAYS is passed over: a compromised one
-# is usually caught and pulled within days. The same cutoff goes into the
+# is usually caught and pulled within days. The cutoff goes into the
 # image as RELEASED_BEFORE, so the pins' own dependencies, which npm and
-# uv resolve at build time, are no younger either.
+# uv resolve at build time, are no younger either. The pins themselves
+# come from a day earlier still, because a package can be published
+# before its dependencies (playwright 1.65.1 came out 21 minutes before
+# the playwright-core it requires), and a cutoff falling between them
+# makes the build fail. internal/imageupdate does the same.
 set -eu
 cd "$(dirname "$0")/.."
 file=image/Containerfile
 min_age_days=${MIN_AGE_DAYS:-7}
-cutoff=$(node -e 'console.log(new Date(Date.now() - process.argv[1] * 864e5).toISOString())' "$min_age_days")
+days_ago() { node -e 'console.log(new Date(Date.now() - process.argv[1] * 864e5).toISOString())' "$1"; }
+cutoff=$(days_ago "$min_age_days")
+pick=$(days_ago "$((min_age_days + 1))")
 
 # settled PACKAGE [MINOR] prints the newest stable release of an npm
-# package published before the cutoff, within MINOR ("1.64") if given.
+# package published before the pick date, within MINOR ("1.64") if given.
 settled() {
 	npm view "$1" time --json | node -e '
-		const [cutoff, minor] = process.argv.slice(1);
+		const [pick, minor] = process.argv.slice(1);
 		let s = "";
 		process.stdin.on("data", d => s += d).on("end", () => {
 			const times = JSON.parse(s);
 			const key = v => v.split(".").map(Number);
 			const ok = Object.keys(times)
-				.filter(v => /^\d+\.\d+\.\d+$/.test(v) && times[v] <= cutoff && (!minor || v.startsWith(minor + ".")))
+				.filter(v => /^\d+\.\d+\.\d+$/.test(v) && times[v] <= pick && (!minor || v.startsWith(minor + ".")))
 				.sort((a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; });
-			if (!ok.length) { console.error("no release of the package before " + cutoff); process.exit(1); }
+			if (!ok.length) { console.error("no release of the package before " + pick); process.exit(1); }
 			console.log(ok.pop());
-		});' "$cutoff" "${2:-}"
+		});' "$pick" "${2:-}"
 }
 
 claude=$(settled @anthropic-ai/claude-code)
@@ -39,17 +45,17 @@ pi=$(settled @earendil-works/pi-coding-agent)
 # releases of one minor version share. Python releases trail Node's, so
 # take the newest Python and the newest Node patch of its minor.
 python=$(curl -fsS https://pypi.org/pypi/playwright/json | node -e '
-	const cutoff = process.argv[1];
+	const pick = process.argv[1];
 	let s = "";
 	process.stdin.on("data", d => s += d).on("end", () => {
 		const key = v => v.split(".").map(Number);
 		const ok = Object.entries(JSON.parse(s).releases)
-			.filter(([v, files]) => /^\d+\.\d+\.\d+$/.test(v) && files.length && files.every(f => f.upload_time_iso_8601 <= cutoff))
+			.filter(([v, files]) => /^\d+\.\d+\.\d+$/.test(v) && files.length && files.every(f => f.upload_time_iso_8601 <= pick))
 			.map(([v]) => v)
 			.sort((a, b) => { const x = key(a), y = key(b); return x[0] - y[0] || x[1] - y[1] || x[2] - y[2]; });
-		if (!ok.length) { console.error("no Python playwright before " + cutoff); process.exit(1); }
+		if (!ok.length) { console.error("no Python playwright before " + pick); process.exit(1); }
 		console.log(ok.pop());
-	});' "$cutoff")
+	});' "$pick")
 minor=${python%.*}
 node=$(settled playwright "$minor")
 
