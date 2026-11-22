@@ -1,4 +1,4 @@
-// Package harness drives Claude Code and pi headlessly inside a sandbox
+// Package harness drives Claude Code, pi and Antigravity headlessly inside a sandbox
 // and translates what they print into turn.Events.
 package harness
 
@@ -64,6 +64,8 @@ func Run(ctx context.Context, req *turn.Request, emit Emit) error {
 		return runClaude(ctx, req, workdir, emit)
 	case turn.Pi:
 		return runPi(ctx, req, workdir, emit)
+	case turn.Agy:
+		return runAgy(ctx, req, workdir, emit)
 	default:
 		return fmt.Errorf("unknown harness %q", req.Harness)
 	}

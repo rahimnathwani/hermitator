@@ -61,6 +61,9 @@ const CustomProviderPrefix = "custom-"
 const (
 	Claude = "claude"
 	Pi     = "pi"
+	// Agy is Google's Antigravity CLI, driven over the Agent Client
+	// Protocol.
+	Agy = "agy"
 )
 
 // Request asks the guest to run one turn.
