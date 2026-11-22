@@ -36,7 +36,9 @@ func fakeAgy(scenario string) {
 	update := func(u map[string]any) {
 		send(map[string]any{"jsonrpc": "2.0", "method": "session/update", "params": map[string]any{"sessionId": "agy-1", "update": u}})
 	}
-	text := func(s string) { update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": s}}) }
+	text := func(s string) {
+		update(map[string]any{"sessionUpdate": "agent_message_chunk", "content": map[string]any{"type": "text", "text": s}})
+	}
 	usage := func(n int) { update(map[string]any{"sessionUpdate": "usage_update", "used": n, "size": 1048576}) }
 	tool := func(kind, id, status string) {
 		update(map[string]any{"sessionUpdate": kind, "toolCallId": id, "name": "run_command", "title": "make test",

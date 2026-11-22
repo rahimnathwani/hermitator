@@ -16,7 +16,7 @@ import (
 
 // Rate is a model's price per million tokens from a date on.
 type Rate struct {
-	From                                time.Time
+	From                                 time.Time
 	Input, CacheRead, CacheWrite, Output float64
 }
 
