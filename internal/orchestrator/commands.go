@@ -168,7 +168,7 @@ const helpText = `*hermitator commands*
 /model [NAME]: show or change the model (/model default to reset)
 /effort [LEVEL]: show or change how hard it thinks
 /once [MODEL] [EFFORT]: MESSAGE: use them for one message only
-/switch claude|pi: change harness
+/switch claude|pi|agy: change harness
 /upgrade: move the agent to the newest image, keeping its files; /upgrade all for all your agents
 
 *This chat*

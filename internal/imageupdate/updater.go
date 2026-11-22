@@ -53,9 +53,10 @@ type Updater struct {
 	InUse func(ctx context.Context) (map[string]bool, error)
 
 	// For tests: registries, the build, and podman's copy of an image.
-	NPM, PyPI string
-	Build     func(ctx context.Context, argv, env []string) ([]byte, error)
-	RemoveTag func(ctx context.Context, tag string)
+	// Agy is Antigravity's release server; "off" leaves its pin alone.
+	NPM, PyPI, Agy string
+	Build          func(ctx context.Context, argv, env []string) ([]byte, error)
+	RemoveTag      func(ctx context.Context, tag string)
 
 	once    sync.Once
 	mu      sync.Mutex
@@ -95,6 +96,9 @@ func (u *Updater) fill() {
 	}
 	if u.NPM == "" {
 		u.NPM = "https://registry.npmjs.org"
+	}
+	if u.Agy == "" {
+		u.Agy = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app"
 	}
 	if u.PyPI == "" {
 		u.PyPI = "https://pypi.org"
@@ -228,7 +232,10 @@ func (u *Updater) run(ctx context.Context, force bool) Result {
 		have = floor
 	}
 	floor = raiseFloor(floor, have)
-	reg := registry{npm: u.NPM, pypi: u.PyPI, client: http.DefaultClient}
+	reg := registry{npm: u.NPM, pypi: u.PyPI, agy: u.Agy, client: http.DefaultClient}
+	if u.Agy == "off" {
+		reg.agy = ""
+	}
 	want, err := reg.settled(ctx, time.Now().Add(-u.MinAge), floor)
 	if err != nil {
 		return Result{Err: fmt.Errorf("looking up releases: %w", err)}
@@ -241,7 +248,7 @@ func (u *Updater) run(ctx context.Context, force bool) Result {
 	}
 
 	argv := []string{"sh", filepath.Join(u.Source, "deploy", "build-image.sh"), u.Family, filepath.Join(u.Source, "image")}
-	for _, k := range append(slices.Clone(packagePins), pinReleased) {
+	for _, k := range buildPins() {
 		argv = append(argv, "--build-arg", k+"="+want[k])
 	}
 	bctx, cancel := context.WithTimeout(ctx, buildTimeout)
@@ -282,6 +289,9 @@ func raiseFloor(floor, have Pins) Pins {
 			out[k] = have[k]
 		}
 	}
+	if later(have[pinAgy], out[pinAgy]) && have[pinAgyURL] != "" && have[pinAgySHA] != "" {
+		out[pinAgy], out[pinAgyURL], out[pinAgySHA] = have[pinAgy], have[pinAgyURL], have[pinAgySHA]
+	}
 	newer := later(have[pinNode], out[pinNode]) || later(have[pinPython], out[pinPython])
 	older := later(out[pinNode], have[pinNode]) || later(out[pinPython], have[pinPython])
 	if newer && !older && minorOf(have[pinNode]) == minorOf(have[pinPython]) {
@@ -292,7 +302,7 @@ func raiseFloor(floor, have Pins) Pins {
 
 func (u *Updater) writePins(name string, p Pins) {
 	var b strings.Builder
-	for _, k := range append(slices.Clone(packagePins), pinReleased) {
+	for _, k := range buildPins() {
 		fmt.Fprintf(&b, "%s=%s\n", k, p[k])
 	}
 	os.WriteFile(filepath.Join(u.Images.Dir, name), []byte(b.String()), 0o644)

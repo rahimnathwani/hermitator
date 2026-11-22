@@ -409,8 +409,8 @@ func (m *Manager) command(ctx context.Context, acct *store.Account, agentID stri
 		return true
 	case "switch":
 		target := strings.ToLower(cmd.Arg)
-		if target != store.HarnessClaude && target != store.HarnessPi {
-			reply("Usage: /switch claude or /switch pi")
+		if target != store.HarnessClaude && target != store.HarnessPi && target != store.HarnessAgy {
+			reply("Usage: /switch claude, /switch pi or /switch agy")
 			return
 		}
 		if target == ag.Harness {
@@ -511,8 +511,11 @@ func describeState(state string, busy bool) string {
 }
 
 func harnessName(h string) string {
-	if h == store.HarnessPi {
+	switch h {
+	case store.HarnessPi:
 		return "pi"
+	case store.HarnessAgy:
+		return "Antigravity"
 	}
 	return "Claude Code"
 }

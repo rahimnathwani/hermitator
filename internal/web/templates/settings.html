@@ -49,6 +49,42 @@
     </div>
   </div>
 
+  <div class="setting" id="antigravity">
+    <div class="about">
+      <h3>Antigravity {{if $d.Agy.IsZero}}<span class="badge">Not signed in</span>{{else}}<span class="badge ok">Signed in {{ago $d.Agy}}</span>{{end}}</h3>
+      <p>Antigravity agents use a Google account, with its Google AI plan. Signing in runs <code>agy acp --login</code> in one of your sandboxes. Google asks to let Antigravity use your Google Cloud projects too, and your agents hold the token during their turns, so an account without important Cloud projects is safest.</p>
+    </div>
+    <div class="control">
+      {{if $d.HasAgents}}
+      <div data-mount="claude" data-src="/settings/agy/login" data-code="/settings/agy/code" data-starting="Starting agy's sign-in inside your sandbox…" data-connected="Antigravity is connected." class="section">
+        <button data-start>{{icon "external"}}{{if $d.Agy.IsZero}}Sign in with Google{{else}}Sign in again{{end}}</button>
+        <div data-signin hidden>
+          <p>1. Open <a data-url target="_blank" rel="noopener">Google's sign-in page</a> and approve.</p>
+          <p>2. Copy the code it shows, or the whole address of the page you land on, and paste it here.</p>
+          <form data-code-form class="inline-form" hx-boost="false">
+            <input type="text" name="code" placeholder="Code from the sign-in page" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Code from Google's sign-in page" required>
+            <button>Connect</button>
+          </form>
+        </div>
+        <p data-message role="status" class="hint"></p>
+      </div>
+      {{else}}
+      <p class="hint">The sign-in runs inside one of your agents' sandboxes. Create an agent first.</p>
+      {{end}}
+      {{if not $d.Agy.IsZero}}
+      <div class="form-row">
+      <form method="post" action="/settings/secret" data-confirm="Sign out" data-confirm-title="Sign Antigravity out?">
+        <input type="hidden" name="field" value="agy"><input type="hidden" name="remove" value="1">
+        <template data-confirm-body>
+          <p>hermitator forgets the Google token. {{with (index $d.Uses "agy")}}{{join . ", "}} cannot answer{{else}}No agent uses it right now, but Antigravity agents cannot run{{end}} until you sign in again. To cut the token off at Google too, remove Antigravity's access in your Google account's security settings.</p>
+        </template>
+        <button class="danger">Sign out</button>
+      </form>
+      </div>
+      {{end}}
+    </div>
+  </div>
+
   <div class="setting" id="openai-codex">
     <div class="about">
       <h3>ChatGPT {{if $d.Codex}}<span class="badge ok">Connected {{ago $d.CodexSince}}</span>{{else}}<span class="badge">Not connected</span>{{end}}</h3>

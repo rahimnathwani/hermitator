@@ -16,6 +16,10 @@ var (
 	ClaudeModels = []string{"fable", "opus", "sonnet", "haiku"}
 	// ClaudeEfforts are Claude Code's --effort levels.
 	ClaudeEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+	// AgyModels are what Antigravity offers, without a thinking level;
+	// AgyEfforts are its thinking levels.
+	AgyModels  = []string{"gemini-4-neon", "gemini-4-argon", "gemini-4-hydrogen", "gemini-3.8-flash", "claude-opus-5-5", "claude-sonnet-5-5", "gpt-oss-120b-medium"}
+	AgyEfforts = []string{"low", "medium", "high", "xhigh"}
 	// PiEfforts are pi's --thinking levels.
 	PiEfforts = []string{"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 	// PiModels are suggestions per pi provider.
@@ -28,8 +32,11 @@ var (
 
 // Efforts lists the effort levels a harness accepts.
 func Efforts(harness string) []string {
-	if harness == store.HarnessPi {
+	switch harness {
+	case store.HarnessPi:
 		return PiEfforts
+	case store.HarnessAgy:
+		return AgyEfforts
 	}
 	return ClaudeEfforts
 }
@@ -37,8 +44,11 @@ func Efforts(harness string) []string {
 // ModelSuggestions lists likely models for an agent on Claude Code or one
 // of hermitator's own pi providers.
 func ModelSuggestions(harness, provider string) []string {
-	if harness == store.HarnessPi {
+	switch harness {
+	case store.HarnessPi:
 		return PiModels[providerOrDefault(provider)]
+	case store.HarnessAgy:
+		return AgyModels
 	}
 	return ClaudeModels
 }
@@ -110,7 +120,7 @@ func (m *Manager) modelCommand(ctx context.Context, ag *store.Agent, arg string,
 	model := arg
 	if strings.EqualFold(arg, "default") {
 		model = ""
-	} else if ag.Harness == store.HarnessClaude {
+	} else if ag.Harness == store.HarnessClaude || ag.Harness == store.HarnessAgy {
 		model = strings.ToLower(model)
 	}
 	if err := m.store.SetAgentModel(ctx, ag.ID, model, ag.Effort); err != nil {

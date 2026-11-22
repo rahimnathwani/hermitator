@@ -152,7 +152,8 @@ func (a *actor) mustWait(k store.ThreadKey) bool {
 // parallel is how many turns the agent may run at once, each in a
 // conversation of its own. Only Claude Code agents run more than one:
 // pi rewrites its auth.json when it refreshes a ChatGPT token, and a
-// second turn would write the stale copy back over the fresh one. An
+// second turn would write the stale copy back over the fresh one;
+// Antigravity's token file is refreshed the same way. An
 // owner with a spending limit also gets one at a time, because each
 // turn is given all that is left under it.
 func (a *actor) parallel() int {

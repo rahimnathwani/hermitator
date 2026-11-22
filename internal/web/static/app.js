@@ -432,7 +432,7 @@ function mountClaude(el) {
   };
   start.addEventListener("click", () => {
     start.disabled = true;
-    message.textContent = "Starting claude setup-token inside your sandbox…";
+    message.textContent = el.dataset.starting || "Starting claude setup-token inside your sandbox…";
     src = new EventSource(el.dataset.src);
     src.addEventListener("url", (e) => {
       const ev = data(e);
@@ -466,7 +466,7 @@ function mountClaude(el) {
     }
     if (res.ok) {
       signin.hidden = true;
-      message.textContent = "Claude is connected.";
+      message.textContent = el.dataset.connected || "Claude is connected.";
       setTimeout(() => location.reload(), 800);
       return;
     }

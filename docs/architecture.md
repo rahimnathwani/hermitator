@@ -19,7 +19,7 @@ One process on the host, `hermitator serve`, contains:
 | Image updater | `internal/imageupdate` | Builds a new agent image when its pinned packages have releases eight days old, and prunes unused ones. |
 
 Inside every sandbox, `hermitator-guest` runs as PID 1. It serves the job
-spool, runs turns by driving Claude Code or pi, and is also the
+spool, runs turns by driving Claude Code, pi or Antigravity, and is also the
 `whatsapp-send` command agents use to send files.
 
 Everything hermitator keeps lives under `/var/lib/hermitator`:
@@ -461,7 +461,28 @@ deliberate.
 The prompt goes in as an RPC command; hermitator waits for `agent_settled`
 and cancels any extension dialog, since nobody can answer it.
 
-Both get hermitator's addition to the system prompt, which tells them they
+**Antigravity** (Google's CLI) runs as `agy acp --dangerously-skip-permissions`,
+an Agent Client Protocol server spoken to over stdin and stdout
+(`internal/harness/agy.go`). It differs from the other two in ways the
+turn allows for:
+
+| Behaviour | What hermitator does |
+|---|---|
+| **Session IDs** are agy's own, from `session/new` | Kept after the first turn, like a forked pi session's |
+| **`session/load`** replays the conversation first, and accepts IDs agy never saw | Loads only a session whose transcript (`~/.gemini/antigravity-cli/conversations/<id>.db`) exists; drops the replay |
+| **Model and thinking level** reset on every load | Set with `session/set_config_option` on every turn |
+| **System prompt** | Appended through `_meta.antigravity.systemPrompt.append`, on every turn |
+| **A prompt sent mid-turn** joins the turn; the first answers at once | Steering, as for Claude Code |
+| **Commands over ten seconds** move to the background; the prompt answers early and agy carries on when the command ends | The turn ends only when no prompt waits, no tool call runs, and agy has taken a step since the last command finished |
+| **Background processes** a command starts end when the command returns, `nohup` or not | Agents are told to start them as `(setsid nohup CMD … &)`, which survives |
+| **Cost** is not reported, only tokens | Priced from `turn.Prices`, list prices by model, dated where they change |
+| **Forks** do not exist | `/fork` and the review before sleep are Claude Code's and pi's only |
+
+Its updater is off (`AGY_CLI_DISABLE_AUTO_UPDATE`); image builds move it.
+Antigravity agents run one turn at a time, like pi's, because each turn
+rewrites the token file it was given.
+
+All three get hermitator's addition to the system prompt, which tells them they
 are talking over WhatsApp, where files arrive, how to send one back and that
 background processes should log to a file.
 
@@ -527,6 +548,7 @@ answered.
 |---|---|---|
 | Claude subscription | `claude setup-token`, run inside a sandbox from the panel, or pasted in | `CLAUDE_CODE_OAUTH_TOKEN` |
 | ChatGPT subscription | Device-code login, run inside a sandbox by pi's own code | `~/.pi/agent/auth.json`, synced back when pi refreshes it |
+| Google account, for Antigravity | `agy acp --login`, run inside a sandbox from the panel (`internal/guestfiles/agy-login.py`) | `~/.gemini/antigravity-cli/antigravity-oauth-token`, synced back when agy refreshes it; not offered with the egress proxy on, which cannot yet stand in for it |
 | DeepSeek, OpenRouter | Pasted into the panel | `DEEPSEEK_API_KEY`, `OPENROUTER_API_KEY` |
 | The user's own providers | Base URL, API, models and key entered in the panel | `HERMITATOR_PROVIDER_<NAME>_KEY`, named by the provider's entry in `~/.pi/agent/models.json` |
 | GitHub | `gh auth token` or a fine-grained token, checked against GitHub when saved | `GH_TOKEN` and `GITHUB_TOKEN`, plus a git credential helper set through `GIT_CONFIG_*`, so git over https uses it without it touching the disk |
@@ -710,7 +732,10 @@ because a package can be published before what it depends on (playwright
 1.65.1 came out 21 minutes before its playwright-core), and a cutoff
 falling between the two fails the build. `RELEASED_BEFORE` is set at each
 build but is never on its own a reason for one, or every day would bring
-an image. A failed build
+an image. Antigravity is a binary from Google's release bucket, whose manifest
+names only the latest build; the image pins its URL and SHA-512
+(`AGY_URL`, `AGY_SHA512`, amd64 only), and the updater moves them once
+the build's `Last-Modified` is a day old. A failed build
 leaves the current image alone, writes its pins to `images/.update-failed`
 so the same versions are not tried daily (`/host image update` tries
 anyway), and tells the host operators with the end of its output. A build

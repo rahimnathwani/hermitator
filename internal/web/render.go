@@ -94,8 +94,11 @@ var funcs = template.FuncMap{
 		}
 	},
 	"harness": func(h string) string {
-		if h == store.HarnessPi {
+		switch h {
+		case store.HarnessPi:
 			return "pi"
+		case store.HarnessAgy:
+			return "Antigravity"
 		}
 		return "Claude Code"
 	},

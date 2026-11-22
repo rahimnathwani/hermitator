@@ -14,6 +14,8 @@ import (
 const (
 	HarnessClaude = "claude"
 	HarnessPi     = "pi"
+	// HarnessAgy is Google's Antigravity CLI.
+	HarnessAgy = "agy"
 )
 
 // Agent states, mirrored from the sandbox so the UI can show them without

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 // secretFields are the credentials users paste in.
 var secretFields = map[string]string{
 	"claude":     store.SecretClaudeToken,
+	"agy":        store.SecretAgyToken, // removed here, set only by signing in
 	"deepseek":   store.SecretDeepSeekKey,
 	"openrouter": store.SecretOpenRouterKey,
 }
@@ -60,6 +62,7 @@ func (s *Server) settingsPage(w http.ResponseWriter, r *http.Request, v *viewer)
 		"SpentMonth":  spentMonth,
 		"Numbers":     numbers,
 		"Claude":      times[store.SecretClaudeToken],
+		"Agy":         times[store.SecretAgyToken],
 		"DeepSeek":    times[store.SecretDeepSeekKey],
 		"OpenRouter":  times[store.SecretOpenRouterKey],
 		"Codex":       s.Agents.HasPiProvider(ctx, v.User.ID, orchestrator.ProviderCodex),
@@ -84,6 +87,10 @@ func (s *Server) saveSecret(w http.ResponseWriter, r *http.Request, v *viewer) {
 	}
 	if value != "" && strings.ContainsAny(value, " \t\r\n") {
 		s.back(w, r, "/settings", "That does not look like a token: it contains whitespace.")
+		return
+	}
+	if field == "agy" && value != "" {
+		s.back(w, r, "/settings", "Antigravity connects by signing in with Google.")
 		return
 	}
 	if field == "claude" && value != "" && !strings.HasPrefix(value, "sk-ant-") {
@@ -148,7 +155,16 @@ func (s *Server) codexLogin(w http.ResponseWriter, r *http.Request, v *viewer) {
 // the sign-in page comes back through claudeCode. Leaving the page
 // cancels it.
 func (s *Server) claudeLogin(w http.ResponseWriter, r *http.Request, v *viewer) {
-	events, err := s.Agents.ClaudeLogin(r.Context(), v.User.ID)
+	s.cliLogin(w, r, v, s.Agents.ClaudeLogin)
+}
+
+// agyLogin is claudeLogin for Antigravity's `agy acp --login`.
+func (s *Server) agyLogin(w http.ResponseWriter, r *http.Request, v *viewer) {
+	s.cliLogin(w, r, v, s.Agents.AgyLogin)
+}
+
+func (s *Server) cliLogin(w http.ResponseWriter, r *http.Request, v *viewer, start func(context.Context, string) (<-chan orchestrator.LoginEvent, error)) {
+	events, err := start(r.Context(), v.User.ID)
 	st, serr := newStream(w)
 	if serr != nil {
 		return
@@ -184,7 +200,7 @@ func (s *Server) claudeLogin(w http.ResponseWriter, r *http.Request, v *viewer) 
 // was on the sign-in page. 400 means try another code; 409 means the login
 // is over and must be started again.
 func (s *Server) claudeCode(w http.ResponseWriter, r *http.Request, v *viewer) {
-	err := s.Agents.ClaudeLoginCode(r.Context(), v.User.ID, formValue(r, "login"), r.FormValue("code"))
+	err := s.Agents.LoginCode(r.Context(), v.User.ID, formValue(r, "login"), r.FormValue("code"))
 	switch {
 	case errors.Is(err, orchestrator.ErrCodeFormat):
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -192,6 +208,20 @@ func (s *Server) claudeCode(w http.ResponseWriter, r *http.Request, v *viewer) {
 		http.Error(w, err.Error(), http.StatusConflict)
 	default:
 		s.audit(r, v, "secret.set", store.SecretClaudeToken+" via setup-token")
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// agyCode is claudeCode for Antigravity's sign-in.
+func (s *Server) agyCode(w http.ResponseWriter, r *http.Request, v *viewer) {
+	err := s.Agents.LoginCode(r.Context(), v.User.ID, formValue(r, "login"), r.FormValue("code"))
+	switch {
+	case errors.Is(err, orchestrator.ErrCodeFormat):
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	case err != nil:
+		http.Error(w, err.Error(), http.StatusConflict)
+	default:
+		s.audit(r, v, "secret.set", store.SecretAgyToken+" via agy acp --login")
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

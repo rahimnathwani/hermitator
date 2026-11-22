@@ -24,8 +24,23 @@ ARG CLAUDE_CODE_VERSION=2.1.302
 ARG PI_VERSION=1.3.0
 ARG PLAYWRIGHT_VERSION=1.64.1
 ARG PLAYWRIGHT_PYTHON_VERSION=1.64.0
+ARG AGY_VERSION=1.5.14
+ARG AGY_URL=https://example.com/agy/1.5.14.tar.gz
+ARG AGY_SHA512=` + agySHA + `
 ARG RELEASED_BEFORE=2026-10-18T01:00:47.000Z
 `
+
+const agySHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+// The fake release server speaks plain HTTP.
+func init() { agyURLPrefix = "http://" }
+
+// agyAge is how long ago the fake Antigravity server's latest build came
+// out, and agyLatest which build it is.
+var (
+	agyAge    = 3 * 24 * time.Hour
+	agyLatest = "1.5.14"
+)
 
 // fakeRegistry answers like npm and PyPI. Releases younger than a week
 // must be passed over; days are how long ago each came out.
@@ -34,6 +49,15 @@ func fakeRegistry(t *testing.T, npm map[string]map[string]int, pypi map[string]i
 		return time.Now().Add(-time.Duration(n) * 24 * time.Hour).UTC().Format(time.RFC3339)
 	}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/agy/manifests/linux_amd64.json" {
+			url := "http://" + r.Host + "/agy/" + agyLatest + ".tar.gz"
+			json.NewEncoder(w).Encode(map[string]string{"version": agyLatest, "url": url, "sha512": strings.Repeat("b", 128)})
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/agy/") && r.Method == http.MethodHead {
+			w.Header().Set("Last-Modified", time.Now().Add(-agyAge).UTC().Format(http.TimeFormat))
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/pypi/") {
 			releases := map[string][]map[string]string{}
 			for v, d := range pypi {
@@ -97,6 +121,7 @@ func newFixture(t *testing.T) *fixture {
 		Keep:    1,
 		NPM:     reg.URL,
 		PyPI:    reg.URL,
+		Agy:     reg.URL + "/agy",
 		Notify: func(_ context.Context, text string) {
 			f.mu.Lock()
 			f.notes = append(f.notes, text)
@@ -294,9 +319,36 @@ func TestPinsLeaveTheirDependenciesADay(t *testing.T) {
 // would otherwise have built a downgrade.
 func TestUpdaterNeverGoesBelowTheCurrentImage(t *testing.T) {
 	f := newFixture(t)
-	f.addImage("universal-20261005", "CLAUDE_CODE_VERSION=2.1.311\nPI_VERSION=1.3.0\nPLAYWRIGHT_VERSION=1.66.0\nPLAYWRIGHT_PYTHON_VERSION=1.66.0\nRELEASED_BEFORE=2026-10-04T00:00:00.000Z")
+	f.addImage("universal-20261005", "CLAUDE_CODE_VERSION=2.1.311\nPI_VERSION=1.3.0\nPLAYWRIGHT_VERSION=1.66.0\nPLAYWRIGHT_PYTHON_VERSION=1.66.0\nAGY_VERSION=1.5.14\nAGY_URL=https://example.com/agy.tar.gz\nAGY_SHA512="+agySHA+"\nRELEASED_BEFORE=2026-10-04T00:00:00.000Z")
 	r := f.u.Run(context.Background(), false)
 	if r.Built != "" || len(f.builds) != 0 || !strings.Contains(r.Skipped, "already has the newest") {
 		t.Fatalf("run = %+v, builds %v", r, f.builds)
+	}
+}
+
+// Antigravity's latest build is taken once Google published it a day ago,
+// with its URL and checksum; one younger is left for a later look.
+func TestUpdaterTakesAntigravityADayOld(t *testing.T) {
+	agyLatest = "1.6.0"
+	defer func() { agyLatest, agyAge = "1.5.14", 3*24*time.Hour }()
+
+	agyAge = 12 * time.Hour
+	f := newFixture(t)
+	if r := f.u.Run(context.Background(), false); r.Err != nil {
+		t.Fatalf("run = %+v", r)
+	}
+	args := strings.Join(f.builds[0], " ")
+	if !strings.Contains(args, "AGY_VERSION=1.5.14") || !strings.Contains(args, "AGY_SHA512="+agySHA) {
+		t.Fatalf("a build out for 12 hours was taken: %s", args)
+	}
+
+	agyAge = 25 * time.Hour
+	f = newFixture(t)
+	if r := f.u.Run(context.Background(), false); r.Err != nil {
+		t.Fatalf("run = %+v", r)
+	}
+	args = strings.Join(f.builds[0], " ")
+	if !strings.Contains(args, "AGY_VERSION=1.6.0") || !strings.Contains(args, "/agy/1.6.0.tar.gz") || !strings.Contains(args, "AGY_SHA512="+strings.Repeat("b", 128)) {
+		t.Fatalf("the day-old build was not taken with its URL and checksum: %s", args)
 	}
 }

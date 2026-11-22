@@ -74,8 +74,11 @@ func ownProvider(p *store.Provider) Provider {
 // modelChoices lists the models an agent is likely to be told to run, and
 // what it runs when none is set ("" when the harness decides).
 func (m *Manager) modelChoices(ctx context.Context, ag *store.Agent) (suggested []string, def string) {
-	if ag.Harness != store.HarnessPi {
+	switch ag.Harness {
+	case store.HarnessClaude:
 		return ClaudeModels, ""
+	case store.HarnessAgy:
+		return AgyModels, ""
 	}
 	if name, ok := CustomName(ag.PiProvider); ok {
 		p, err := m.store.Provider(ctx, ag.UserID, name)

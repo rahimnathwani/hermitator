@@ -154,6 +154,11 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		return fail("⚠️ This agent's sandbox is misconfigured: " + err.Error())
 	}
 	m.usePlaceholders(ctx, agent, spec, &creds)
+	if creds.placeholders && agent.Harness == store.HarnessAgy {
+		// The proxy cannot yet stand in for a Google sign-in, and handing
+		// agy the real token would break the promise the setting makes.
+		return fail("⚠️ Antigravity cannot run while *Keep them out of the sandbox* is on in Settings: it needs its Google token inside. Turn that off, or /switch this agent to claude or pi.")
+	}
 	woke := time.Now()
 	wake, err := m.rt.Wake(ctx, spec)
 	if err != nil {
@@ -218,7 +223,7 @@ func (m *Manager) runTurn(a *actor, t *activeTurn, batch []Message) bool {
 		return m.finish(ctx, chat, rec, nil, "⚠️ Could not hand the turn to the sandbox: "+err.Error(), false)
 	}
 	t.submitted(&client)
-	if agent.Harness == store.HarnessClaude {
+	if agent.Harness == store.HarnessClaude || agent.Harness == store.HarnessAgy {
 		a.do(func(a *actor) {
 			if a.turns[t.key] == t {
 				t.steerTo = chatKey(last)
@@ -384,7 +389,7 @@ func (m *Manager) turnRequest(ctx context.Context, t *activeTurn, agent *store.A
 		Effort:       effort,
 		Fork:         fork,
 		Provider:     agent.PiProvider,
-		SystemPrompt: m.agentPrompt(spec, loc, last) + credentialsNote(creds) + m.historyNote(ctx, spec, agent, last),
+		SystemPrompt: m.agentPrompt(spec, loc, last) + credentialsNote(creds) + m.historyNote(ctx, spec, agent, last) + harnessNote(agent.Harness),
 		SteerID:      t.id,
 		Env:          env,
 		Files:        creds.files,
@@ -1302,6 +1307,20 @@ func credentialsNote(c credentials) string {
 	return b.String()
 }
 
+// harnessNote is what one harness needs to be told that the others do
+// not. Antigravity ends every process a command started in the
+// background as soon as that command returns, unless it was handed to
+// the machine's init first, which a subshell does; and its own
+// scheduler cannot run while the machine sleeps.
+func harnessNote(harness string) string {
+	if harness != store.HarnessAgy {
+		return ""
+	}
+	return "\n- Here, a command you run ends any process it left running in the background when it returns, nohup or not. To leave something running past the command (a dev server, a watcher, hermitator-guest notify or hold), start it detached in a subshell, exactly like this: (setsid nohup CMD > /tmp/job.log 2>&1 < /dev/null &). Use that form wherever these instructions say nohup ... &." +
+		"\n- For anything later, use hermitator-guest schedule, never your own /schedule or timers: those stop while this machine sleeps." +
+		"\n- Add MCP servers with agy mcp add."
+}
+
 // stallState is when a turn last showed progress, and what it was doing.
 type stallState struct {
 	at    time.Time
@@ -1319,6 +1338,8 @@ func (m *Manager) historyNote(ctx context.Context, spec *sandbox.Spec, ag *store
 		b.WriteString("\n- Full transcripts of your conversations, including what was summarised and what came before a /new, are in ~/.claude/projects/ (one .jsonl per conversation).")
 	case store.HarnessPi:
 		b.WriteString("\n- Full transcripts of your conversations, including what was summarised and what came before a /new, are in ~/.pi/agent/sessions/.")
+	case store.HarnessAgy:
+		b.WriteString("\n- Full transcripts of your conversations, including what was summarised and what came before a /new, are SQLite databases in ~/.gemini/antigravity-cli/conversations/.")
 	}
 	if m.newGuest(spec) {
 		b.WriteString(" When someone refers to something from before, or you need a detail a summary dropped, look it up before guessing: hermitator-guest recall WORDS lists the newest messages containing all of WORDS in this chat's conversations and history file, and hermitator-guest recall --show REF reads the messages around one. recall --all searches your other chats too; other people may be in those, so do that only when the owner asks.")

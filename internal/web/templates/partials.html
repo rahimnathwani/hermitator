@@ -91,6 +91,10 @@
     {{- else}}. No Claude token yet: add one in <a href="/settings#claude">Settings</a>, or this agent cannot answer.{{end -}}
   </p>
   <p class="hint pi-only">The pi coding agent, on a ChatGPT subscription, a DeepSeek or OpenRouter key, or <a href="/settings#providers">a provider of your own</a>.</p>
+  <p class="hint agy-only">Google's Antigravity CLI, on the Google account signed in
+    {{- if .AgyReady}} in <a href="/settings#antigravity">Settings</a>.
+    {{- else}}. No Google account signed in yet: sign in in <a href="/settings#antigravity">Settings</a>, or this agent cannot answer.{{end -}}
+  </p>
 </fieldset>
 <fieldset class="field pi-only">
   <legend>Provider</legend>
@@ -121,5 +125,9 @@
 <fieldset class="field pi-only">
   <legend>Thinking</legend>
   {{template "seg" .PiEffort}}
+</fieldset>
+<fieldset class="field agy-only">
+  <legend>Thinking</legend>
+  {{template "seg" .AgyEffort}}
 </fieldset>
 {{end}}

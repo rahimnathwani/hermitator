@@ -63,11 +63,13 @@ const otherModel = "+other"
 type agentFields struct {
 	Harness      segmented
 	ClaudeReady  bool // the owner has a Claude token
+	AgyReady     bool // the owner has signed in for Antigravity
 	Provider     segmented
 	Keys         []providerKey
 	Models       []modelSet
 	ClaudeEffort segmented
 	PiEffort     segmented
+	AgyEffort    segmented
 }
 
 // modelSet is the model choice for one harness and provider. A form holds
@@ -124,12 +126,18 @@ func providerOrCodex(p string) string {
 func newAgentFields(a *store.Agent, providers []orchestrator.Provider, ready map[string]bool) agentFields {
 	f := agentFields{
 		ClaudeReady: ready[store.HarnessClaude],
+		AgyReady:    ready[store.HarnessAgy],
 		Harness: seg("harness", a.Harness,
 			option{Value: store.HarnessClaude, Label: "Claude Code"},
-			option{Value: store.HarnessPi, Label: "pi"}),
+			option{Value: store.HarnessPi, Label: "pi"},
+			option{Value: store.HarnessAgy, Label: "Antigravity"}),
 		ClaudeEffort: effortChoice(a, store.HarnessClaude, "effort_claude"),
 		PiEffort:     effortChoice(a, store.HarnessPi, "effort_pi"),
-		Models:       []modelSet{modelChoice(a, store.HarnessClaude, "", "", orchestrator.ClaudeModels)},
+		AgyEffort:    effortChoice(a, store.HarnessAgy, "effort_agy"),
+		Models: []modelSet{
+			modelChoice(a, store.HarnessClaude, "", "", orchestrator.ClaudeModels),
+			modelChoice(a, store.HarnessAgy, "", "", orchestrator.AgyModels),
+		},
 	}
 	f.Provider = seg("provider", providerOrCodex(a.PiProvider))
 	for _, p := range providers {
@@ -150,10 +158,12 @@ func newAgentFields(a *store.Agent, providers []orchestrator.Provider, ready map
 func (s *Server) ready(ctx context.Context, userID string) map[string]bool {
 	times, _ := s.Store.SecretTimes(ctx, userID)
 	_, claude := times[store.SecretClaudeToken]
+	_, agy := times[store.SecretAgyToken]
 	_, deepseek := times[store.SecretDeepSeekKey]
 	_, openrouter := times[store.SecretOpenRouterKey]
 	ready := map[string]bool{
 		store.HarnessClaude:             claude,
+		store.HarnessAgy:                agy,
 		orchestrator.ProviderCodex:      s.Agents.HasPiProvider(ctx, userID, orchestrator.ProviderCodex),
 		orchestrator.ProviderDeepSeek:   deepseek,
 		orchestrator.ProviderOpenRouter: openrouter,

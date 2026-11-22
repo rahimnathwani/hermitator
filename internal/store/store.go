@@ -95,23 +95,56 @@ func (s *Store) migrateTo(ctx context.Context, last int) error {
 		if err != nil {
 			return err
 		}
-		tx, err := s.db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, string(body)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("%s: %w", e.Name(), err)
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, version, ts(time.Now())); err != nil {
-			tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
+		if err := s.apply(ctx, version, e.Name(), string(body)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// noForeignKeys marks a migration that rebuilds a table other tables refer
+// to, which must run with foreign keys off.
+const noForeignKeys = "-- hermitator: foreign keys off"
+
+// apply runs one migration in a transaction of its own connection. One
+// marked noForeignKeys runs with foreign keys off, as SQLite's table
+// rebuild needs: they cannot be turned off inside a transaction, and with
+// them on, dropping the old table cascades into every table that refers
+// to it. They are checked before the migration commits, and back on
+// before the connection goes back to the pool.
+func (s *Store) apply(ctx context.Context, version int, name, body string) error {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	off := strings.HasPrefix(body, noForeignKeys)
+	if off {
+		if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+			return err
+		}
+		defer conn.ExecContext(context.WithoutCancel(ctx), `PRAGMA foreign_keys = ON`)
+	}
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, body); err != nil {
+		tx.Rollback()
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	if off {
+		var problems int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_foreign_key_check`).Scan(&problems); err != nil || problems > 0 {
+			tx.Rollback()
+			return fmt.Errorf("%s: %d foreign key problems (%v)", name, problems, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, version, ts(time.Now())); err != nil {
+		tx.Rollback()
+		return err
+	}
+	return tx.Commit()
 }
 
 const timeFormat = "2006-01-02T15:04:05.000000Z"

@@ -53,7 +53,7 @@ way, and `/help COMMAND` shows one.
 | `/model`, `/model opus`, `/model default` | Show or change the model |
 | `/effort`, `/effort high`, `/effort default` | Show or change how hard it thinks |
 | `/once opus max: …` | Use another model or effort for this one message |
-| `/switch claude` or `/switch pi` | Change harness, same workspace |
+| `/switch claude`, `/switch pi` or `/switch agy` | Change harness (Claude Code, pi or Antigravity), same workspace |
 | `/upgrade`, `/upgrade all` | Move the agent, or all of yours, to the newest image; files are kept, background processes end, and it asks first |
 
 Model and effort changes apply from the next message, and the conversation

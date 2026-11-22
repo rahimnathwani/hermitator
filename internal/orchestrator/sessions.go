@@ -93,7 +93,7 @@ func (m *Manager) forkCommand(ctx context.Context, ag *store.Agent, k store.Thre
 	th, err := m.store.Thread(ctx, k)
 	switch {
 	case ag.Harness != store.HarnessClaude:
-		reply("/fork works with Claude Code; pi agents can start afresh with /new and go back with /resume.")
+		reply("/fork works with Claude Code; other agents can start afresh with /new and go back with /resume.")
 		return
 	case err != nil || th.SessionID == "":
 		reply("There is no conversation to branch off yet.")

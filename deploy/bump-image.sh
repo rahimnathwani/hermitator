@@ -88,3 +88,24 @@ pin PI_VERSION "$pi"
 pin PLAYWRIGHT_VERSION "$node"
 pin PLAYWRIGHT_PYTHON_VERSION "$python"
 pin RELEASED_BEFORE "$cutoff"
+
+# Antigravity: Google's release server names only its latest build, by URL
+# and SHA-512. It is taken once the build has been out for a day (by its
+# Last-Modified), the same rule internal/imageupdate applies.
+manifest=$(curl -fsS https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json)
+field() { printf '%s' "$manifest" | node -e 'let s=""; process.stdin.on("data", d => s += d).on("end", () => console.log(JSON.parse(s)[process.argv[1]]))' "$1"; }
+agy_version=$(field version)
+agy_url=$(field url)
+agy_sha=$(field sha512)
+published=$(curl -fsSI "$agy_url" | sed -n 's/^[Ll]ast-[Mm]odified: //p' | tr -d '\r')
+old_agy=$(sed -n 's/^ARG AGY_VERSION=//p' "$file")
+if ! node -e 'process.exit(Date.now() - Date.parse(process.argv[1]) >= 864e5 ? 0 : 1)' "$published"; then
+	echo "AGY_VERSION: $old_agy (kept; $agy_version came out $published, under a day ago)"
+elif later "$agy_version" "$old_agy"; then
+	sed -i.bak -e "s|^ARG AGY_VERSION=.*|ARG AGY_VERSION=$agy_version|" \
+		-e "s|^ARG AGY_URL=.*|ARG AGY_URL=$agy_url|" \
+		-e "s|^ARG AGY_SHA512=.*|ARG AGY_SHA512=$agy_sha|" "$file" && rm -f "$file.bak"
+	echo "AGY_VERSION: $old_agy -> $agy_version"
+else
+	echo "AGY_VERSION: $old_agy (unchanged)"
+fi

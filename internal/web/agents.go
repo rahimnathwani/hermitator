@@ -139,6 +139,10 @@ func (s *Server) newAgentPage(w http.ResponseWriter, r *http.Request, v *viewer)
 	})
 }
 
+func knownHarness(h string) bool {
+	return h == store.HarnessClaude || h == store.HarnessPi || h == store.HarnessAgy
+}
+
 func (s *Server) createAgent(w http.ResponseWriter, r *http.Request, v *viewer) {
 	name := formValue(r, "name")
 	if !agentName.MatchString(name) {
@@ -146,7 +150,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request, v *viewer) 
 		return
 	}
 	harness := formValue(r, "harness")
-	if harness != store.HarnessClaude && harness != store.HarnessPi {
+	if !knownHarness(harness) {
 		s.back(w, r, "/agents/new", "Pick a harness.")
 		return
 	}
@@ -275,7 +279,7 @@ func (s *Server) updateAgent(w http.ResponseWriter, r *http.Request, v *viewer) 
 		return
 	}
 	harness := formValue(r, "harness")
-	if harness != store.HarnessClaude && harness != store.HarnessPi {
+	if !knownHarness(harness) {
 		harness = a.Harness
 	}
 	idle, _ := strconv.Atoi(formValue(r, "idle_minutes"))

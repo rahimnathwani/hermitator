@@ -291,9 +291,11 @@ legend { padding: 0; }
 .seg input:focus-visible + span { box-shadow: 0 0 0 2px var(--accent); }
 .model-set .other { display: none; max-width: 320px; margin-top: 8px; }
 .model-set:has(input[value="+other"]:checked) .other { display: block; }
-.pi-only { display: none; }
+.pi-only, .agy-only { display: none; }
 form:has(input[name="harness"][value="pi"]:checked) .pi-only { display: block; }
-form:has(input[name="harness"][value="pi"]:checked) .claude-only { display: none; }
+form:has(input[name="harness"][value="agy"]:checked) .agy-only { display: block; }
+form:has(input[name="harness"][value="pi"]:checked) .claude-only,
+form:has(input[name="harness"][value="agy"]:checked) .claude-only { display: none; }
 
 /* Unsaved changes: the field says so, the form says so, and Save wakes up. */
 .field.changed > legend::after, .field.changed > .label::after {

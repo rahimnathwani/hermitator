@@ -127,7 +127,7 @@ graph TB
   end
   subgraph sandbox [One gVisor sandbox per agent with zero RAM when asleep]
     INIT[hermitator-guest as PID 1]
-    H[Claude Code or pi]
+    H[Claude Code, pi or Antigravity]
     BG[Dev servers and other background work]
   end
   WA --> GW
@@ -330,7 +330,7 @@ running agents you do not trust.
 | [internal/orchestrator](internal/orchestrator) | Routing, turns, sleep and wake |
 | [internal/sandbox](internal/sandbox) | runsc, OverlayFS, network namespaces and nftables |
 | [internal/spool](internal/spool) | Running processes in a sandbox through files |
-| [internal/harness](internal/harness) | Driving Claude Code and pi headlessly |
+| [internal/harness](internal/harness) | Driving Claude Code, pi and Antigravity headlessly |
 | [internal/gateway](internal/gateway) | WhatsApp |
 | [internal/web](internal/web) | The panel |
 | [internal/hostops](internal/hostops) | `/host` and `hermitator doctor`: what the server itself is doing |

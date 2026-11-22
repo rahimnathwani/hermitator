@@ -7,8 +7,10 @@ import (
 
 // Secret names. Values are always ciphertext produced by secrets.Box.
 const (
-	SecretClaudeToken   = "claude_oauth_token"
-	SecretPiAuth        = "pi_auth_json"
+	SecretClaudeToken = "claude_oauth_token"
+	SecretPiAuth      = "pi_auth_json"
+	// SecretAgyToken is Antigravity's token file, refreshed in place.
+	SecretAgyToken      = "agy_oauth_token"
 	SecretDeepSeekKey   = "deepseek_api_key"
 	SecretOpenRouterKey = "openrouter_api_key"
 	SecretGitHubToken   = "github_token"

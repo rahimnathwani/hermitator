@@ -155,6 +155,8 @@ func (s *Server) Handler() (http.Handler, error) {
 	tenant("GET /settings/codex/login", s.codexLogin)
 	tenant("GET /settings/claude/login", s.claudeLogin)
 	tenant("POST /settings/claude/code", s.claudeCode)
+	tenant("GET /settings/agy/login", s.agyLogin)
+	tenant("POST /settings/agy/code", s.agyCode)
 	tenant("POST /settings/codex/disconnect", s.codexDisconnect)
 
 	// Everyone can change their own password.

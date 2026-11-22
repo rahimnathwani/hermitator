@@ -87,6 +87,12 @@ func (m *Manager) credentials(ctx context.Context, a *store.Agent) (credentials,
 			return c, "This agent runs Claude Code, but no Claude token is set up. Sign in with Claude at " + settings + "#claude, which works from your phone."
 		}
 		c.env["CLAUDE_CODE_OAUTH_TOKEN"] = tok
+	case store.HarnessAgy:
+		tok := m.Secret(ctx, a.UserID, store.SecretAgyToken)
+		if tok == "" {
+			return c, "This agent runs Antigravity, but no Google account is signed in for it. Sign in at " + settings + "#antigravity"
+		}
+		c.files = append(c.files, turn.File{Path: turn.AgyTokenPath, Content: tok, Sync: true})
 	case store.HarnessPi:
 		auth := m.Secret(ctx, a.UserID, store.SecretPiAuth)
 		if auth != "" {
@@ -246,8 +252,14 @@ func hasProvider(authJSON, provider string) bool {
 }
 
 // syncFile stores credential files the harness rewrote during a turn
-// (pi refreshes its OAuth tokens in place).
+// (pi and Antigravity refresh their OAuth tokens in place).
 func (m *Manager) syncFile(ctx context.Context, userID string, ev turn.Event) {
+	if ev.Path == turn.AgyTokenPath && json.Valid([]byte(ev.Content)) {
+		if err := m.PutSecret(ctx, userID, store.SecretAgyToken, ev.Content); err != nil {
+			m.log.Error("store refreshed Antigravity credentials", "user", userID, "err", err)
+		}
+		return
+	}
 	if ev.Path != turn.PiAuthPath || !json.Valid([]byte(ev.Content)) {
 		return
 	}
@@ -263,7 +275,7 @@ func (m *Manager) scrubCredentials(ctx context.Context, spec *sandbox.Spec) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	client := spec.Spool()
-	_, exit, err := client.Run(ctx, spool.Job{ID: "scrub-" + ids.New(), Argv: []string{"sh", "-c", `rm -f "$HOME/.pi/agent/auth.json"`}})
+	_, exit, err := client.Run(ctx, spool.Job{ID: "scrub-" + ids.New(), Argv: []string{"sh", "-c", `rm -f "$HOME/.pi/agent/auth.json" "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"`}})
 	if err != nil || !exit.OK() {
 		m.log.Warn("scrub credentials", "agent", spec.ID, "err", err, "exit", exit.String())
 	}
@@ -305,6 +317,15 @@ func (m *Manager) Terminal(ctx context.Context, agentID string) (cmd *exec.Cmd, 
 			Argv: []string{"sh", "-c", `mkdir -p "$HOME/.pi/agent" && umask 077 && cat > "$HOME/.pi/agent/auth.json"`}})
 		cancel()
 	}
+	// Antigravity's token too, unless it is meant to stay out of the
+	// sandbox; it is read back below in case agy refreshed it.
+	agyToken := m.Secret(ctx, ag.UserID, store.SecretAgyToken)
+	if agyToken != "" && !creds.placeholders {
+		wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		spec.Spool().Run(wctx, spool.Job{ID: "creds-" + ids.New(), Stdin: []byte(agyToken),
+			Argv: []string{"sh", "-c", `mkdir -p "$HOME/.gemini/antigravity-cli" && umask 077 && cat > "$HOME/.gemini/antigravity-cli/antigravity-oauth-token"`}})
+		cancel()
+	}
 	cmd, err = m.rt.Shell(ctx, spec, env)
 	if err != nil {
 		release()
@@ -322,6 +343,13 @@ func (m *Manager) Terminal(ctx context.Context, agentID string) (cmd *exec.Cmd, 
 				m.PutSecret(rctx, ag.UserID, store.SecretPiAuth, back)
 			}
 		}
+		if agyToken != "" && !creds.placeholders {
+			out, exit, err := spec.Spool().Run(rctx, spool.Job{ID: "creds-" + ids.New(),
+				Argv: []string{"sh", "-c", `cat "$HOME/.gemini/antigravity-cli/antigravity-oauth-token" 2>/dev/null`}})
+			if back := strings.TrimSpace(string(out)); err == nil && exit.OK() && json.Valid(out) && back != strings.TrimSpace(agyToken) {
+				m.PutSecret(rctx, ag.UserID, store.SecretAgyToken, back)
+			}
+		}
 		release()
 	}
 	return cmd, done, nil
@@ -333,7 +361,7 @@ type LoginEvent struct {
 	UserCode        string `json:"user_code,omitempty"`
 	VerificationURI string `json:"verification_uri,omitempty"`
 	Message         string `json:"message,omitempty"`
-	// Login names a login that waits for a code, for ClaudeLoginCode.
+	// Login names a login that waits for a code, for LoginCode.
 	Login string `json:"login,omitempty"`
 }
 

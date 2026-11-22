@@ -22,10 +22,28 @@ const (
 	pinPi       = "PI_VERSION"
 	pinNode     = "PLAYWRIGHT_VERSION"
 	pinPython   = "PLAYWRIGHT_PYTHON_VERSION"
+	pinAgy      = "AGY_VERSION"
 	pinReleased = "RELEASED_BEFORE"
+	// Antigravity's build is fetched by URL and checked by SHA-512; both
+	// travel with its version.
+	pinAgyURL = "AGY_URL"
+	pinAgySHA = "AGY_SHA512"
 )
 
-var packagePins = []string{pinClaude, pinPi, pinNode, pinPython}
+var packagePins = []string{pinClaude, pinPi, pinNode, pinPython, pinAgy}
+
+// buildPins are every pin a build is given, in the order they are passed.
+func buildPins() []string {
+	return append(slices.Clone(packagePins), pinAgyURL, pinAgySHA, pinReleased)
+}
+
+// agyMinAge is how long an Antigravity build must have been out. Google's
+// release bucket names only its latest build, so a build passed over is
+// gone; a day is what the owner chose for it.
+const agyMinAge = 24 * time.Hour
+
+// agyURLPrefix is what a build's URL must start with.
+var agyURLPrefix = "https://"
 
 // dependencyLag is how much longer than the pins the packages they depend
 // on get to have come out. A package can be published before its own
@@ -40,6 +58,7 @@ var pinNames = map[string]string{
 	pinPi:     "pi",
 	pinNode:   "Playwright",
 	pinPython: "Playwright for Python",
+	pinAgy:    "Antigravity",
 }
 
 // Pins are build arguments by name.
@@ -117,7 +136,10 @@ func newest(versions []string) string {
 // registry looks up releases, as deploy/bump-image.sh does.
 type registry struct {
 	npm, pypi string
-	client    *http.Client
+	// agy is Antigravity's release server, which serves a manifest of the
+	// latest build per platform.
+	agy    string
+	client *http.Client
 }
 
 func (r registry) getJSON(ctx context.Context, url string, v any) error {
@@ -163,6 +185,43 @@ func (r registry) npmSettled(ctx context.Context, pkg string, cutoff time.Time, 
 		return "", fmt.Errorf("no release of %s before %s", pkg, cutoff.Format(time.DateOnly))
 	}
 	return newest(ok), nil
+}
+
+// agySettled is Antigravity's latest Linux build, if Google published it
+// at least agyMinAge before now; otherwise ok is false. The manifest says
+// nothing of when; the build's own Last-Modified does.
+func (r registry) agySettled(ctx context.Context, now time.Time) (version, url, sha string, ok bool, err error) {
+	var m struct {
+		Version string `json:"version"`
+		URL     string `json:"url"`
+		SHA512  string `json:"sha512"`
+	}
+	// The image pins one build, for amd64, and leaves agy out elsewhere.
+	if err := r.getJSON(ctx, r.agy+"/manifests/linux_amd64.json", &m); err != nil {
+		return "", "", "", false, err
+	}
+	if !stable.MatchString(m.Version) || !strings.HasPrefix(m.URL, agyURLPrefix) || len(m.SHA512) != 128 {
+		return "", "", "", false, fmt.Errorf("unexpected Antigravity manifest: %q %q", m.Version, m.URL)
+	}
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, m.URL, nil)
+	if err != nil {
+		return "", "", "", false, err
+	}
+	resp, err := r.client.Do(req)
+	if err != nil {
+		return "", "", "", false, err
+	}
+	resp.Body.Close()
+	published, err := http.ParseTime(resp.Header.Get("Last-Modified"))
+	if resp.StatusCode != http.StatusOK || err != nil {
+		return "", "", "", false, fmt.Errorf("the Antigravity %s build: %s, no release date", m.Version, resp.Status)
+	}
+	if now.Sub(published) < agyMinAge {
+		return "", "", "", false, nil
+	}
+	return m.Version, m.URL, m.SHA512, true, nil
 }
 
 // pypiSettled is the newest stable release of a PyPI package whose files
@@ -222,9 +281,21 @@ func (r registry) settled(ctx context.Context, cutoff time.Time, floor Pins) (Pi
 		return nil, err
 	}
 	out := Pins{pinClaude: claude, pinPi: pi, pinNode: node, pinPython: python}
+	if r.agy != "" {
+		version, url, sha, ok, err := r.agySettled(ctx, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out[pinAgy], out[pinAgyURL], out[pinAgySHA] = version, url, sha
+		}
+	}
 	for k, v := range floor {
 		if slices.Contains(packagePins, k) && later(v, out[k]) {
 			out[k] = v
+			if k == pinAgy {
+				out[pinAgyURL], out[pinAgySHA] = floor[pinAgyURL], floor[pinAgySHA]
+			}
 		}
 	}
 	// A floor ahead of one Playwright but not the other would split them.

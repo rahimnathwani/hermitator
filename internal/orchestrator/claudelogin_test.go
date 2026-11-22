@@ -94,13 +94,13 @@ func TestClaudeLoginFromThePanel(t *testing.T) {
 	// Only the user who started it can answer it.
 	other := &store.User{Email: "b@example.com", PasswordHash: "x", Role: store.RoleUser}
 	e.st.CreateUser(ctx, other)
-	if err := e.m.ClaudeLoginCode(ctx, other.ID, ev.Login, "good#abc"); !errors.Is(err, ErrNoLogin) {
+	if err := e.m.LoginCode(ctx, other.ID, ev.Login, "good#abc"); !errors.Is(err, ErrNoLogin) {
 		t.Fatalf("someone else's code: %v", err)
 	}
-	if err := e.m.ClaudeLoginCode(ctx, e.user.ID, ev.Login, "good#abc\nmore"); !errors.Is(err, ErrCodeFormat) {
+	if err := e.m.LoginCode(ctx, e.user.ID, ev.Login, "good#abc\nmore"); !errors.Is(err, ErrCodeFormat) {
 		t.Fatalf("a code with a newline in it: %v", err)
 	}
-	if err := e.m.ClaudeLoginCode(ctx, e.user.ID, ev.Login, " good#abc "); err != nil {
+	if err := e.m.LoginCode(ctx, e.user.ID, ev.Login, " good#abc "); err != nil {
 		t.Fatal(err)
 	}
 	if got := e.m.Secret(ctx, e.user.ID, store.SecretClaudeToken); got != "sk-ant-oat01-abcdefghijklmnopqrstuvwxyz0123456789" {
@@ -109,7 +109,7 @@ func TestClaudeLoginFromThePanel(t *testing.T) {
 	if e.st.NoticeSent(ctx, e.user.ID, ClaudeExpiryNotice+"-30d") {
 		t.Fatal("the old token's expiry warning was kept")
 	}
-	if err := e.m.ClaudeLoginCode(ctx, e.user.ID, ev.Login, "good#abc"); !errors.Is(err, ErrNoLogin) {
+	if err := e.m.LoginCode(ctx, e.user.ID, ev.Login, "good#abc"); !errors.Is(err, ErrNoLogin) {
 		t.Fatalf("a code for a finished login: %v", err)
 	}
 
@@ -120,7 +120,7 @@ func TestClaudeLoginFromThePanel(t *testing.T) {
 	}
 	ev = next(t, ch)
 	start := time.Now()
-	if err := e.m.ClaudeLoginCode(ctx, e.user.ID, ev.Login, "bad#abc"); err == nil || !strings.Contains(err.Error(), "not accepted") || strings.Contains(err.Error(), "sk-ant") {
+	if err := e.m.LoginCode(ctx, e.user.ID, ev.Login, "bad#abc"); err == nil || !strings.Contains(err.Error(), "not accepted") || strings.Contains(err.Error(), "sk-ant") {
 		t.Fatalf("wrong code: %v", err)
 	}
 	if time.Since(start) > 10*time.Second {

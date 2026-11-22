@@ -49,6 +49,10 @@ const (
 // PiAuthPath is where pi keeps credentials, relative to $HOME.
 const PiAuthPath = "~/.pi/agent/auth.json"
 
+// AgyTokenPath is where Antigravity keeps its Google sign-in, relative to
+// $HOME: an OAuth token it refreshes in place, which is all it needs.
+const AgyTokenPath = "~/.gemini/antigravity-cli/antigravity-oauth-token"
+
 // PiModelsPath is where pi reads extra providers from. The guest merges
 // what the host sends into it rather than replacing it.
 const PiModelsPath = "~/.pi/agent/models.json"

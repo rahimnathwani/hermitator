@@ -40,7 +40,7 @@ type claudeLogin struct {
 	userID string
 	spec   *sandbox.Spec
 	// result gets the login's outcome, "done" or "error", for the
-	// ClaudeLoginCode that is waiting on it.
+	// LoginCode that is waiting on it.
 	result chan LoginEvent
 }
 
@@ -53,12 +53,62 @@ var ErrCodeFormat = errors.New("paste the code exactly as the sign-in page shows
 
 // ClaudeLogin starts `claude setup-token` in one of the user's sandboxes.
 // The first event carries the sign-in URL and the login's ID, to send the
-// code to with ClaudeLoginCode. The channel closes when the login ends.
+// code to with LoginCode. The channel closes when the login ends.
 //
 // ctx covers only starting it. The login then outlives the caller, for up
 // to claudeLoginLife: on a phone the user leaves the panel to sign in, and
 // the browser may drop the panel's connection meanwhile.
 func (m *Manager) ClaudeLogin(ctx context.Context, userID string) (<-chan LoginEvent, error) {
+	return m.cliLogin(ctx, userID, cliLogin{name: "claude", script: "claude-login.py", save: func(ctx context.Context, tok string) (string, error) {
+		tok = strings.TrimSpace(tok)
+		if !strings.HasPrefix(tok, "sk-ant-") {
+			return "", errors.New("setup-token printed something that is not a Claude token")
+		}
+		if err := m.PutSecret(ctx, userID, store.SecretClaudeToken, tok); err != nil {
+			return "", err
+		}
+		m.ForgetSecrets(userID)
+		m.store.ClearNotice(ctx, userID, ClaudeExpiryNotice)
+		return "Claude is connected.", nil
+	}})
+}
+
+// AgyLogin signs in to Google for Antigravity: `agy acp --login` runs in
+// one of the user's sandboxes (internal/guestfiles/agy-login.py drives
+// it) like Claude's setup-token, and the token file it writes is stored.
+// The token is Google's OAuth token for the account; agy refreshes it,
+// and each turn's refresh comes back through syncFile.
+func (m *Manager) AgyLogin(ctx context.Context, userID string) (<-chan LoginEvent, error) {
+	return m.cliLogin(ctx, userID, cliLogin{name: "agy", script: "agy-login.py", save: func(ctx context.Context, tok string) (string, error) {
+		var doc struct {
+			Token struct {
+				RefreshToken string `json:"refresh_token"`
+			} `json:"token"`
+		}
+		if json.Unmarshal([]byte(tok), &doc) != nil || doc.Token.RefreshToken == "" {
+			return "", errors.New("agy saved something that is not a Google sign-in")
+		}
+		if err := m.PutSecret(ctx, userID, store.SecretAgyToken, strings.TrimSpace(tok)); err != nil {
+			return "", err
+		}
+		m.ForgetSecrets(userID)
+		return "Antigravity is connected.", nil
+	}})
+}
+
+// cliLogin is a sign-in run by a harness's own command in a sandbox, with
+// a helper from guestfiles driving it.
+type cliLogin struct {
+	// name is the harness's, for job IDs and the log.
+	name, script string
+	// save stores what the helper reported as the token, and says so in
+	// a sentence for the panel.
+	save func(ctx context.Context, token string) (string, error)
+}
+
+// cliLogin starts a sign-in helper in one of the user's sandboxes. Its
+// helper prints JSON lines: the sign-in URL, then the token or an error.
+func (m *Manager) cliLogin(ctx context.Context, userID string, k cliLogin) (<-chan LoginEvent, error) {
 	ag, err := m.loginAgent(ctx, userID)
 	if err != nil {
 		return nil, err
@@ -71,13 +121,13 @@ func (m *Manager) ClaudeLogin(ctx context.Context, userID string) (<-chan LoginE
 	if err != nil {
 		return nil, err
 	}
-	script, err := guestfiles.FS.ReadFile("claude-login.py")
+	script, err := guestfiles.FS.ReadFile(k.script)
 	if err != nil {
 		release()
 		return nil, err
 	}
 	login := ids.New()
-	jobID := "claude-login-" + login
+	jobID := k.name + "-login-" + login
 	codeFile := path.Join(m.rt.GuestShared(spec), claudeLoginDir, login)
 	client := spec.Spool()
 	// The helper goes in on stdin rather than from the sandbox's tools
@@ -133,9 +183,9 @@ func (m *Manager) ClaudeLogin(ctx context.Context, userID string) (<-chan LoginE
 			// already replaced by the helper; "done" carries none.
 			switch ev.Type {
 			case "done":
-				m.log.Info("claude login", "agent", ag.ID, "login", login, "outcome", "token saved")
+				m.log.Info(k.name+" login", "agent", ag.ID, "login", login, "outcome", "token saved")
 			case "error":
-				m.log.Warn("claude login", "agent", ag.ID, "login", login, "outcome", redactTokens(ev.Message))
+				m.log.Warn(k.name+" login", "agent", ag.ID, "login", login, "outcome", redactTokens(ev.Message))
 			}
 			if ev.Type == "done" || ev.Type == "error" {
 				select {
@@ -168,18 +218,12 @@ func (m *Manager) ClaudeLogin(ctx context.Context, userID string) (<-chan LoginE
 			case "token":
 				finished = true
 				forget()
-				tok := strings.TrimSpace(ev.Token)
-				if !strings.HasPrefix(tok, "sk-ant-") {
-					send(LoginEvent{Type: "error", Message: "setup-token printed something that is not a Claude token"})
-					return
-				}
-				if err := m.PutSecret(lctx, userID, store.SecretClaudeToken, tok); err != nil {
+				done, err := k.save(lctx, ev.Token)
+				if err != nil {
 					send(LoginEvent{Type: "error", Message: err.Error()})
 					return
 				}
-				m.ForgetSecrets(userID)
-				m.store.ClearNotice(lctx, userID, ClaudeExpiryNotice)
-				send(LoginEvent{Type: "done", Message: "Claude is connected."})
+				send(LoginEvent{Type: "done", Message: done})
 			}
 		})
 		// Read before Cancel or Remove, which delete the job's stderr.
@@ -204,14 +248,14 @@ func (m *Manager) ClaudeLogin(ctx context.Context, userID string) (<-chan LoginE
 // waiting for a code a little sooner.
 const claudeLoginLife = 20 * time.Minute
 
-// claudeCodeWait is how long ClaudeLoginCode waits for setup-token to
+// claudeCodeWait is how long LoginCode waits for setup-token to
 // answer a code; the helper gives up after a minute.
 var claudeCodeWait = 90 * time.Second
 
-// ClaudeLoginCode hands the code from Claude's sign-in page to a waiting
+// LoginCode hands the code from Claude's sign-in page to a waiting
 // login of the user's, and waits for the outcome: nil once the token is
 // saved, or why it was not.
-func (m *Manager) ClaudeLoginCode(ctx context.Context, userID, login, code string) error {
+func (m *Manager) LoginCode(ctx context.Context, userID, login, code string) error {
 	code = strings.TrimSpace(code)
 	if code == "" || len(code) > 1024 || strings.ContainsAny(code, "\r\n") {
 		return ErrCodeFormat
@@ -232,7 +276,7 @@ func (m *Manager) ClaudeLoginCode(ctx context.Context, userID, login, code strin
 		}
 		return errors.New(ev.Message)
 	case <-time.After(claudeCodeWait):
-		return errors.New("setup-token did not answer; start again")
+		return errors.New("the sign-in did not answer; start again")
 	case <-ctx.Done():
 		return ctx.Err()
 	}
